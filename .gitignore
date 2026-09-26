@@ -1,0 +1,69 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+
+# Git worktrees
+.worktrees/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# JavaScript/TypeScript
+node_modules/
+.npm/
+.pnpm-store/
+coverage/
+.next/
+out/
+
+# Android/Gradle
+.gradle/
+local.properties
+*/build/
+captures/
+.externalNativeBuild/
+*.apk
+*.aab
+
+# Audio, datasets, model checkpoints, and experiment output
+data/
+datasets/
+artifacts/
+checkpoints/
+models/
+outputs/
+*.wav
+*.mp3
+*.flac
+*.mid
+*.midi
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors

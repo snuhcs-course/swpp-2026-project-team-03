@@ -1,28 +1,74 @@
-# SNU-SWPP-Template
+# Music Transcription & Generation
 
-You can use the README file to showcase and promote your mobile app. The template provided below is just a starting point. Feel free to craft your README as you see fit. 
+Team 03's Project ROCKY for SNU SWPP 2026.
 
-Please note that the README doesn't affect your grade and is not included in documentation(Wiki).
+The repository is organized as a small monorepo so the client application,
+backend services, and machine-learning code can evolve independently while
+sharing one issue tracker and CI configuration.
 
-# [Your Application Name]
+## Repository layout
 
-[Short application description here]
+| Directory | Responsibility |
+| --- | --- |
+| [`app/`](app/) | User-facing client application and UI integration |
+| [`server/`](server/) | API, authentication, orchestration, and persistence |
+| [`ml/`](ml/) | Audio preprocessing, transcription, generation, and model experiments |
+| [`docs/`](docs/) | Architecture notes, API contracts, and project decisions |
+| [`tests/`](tests/) | Cross-component and end-to-end test fixtures |
 
-![Application Screenshot](path_to_screenshot.png)
+Each component has its own README with a suggested boundary and setup notes.
 
-## Features
+## Development workflow
 
-- Feature 1: Brief description
-- Feature 2: Brief description
-- ...
+1. Create a focused branch from `main`, using a prefix such as `app/`,
+   `server/`, `ml/`, or `docs/`.
+2. Make a small, reviewable change and add or update tests with it.
+3. Run the checks documented by the component you changed.
+4. Open a pull request into `main`; do not commit directly to `main`.
 
-## Getting Started
+### Parallel work with Git worktrees
 
-### Prerequisites
+Worktrees let each teammate keep an independent checkout while sharing the
+same local repository object database. From the primary checkout:
 
-- Android Studio [version, e.g., 4.2.1]
-- Minimum Android SDK Version [e.g., 21]
+```powershell
+git fetch origin
+git worktree add .worktrees\app-feature -b app/feature origin/main
+git worktree add .worktrees\server-feature -b server/feature origin/main
+git worktree list
+```
 
-### Installation
+When the work is merged and no longer needed:
 
-[Installation link here]
+```powershell
+git worktree remove .worktrees\app-feature
+git branch -d app/feature
+git worktree prune
+```
+
+The `.worktrees/` directory is ignored so worktree checkouts cannot be
+accidentally committed. Keep each worktree on one branch at a time, and do
+not check in generated model weights, datasets, credentials, or local
+environment files.
+
+## Initial setup
+
+Clone the repository and inspect the component README before installing a
+runtime. Component-specific dependencies should stay inside that component;
+the root should contain only shared tooling and documentation.
+
+```powershell
+git clone https://github.com/snuhcs-course/swpp-2026-project-team-03.git
+cd swpp-2026-project-team-03
+git worktree list
+```
+
+## Collaboration conventions
+
+- Use pull requests for all changes.
+- Keep commits focused and use imperative commit subjects, for example
+  `Add MIDI export endpoint`.
+- Record important design choices in `docs/decisions/`.
+- Prefer reproducible scripts and pinned dependencies.
+- Store large datasets and model artifacts outside Git; document how to fetch
+  them in `ml/README.md`.
