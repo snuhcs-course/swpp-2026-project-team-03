@@ -27,6 +27,7 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.conda/
 venv/
 env/
 *.egg-info/
@@ -67,3 +68,6 @@ outputs/
 *.pth
 *.onnx
 *.safetensors
+
+# Independent upstream model repository
+ml/external/MIDI-RWKV/

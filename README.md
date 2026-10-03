@@ -2,6 +2,17 @@
 
 Team 03's Project ROCKY for SNU SWPP 2026.
 
+## MIDI-RWKV experiment worktree
+
+This worktree is dedicated to evaluating pretrained MIDI-RWKV for missing-track
+generation on BabySlakh. It removes each Piano, Guitar, Bass, or Drums family
+from a multitrack MIDI, generates one consolidated replacement with
+`generate_new_track()`, and evaluates completed outputs with CP, GS, and PCHE.
+
+The reproducible experiment specification, runner, evaluation tools, pretrained
+model checkout, and local results are under [`ml/`](ml/). See
+[`ml/README.md`](ml/README.md) for the exact task boundary and artifact layout.
+
 The repository is organized as a small monorepo so the client application,
 backend services, and machine-learning code can evolve independently while
 sharing one issue tracker and CI configuration.
