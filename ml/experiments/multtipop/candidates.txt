@@ -1,0 +1,12 @@
+# First MulTTiPop test picks: sung sections, 2005-2009 (the newest the dataset
+# has), at least 26 s long, two or more supported families in the reference.
+WeglOyOLmrY  # Lily Allen - 22 (2009)
+nJmBlBEdxAV  # Owl City - Fireflies (2009)
+DpgvQJPemad  # Taylor Swift - Fifteen (2009)
+nZgWOyE_gry  # Carrie Underwood - Cowboy Casanova (2009)
+nRPxeXRLgb_  # Lady Gaga - Speechless (2009)
+kygzPZbPoKB  # U2 - Magnificent (2009)
+nLgakVNzoYp  # Ne-Yo - Closer (2008)
+kygzJKOLgKB  # Gwen Stefani - Early Winter (2008)
+jDgXzvEqoKl  # Alicia Keys - No One (2007)
+ZbgOknqwgnY  # The Killers - Read My Mind (2006)
