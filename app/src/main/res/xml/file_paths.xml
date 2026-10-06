@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 내보내기(공유)할 파일을 임시로 복사해두는 폴더 -->
+    <cache-path name="share" path="share/" />
+</paths>
