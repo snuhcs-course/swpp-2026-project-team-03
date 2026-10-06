@@ -405,17 +405,28 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
     val cs = MaterialTheme.colorScheme
     var saved by remember { mutableStateOf(!fresh) }
     var playing by remember { mutableStateOf(false) }
+    var selectedPart by remember { mutableStateOf<String?>(null) }
     val player = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { player.release() } }
+
+    fun selectPart(inst: String) {
+        if (playing) {
+            player.stop()
+            player.reset()
+            playing = false
+        }
+        selectedPart = if (selectedPart == inst) null else inst
+    }
 
     fun togglePlay() {
         if (playing) {
             player.stop(); player.reset(); playing = false
             return
         }
-        val name = Assets.find(ctx, Demo.BAND, AUDIO_EXT)
+        val base = selectedPart ?: Demo.BAND
+        val name = Assets.find(ctx, base, AUDIO_EXT)
         if (name == null) {
-            Toast.makeText(ctx, "assets/demo/${Demo.BAND}.mp3 파일이 없어요", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "${Demo.kor(base)} 음원 파일이 없어요", Toast.LENGTH_SHORT).show()
             return
         }
         try {
@@ -430,9 +441,10 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
         }
     }
 
-    // 밴드 전체 악보: band.png 하나 또는 MuseScore가 나눠 저장한 band-1.png, band-2.png ...
-    val pages = remember {
-        val pageNo = Regex("^${Demo.BAND}(-(\\d+))?\\.(png|jpg|jpeg|webp)$")
+    // 선택한 악기의 악보, 또는 아무 악기도 선택하지 않았을 때 밴드 전체 악보
+    val scoreBase = selectedPart ?: Demo.BAND
+    val pages = remember(scoreBase) {
+        val pageNo = Regex("^${Regex.escape(scoreBase)}(-(\\d+))?\\.(png|jpg|jpeg|webp)$")
         Assets.list(ctx)
             .mapNotNull { n -> pageNo.find(n)?.let { m -> (m.groupValues[2].toIntOrNull() ?: 0) to n } }
             .sortedBy { it.first }
@@ -450,20 +462,32 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
             }
         }
     }) {
-        // 악기 구성 표시 (AI가 새로 만든 악기는 ✨)
+        // 악기를 다시 누르면 밴드 전체 보기로 돌아간다.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             work.instruments.forEach { inst ->
                 val ai = inst in Demo.AI_GENERATED
+                val selected = selectedPart == inst
                 Box(
                     Modifier.weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (ai) cs.secondary.copy(alpha = 0.18f) else cs.surface)
+                        .background(
+                            when {
+                                selected -> cs.primary.copy(alpha = 0.24f)
+                                ai -> cs.secondary.copy(alpha = 0.18f)
+                                else -> cs.surface
+                            },
+                        )
+                        .border(
+                            BorderStroke(1.dp, if (selected) cs.primary else Color.Transparent),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable { selectPart(inst) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         (if (ai) "✨ " else "") + Demo.kor(inst), fontWeight = FontWeight.Bold,
-                        color = if (ai) cs.secondary else cs.onSurface,
+                        color = if (selected) cs.primary else if (ai) cs.secondary else cs.onSurface,
                     )
                 }
             }
@@ -474,13 +498,16 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
         }
         Spacer(Modifier.height(12.dp))
 
-        // 전체 재생
+        // 선택한 악기의 음원 또는 밴드 전체 음원 재생
         Button(onClick = { togglePlay() }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
-            Text(if (playing) "■ 정지" else "▶ 밴드 전체 듣기", fontSize = 16.sp)
+            Text(
+                if (playing) "■ 정지" else "▶ ${selectedPart?.let(Demo::kor) ?: "밴드 전체"} 듣기",
+                fontSize = 16.sp,
+            )
         }
         Spacer(Modifier.height(12.dp))
 
-        // 밴드 전체 악보
+        // 선택한 악기 또는 밴드 전체 악보
         Box(
             Modifier.fillMaxWidth().weight(1f)
                 .clip(RoundedCornerShape(16.dp))
@@ -498,7 +525,7 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
                 }
             } else {
                 Text(
-                    "악보 이미지가 없어요\n(assets/demo/${Demo.BAND}.png)",
+                    "악보 이미지가 없어요\n(assets/demo/$scoreBase.png)",
                     color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(40.dp),
                 )
             }
