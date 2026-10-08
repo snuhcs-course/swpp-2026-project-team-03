@@ -64,7 +64,7 @@ Team 3 (영양실조) · 김채연, 박재욱, 조수빈, 홍순형
 ---
 
 ## 3. Demo video
-- 영상 링크: (YouTube 일부공개 / Google Drive 링크 기입)
+- 영상 링크: [ROCKY Demo video (Google Drive)](https://drive.google.com/file/d/16sLdD9x2Bg739iO0UaESiY7LWRzARTw-/view?usp=drive_link)
 
 ---
 
