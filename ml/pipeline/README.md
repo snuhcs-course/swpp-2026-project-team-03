@@ -64,6 +64,59 @@ that needs beats has to estimate them from the audio.
 Instruments are not collapsed to piano, guitar, bass, and drums. That mapping
 belongs to the arrangement stage.
 
+## Running on the team GPU server (SGS)
+
+The team workspace on [SGS](https://sgs-docs.snucse.org/) has one A100 GPU and
+a 20 GiB volume, `muscriptor-data`, that already holds the MuScriptor `large`
+weights. No Hugging Face login is needed there. Set up `kubectl` and
+`kubelogin` as the SGS manual describes, then, from the repository root:
+
+```bash
+# 1. Start the file-transfer pod (no GPU). The volume already exists; this
+#    does not recreate or erase it.
+kubectl apply -f ml/pipeline/sgs/storage.yaml
+kubectl wait --for=condition=Ready pod/rocky-files
+
+# 2. Copy the pipeline code and the songs to the volume.
+export COPYFILE_DISABLE=1   # macOS only: keeps ._ metadata files out of the archive
+tar -C ml/pipeline -cf - . | kubectl exec -i rocky-files -- tar -C /data/pipeline -xf -
+tar -C <folder with songs> -cf - . | kubectl exec -i rocky-files -- tar -C /data/input -xf -
+
+# 3. Run. The pod processes every file in /data/input and exits.
+kubectl apply -f ml/pipeline/sgs/gpu-job.yaml
+kubectl logs -f rocky-pipeline
+
+# 4. Fetch the results, then remove the finished pod.
+mkdir -p outputs/pipeline
+kubectl exec rocky-files -- tar -C /data/output -cf - . | tar -C outputs/pipeline -xf -
+kubectl delete pod rocky-pipeline
+```
+
+A 2 min 27 s song took 3 min 16 s in total on the A100 once the packages were
+installed. Songs that already have `/data/output/<name>/transcription.mid` are
+skipped; delete that folder to redo a song.
+
+| Path on the volume | Content |
+| --- | --- |
+| `/data/model/model.safetensors` | MuScriptor `large` weights |
+| `/data/pipeline/` | copy of this directory |
+| `/data/input/` | songs to process |
+| `/data/output/<name>/` | results, same layout as above |
+| `/data/cache/` | installed Python packages and downloaded Demucs weights (11 GiB) |
+
+Things to know:
+
+- The workspace has **one GPU**. A second GPU pod is rejected until the first
+  one ends, so tell the team before a long run.
+- A GPU pod that leaves the GPU idle for 30 minutes is killed by SGS. The job
+  pod exits by itself when it finishes; do not keep GPU shells open.
+- The volume is on the `ferrari` node, so the job waits for a free GPU on that
+  node.
+- About 3.7 GiB of the volume is free. Put the weights of another large model
+  on a new volume (the workspace quota has 30 GiB left) and mount both.
+- Deleting the `muscriptor-data` volume claim erases the weights and the
+  installed packages.
+
 ## Adding a stage
 
 1. Put the stage's code in this directory.
@@ -71,6 +124,9 @@ belongs to the arrangement stage.
    `"$out/transcription.mid"` (and `"$out/stems/"` if it needs audio) and
    writes its result into `"$out"` under a new file name.
 3. Add the output file to the table above.
+4. For the GPU server, copy the stage's weights to the volume and pass their
+   path to the stage, the way `sgs/run_all.sh` passes
+   `/data/model/model.safetensors`.
 
 The script skips Demucs when `stems/no_vocals.wav` already exists, so a later
 stage can be rerun on a song without separating it again.
