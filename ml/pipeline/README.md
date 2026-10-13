@@ -21,7 +21,7 @@ From the repository root:
 | --- | --- | --- |
 | `INPUT_AUDIO` | required | wav, mp3, flac, or m4a |
 | `OUTPUT_DIR` | `outputs/pipeline` | any directory |
-| `MODEL` | `medium` | `small`, `medium`, `large`, or a path to a `.safetensors` file |
+| `MODEL` | `large` | `small`, `medium`, `large`, or a path to a `.safetensors` file |
 | `DEVICE` | `auto` | `auto`, `cpu`, `cuda` |
 
 Example:
@@ -30,14 +30,18 @@ Example:
 ./ml/pipeline/audio_to_midi.sh "data/audio/band_songs/21 Guns - Green Day.wav"
 ```
 
-A 26-second clip takes about 2 minutes on an M-series Mac with `medium`.
+The default model, `large`, is meant for a CUDA GPU, where transcription
+takes roughly as long as the song. On a Mac it runs on the CPU and is slow:
+4 to 14 times the song's length in our runs. Pass `medium` as `MODEL` for
+quick local checks (a 26-second clip takes about 2 minutes).
 
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/). The script installs Demucs and MuScriptor
   through `uvx` on first use; nothing else needs to be installed.
 - A Hugging Face account that has accepted the MuScriptor license
-  (`https://huggingface.co/MuScriptor/muscriptor-medium`, CC BY-NC 4.0), and
+  (`https://huggingface.co/MuScriptor/muscriptor-large`, CC BY-NC 4.0; each
+  model size has its own page), and
   `hf auth login` on the machine. Not needed when `MODEL` is a local file.
 
 ## Output
@@ -73,11 +77,11 @@ stage can be rerun on a song without separating it again.
 
 ## Known limits
 
-- MuScriptor `large` gives broken output on Apple GPUs (MPS). Pass `cpu` as
-  `DEVICE` on a Mac, or run it on a CUDA machine.
+- MuScriptor `large` gives broken output on Apple GPUs (MPS), so on a Mac
+  the script runs it on the CPU unless `DEVICE` is given.
 - Demucs output differs slightly between runs because it applies a random time
   shift, so two runs on the same song do not give byte-identical MIDI.
 - On real pop recordings the transcription is far from exact: onset F1 was
   0.38 on ten MulTTiPop segments with `medium`, higher on guitar-band songs
-  and lower on synth-heavy ones.
+  and lower on synth-heavy ones. `large` has not been scored on that set.
 - The script processes one song per call.

@@ -5,17 +5,18 @@
 #
 # Usage: ./audio_to_midi.sh INPUT_AUDIO [OUTPUT_DIR] [MODEL] [DEVICE]
 #   OUTPUT_DIR  default outputs/pipeline; results go to OUTPUT_DIR/<input name>/
-#   MODEL       small | medium (default) | large | path to a .safetensors file
-#   DEVICE      auto (default) | cpu | cuda.  On a Mac use cpu for large: on MPS
-#               the large model produces garbage.
+#   MODEL       small | medium | large (default) | path to a .safetensors file
+#   DEVICE      auto (default) | cpu | cuda.  On a Mac, auto runs large on the
+#               CPU, because on MPS the large model produces garbage.
 # Writes stems/{vocals,drums,bass,other,no_vocals}.wav, transcription.mid and
 # transcription.log.  Steps whose output already exists are skipped.
 set -euo pipefail
 
 input=$1
 out_root=${2:-outputs/pipeline}
-model=${3:-medium}
+model=${3:-large}
 device=${4:-auto}
+if [[ $device == auto && $model == large && $(uname) == Darwin ]]; then device=cpu; fi
 here=$(cd "$(dirname "$0")" && pwd)
 name=$(basename "${input%.*}")
 out="$out_root/$name"
