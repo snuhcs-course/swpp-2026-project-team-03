@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -174,7 +175,7 @@ fun Page(
             TopAppBar(
                 title = { Text(title, fontWeight = FontWeight.Bold, maxLines = 1) },
                 navigationIcon = {
-                    if (onBack != null) TextButton(onClick = onBack) { Text("←", fontSize = 22.sp) }
+                    if (onBack != null) TextButton(onClick = onBack, modifier = Modifier.testTag("btn_back")) { Text("←", fontSize = 22.sp) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
@@ -201,22 +202,23 @@ fun HomeScreen(nickname: String, onNew: () -> Unit, onStorage: () -> Unit, onAcc
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("${nickname}님, 반가워요", color = cs.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1)
-            TextButton(onClick = onAccount) { Text("내 정보") }
+            TextButton(onClick = onAccount, modifier = Modifier.testTag("btn_account")) { Text("내 정보") }
         }
         Spacer(Modifier.height(16.dp))
         Text("ROCKY", fontSize = 48.sp, fontWeight = FontWeight.Black, color = cs.primary)
         Text("어떤 곡이든, 우리 밴드 악보로", fontSize = 16.sp, color = cs.onSurfaceVariant)
         Spacer(Modifier.height(48.dp))
-        BigCard("NEW", "새 악보 만들기", "음원을 올리면 밴드 악보로 바꿔드려요", cs.primary, cs.onPrimary, onNew)
+        BigCard("NEW", "새 악보 만들기", "음원을 올리면 밴드 악보로 바꿔드려요", cs.primary, cs.onPrimary, "card_new", onNew)
         Spacer(Modifier.height(16.dp))
-        BigCard("STORAGE", "보관함", "저장한 악보 ${count}개", cs.surfaceVariant, cs.onSurface, onStorage)
+        BigCard("STORAGE", "보관함", "저장한 악보 ${count}개", cs.surfaceVariant, cs.onSurface, "card_storage", onStorage)
     }
 }
 
 @Composable
-fun BigCard(tag: String, title: String, sub: String, bg: Color, fg: Color, onClick: () -> Unit) {
+fun BigCard(tag: String, title: String, sub: String, bg: Color, fg: Color, testId: String, onClick: () -> Unit) {
     Column(
         Modifier.fillMaxWidth()
+            .testTag(testId)
             .clip(RoundedCornerShape(24.dp))
             .background(bg)
             .clickable(onClick = onClick)
@@ -249,6 +251,7 @@ fun StorageScreen(onBack: () -> Unit, onOpen: (Work) -> Unit) {
                 items(works) { w ->
                     Column(
                         Modifier.fillMaxWidth()
+                            .testTag("work_item")
                             .clip(RoundedCornerShape(16.dp))
                             .background(cs.surface)
                             .clickable { onOpen(w) }
@@ -279,7 +282,7 @@ fun InstrumentScreen(
     Page("새 악보", onBack, bottom = {
         Button(
             onClick = onNext, enabled = selected.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp).testTag("btn_next"),
         ) { Text("다음  (${selected.size}개 선택)", fontSize = 17.sp) }
     }) {
         Text("당신을 위한 악보를\n만드세요", fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
@@ -303,6 +306,7 @@ fun InstrumentTile(inst: String, on: Boolean, modifier: Modifier, onClick: () ->
     val shape = RoundedCornerShape(20.dp)
     Column(
         modifier.height(140.dp)
+            .testTag("tile_$inst")
             .clip(shape)
             .background(if (on) cs.primary else cs.surface)
             .border(BorderStroke(2.dp, if (on) cs.primary else cs.surfaceVariant), shape)
@@ -335,7 +339,7 @@ fun UploadScreen(onBack: () -> Unit, onStart: (String) -> Unit) {
     Page("음원 업로드", onBack, bottom = {
         Button(
             onClick = { onStart(picked ?: Demo.SONG_TITLE) }, enabled = picked != null,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp).testTag("btn_start"),
         ) { Text("악보 만들기 시작", fontSize = 17.sp) }
     }) {
         Text("어떤 곡으로\n만들까요?", fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
@@ -361,7 +365,10 @@ fun UploadScreen(onBack: () -> Unit, onStart: (String) -> Unit) {
             )
         }
         Spacer(Modifier.height(16.dp))
-        OutlinedButton(onClick = { picked = Demo.SONG_TITLE }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+        OutlinedButton(
+            onClick = { picked = Demo.SONG_TITLE },
+            modifier = Modifier.fillMaxWidth().height(50.dp).testTag("btn_demo"),
+        ) {
             Text("데모 곡으로 체험하기")
         }
         Spacer(Modifier.height(16.dp))
@@ -473,20 +480,17 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
     // 선택한 악기의 악보, 또는 아무 악기도 선택하지 않았을 때 밴드 전체 악보
     val scoreBase = selectedPart ?: Demo.BAND
     val pages = remember(scoreBase) {
-        val pageNo = Regex("^${Regex.escape(scoreBase)}(-(\\d+))?\\.(png|jpg|jpeg|webp)$")
-        Assets.list(ctx)
-            .mapNotNull { n -> pageNo.find(n)?.let { m -> (m.groupValues[2].toIntOrNull() ?: 0) to n } }
-            .sortedBy { it.first }
-            .mapNotNull { (_, n) -> ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) } }
+        scorePageFiles(Assets.list(ctx), scoreBase)
+            .mapNotNull { n -> ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) } }
     }
 
     Page(work.title, onBack, bottom = {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
                 onClick = { WorkStore.add(ctx, work); saved = true }, enabled = !saved,
-                modifier = Modifier.weight(1f).height(52.dp),
+                modifier = Modifier.weight(1f).height(52.dp).testTag("btn_save"),
             ) { Text(if (saved) "저장됨 ✓" else "저장") }
-            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f).height(52.dp)) {
+            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f).height(52.dp).testTag("btn_export")) {
                 Text("내보내기")
             }
         }
@@ -498,6 +502,7 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
                 val selected = selectedPart == inst
                 Box(
                     Modifier.weight(1f)
+                        .testTag("part_$inst")
                         .clip(RoundedCornerShape(12.dp))
                         .background(
                             when {
@@ -528,7 +533,7 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
         Spacer(Modifier.height(12.dp))
 
         // 선택한 악기의 음원 또는 밴드 전체 음원 재생
-        Button(onClick = { togglePlay() }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+        Button(onClick = { togglePlay() }, modifier = Modifier.fillMaxWidth().height(50.dp).testTag("btn_play")) {
             Text(
                 if (playing) "■ 정지" else "▶ ${selectedPart?.let(Demo::kor) ?: "밴드 전체"} 듣기",
                 fontSize = 16.sp,
@@ -539,6 +544,7 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
         // 선택한 악기 또는 밴드 전체 악보
         Box(
             Modifier.fillMaxWidth().weight(1f)
+                .testTag("score")
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White),
             contentAlignment = Alignment.TopCenter,
@@ -568,8 +574,7 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val files = remember {
-        val all = Assets.list(ctx)
-        listOf("${Demo.BAND}.pdf" to "밴드 악보", "${Demo.BAND}.mid" to "밴드 MIDI").filter { it.first in all }
+        exportFiles(Assets.list(ctx), Demo.BAND)
     }
     val checked = remember { mutableStateMapOf<String, Boolean>().apply { files.forEach { put(it.first, true) } } }
 
@@ -577,7 +582,7 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
         Button(
             onClick = { shareFiles(ctx, files.map { it.first }.filter { checked[it] == true }) },
             enabled = checked.values.any { it },
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp).testTag("btn_share"),
         ) { Text("공유하기", fontSize = 17.sp) }
     }) {
         Text("어떤 파일을 보낼까요?", fontSize = 26.sp, fontWeight = FontWeight.Bold)
@@ -591,6 +596,7 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
             items(files) { (name, label) ->
                 Row(
                     Modifier.fillMaxWidth()
+                        .testTag("file_$name")
                         .clip(RoundedCornerShape(14.dp))
                         .background(cs.surface)
                         .clickable { checked[name] = checked[name] != true }

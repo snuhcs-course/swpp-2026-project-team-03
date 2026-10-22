@@ -4,10 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.core.content.FileProvider
 import com.team3.rocky.auth.AuthRepository
 import java.io.File
@@ -32,62 +28,33 @@ object Demo {
     // 원곡에 없어서 AI가 새로 만든 악기 → 결과 화면에 'AI 생성' 표시
     val AI_GENERATED = setOf("piano")
 
-    fun kor(i: String) = when (i) {
-        "piano" -> "피아노"; "drums" -> "드럼"; "bass" -> "베이스"; "guitar" -> "기타"; else -> i
-    }
+    fun kor(i: String) = korName(i)
 
     fun emoji(i: String) = when (i) {
         "piano" -> "🎹"; "drums" -> "🥁"; "bass" -> "🎵"; "guitar" -> "🎸"; else -> "🎶"
     }
 }
 
-val AUDIO_EXT = listOf("mp3", "wav", "flac", "ogg", "m4a")
-val IMG_EXT = listOf("png", "jpg", "jpeg", "webp")
-
-// ---------- 테마 ----------
-private val RockyColors = darkColorScheme(
-    primary = Color(0xFFFF7A3D),
-    onPrimary = Color(0xFF1A1A1A),
-    secondary = Color(0xFFFFC857),
-    onSecondary = Color(0xFF1A1A1A),
-    background = Color(0xFF111114),
-    onBackground = Color(0xFFF2F2F2),
-    surface = Color(0xFF1C1C22),
-    onSurface = Color(0xFFF2F2F2),
-    surfaceVariant = Color(0xFF2A2A33),
-    onSurfaceVariant = Color(0xFFB4B4C0),
-)
-
-@Composable
-fun RockyTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = RockyColors, content = content)
-}
-
 // ---------- 저장한 작업 (보관함) ----------
-data class Work(val id: Long, val title: String, val instruments: List<String>, val date: String)
-
+// Work 데이터와 저장 형식(WorkCodec)은 RockyLogic.kt에 있습니다.
 object WorkStore {
     private const val PREF = "rocky"
 
     // 보관함은 회원마다 따로 저장한다. 로그인 전에는 쓰지 않는다.
-    private fun key(ctx: Context) = "works_" + (AuthRepository.currentUserId(ctx) ?: "guest")
+    private fun key(ctx: Context) = workKey(AuthRepository.currentUserId(ctx))
 
-    fun load(ctx: Context): List<Work> {
-        val raw = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(key(ctx), "") ?: ""
-        return raw.split("\n").filter { it.isNotBlank() }.mapNotNull { line ->
-            val p = line.split("\t")
-            if (p.size < 4) null
-            else Work(p[0].toLongOrNull() ?: 0L, p[1], p[2].split(",").filter { it.isNotBlank() }, p[3])
-        }
-    }
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+
+    fun load(ctx: Context): List<Work> = WorkCodec.decode(prefs(ctx).getString(key(ctx), ""))
 
     fun add(ctx: Context, w: Work) {
-        val list = listOf(w) + load(ctx).filter { it.id != w.id }
-        val raw = list.joinToString("\n") {
-            val title = it.title.replace("\t", " ").replace("\n", " ")
-            "${it.id}\t$title\t${it.instruments.joinToString(",")}\t${it.date}"
-        }
-        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(key(ctx), raw).apply()
+        val raw = WorkCodec.encode(WorkCodec.upsert(load(ctx), w))
+        prefs(ctx).edit().putString(key(ctx), raw).apply()
+    }
+
+    /** 테스트용: 모든 회원의 보관함 비우기 */
+    fun clear(ctx: Context) {
+        prefs(ctx).edit().clear().commit()
     }
 }
 
@@ -95,14 +62,7 @@ object WorkStore {
 object Assets {
     fun list(ctx: Context): List<String> = ctx.assets.list(Demo.DIR)?.toList() ?: emptyList()
 
-    fun find(ctx: Context, base: String, exts: List<String>): String? {
-        val files = list(ctx)
-        for (e in exts) {
-            val n = "$base.$e"
-            if (n in files) return n
-        }
-        return null
-    }
+    fun find(ctx: Context, base: String, exts: List<String>): String? = findAsset(list(ctx), base, exts)
 
     /** assets 안의 파일을 캐시 폴더로 복사 (재생·공유용) */
     fun toCache(ctx: Context, name: String): File {
@@ -124,13 +84,6 @@ fun displayName(ctx: Context, uri: Uri): String {
     return name.substringBeforeLast('.')
 }
 
-private fun mime(name: String) = when (name.substringAfterLast('.').lowercase()) {
-    "pdf" -> "application/pdf"
-    "mid", "midi" -> "audio/midi"
-    "png" -> "image/png"
-    else -> "*/*"
-}
-
 /** 선택한 파일들을 카카오톡·메일·드라이브 등으로 공유 */
 fun shareFiles(ctx: Context, names: List<String>) {
     if (names.isEmpty()) return
@@ -139,7 +92,7 @@ fun shareFiles(ctx: Context, names: List<String>) {
     })
     val intent = if (uris.size == 1) {
         Intent(Intent.ACTION_SEND).apply {
-            type = mime(names[0])
+            type = mimeOf(names[0])
             putExtra(Intent.EXTRA_STREAM, uris[0])
         }
     } else {
