@@ -1,0 +1,8 @@
+midigpt[inference]==0.3.2
+mido
+pretty_midi
+pyyaml
+# 평가·정리 스크립트(experiments/)용
+pandas
+numpy
+openpyxl
