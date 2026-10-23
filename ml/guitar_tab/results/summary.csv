@@ -1,0 +1,11 @@
+song,guitar_notes,tuning,lead_notes,rhythm_notes,rhythm_notes_dropped,merged_events,merged_jumps_gt5,merged_jump_pct,lead_events,lead_jumps_gt5,lead_jump_pct,rhythm_events,rhythm_jumps_gt5,rhythm_jump_pct
+21 Guns - Green Day,2761,standard,697,1984,4,683,3,0.4,557,4,0.7,654,0,0.0
+Heavy Is the Crown - Linkin Park,2252,standard,583,1633,28,574,6,1.0,499,6,1.2,478,4,0.8
+High - 5 Seconds of Summer,1267,standard,418,849,0,380,5,1.3,354,4,1.1,300,17,5.7
+Holding Out For A Hero - Bonnie Tyler,3847,standard,826,2981,29,,,,583,12,2.1,720,5,0.7
+Rain - SID,6710,standard,1095,3672,143,,,,879,5,0.6,792,6,0.8
+Sweet Child O Mine - Guns N Roses,2591,half_step_down,1048,1530,13,976,76,7.8,914,18,2.0,502,18,3.6
+Time-Bomb - All Time Low,3261,standard,967,2286,8,927,14,1.5,624,7,1.1,842,15,1.8
+Yoru ni Kakeru - YOASOBI,4920,standard,1481,3383,53,1447,22,1.5,1437,8,0.6,1094,21,1.9
+한 페이지가 될 수 있게 - DAY6,2484,standard,510,1884,90,510,55,10.8,510,3,0.6,464,4,0.9
+흰수염고래 - YB,1801,standard,586,1140,75,564,17,3.0,554,5,0.9,282,6,2.1
