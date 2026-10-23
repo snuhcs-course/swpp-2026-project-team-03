@@ -48,7 +48,9 @@ MIDI에는 줄·프렛 정보가 없어서, MuseScore에서 MIDI를 TAB 보표�
 
 ## 결과 (`results/`, 10곡)
 
-입력은 `ml/beat_align`으로 정렬한 MuScriptor large 출력(10곡 테스트셋)입니다. 곡별 파일과 `results/summary.csv`가 있습니다.
+입력은 `ml/beat_align`으로 정렬한 MuScriptor large 출력(10곡 테스트셋)입니다. 곡별 폴더에는 `.gp5`와 텍스트 TAB이 있고, 전체 숫자는 `results/summary.csv`에 있습니다.
+
+리드·리듬 MIDI(`skyline_lead_rhythm.mid`)는 저장소 `.gitignore`가 `*.mid`를 제외해서 올리지 않았습니다. 필요하면 위 사용법대로 스크립트를 다시 돌리면 됩니다. MIDI는 실행 직후(곡당 1초 안에) 먼저 저장되고, TAB 계산은 그 뒤에 몇 분 걸립니다. `verify_gp5.py`로 검증할 때도 이 MIDI가 필요합니다.
 
 손이 5프렛 넘게 건너뛰는 비율 (연속한 운지 위치 사이, 개방현 제외):
 
