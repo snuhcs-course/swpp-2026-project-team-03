@@ -1,7 +1,8 @@
 """ROCKY beat alignment.
 
 MuScriptor가 기본 120 BPM 그리드로 써 준 MIDI를 Beat This!가 찾은
-실제 박/다운비트 위에 다시 올려, 템포 하나 + 4/4 마디로 정리한다.
+실제 박/다운비트 위에 다시 올려, 템포 하나 + 박자 하나의 마디로 정리한다.
+박자(마디당 박 수)는 다운비트 사이의 박 수 중 가장 많이 나온 값으로 정한다.
 
     python align.py --midi song.mid --audio song.wav --out song_aligned.mid
     python align.py --midi-dir midi/ --audio-dir audio/ --out-dir aligned/
@@ -16,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -26,7 +28,9 @@ import pretty_midi
 # BPM 계산에서 제외할 비정상 박 간격 (초). 0.2 s = 300 BPM, 2.0 s = 30 BPM
 MIN_BEAT_INTERVAL = 0.2
 MAX_BEAT_INTERVAL = 2.0
-BEATS_PER_BAR = 4        # 4/4만 지원
+DEFAULT_BEATS_PER_BAR = 4   # 다운비트가 없거나 부족할 때 쓰는 박자 (4/4)
+MIN_BEATS_PER_BAR = 2       # 이 범위 밖의 다운비트 간격은 박자 추정에서 제외
+MAX_BEATS_PER_BAR = 12
 SUBDIVISION = 4          # 1박 = 16분음표 4개
 RESOLUTION = 480
 
@@ -36,6 +40,7 @@ class AlignResult:
     bpm: float
     note_count: int
     beat_offset: int
+    beats_per_bar: int = DEFAULT_BEATS_PER_BAR
 
 
 # ----------------------------------------------------------------------
@@ -91,17 +96,48 @@ def estimate_bpm(beats: np.ndarray) -> tuple[float, float]:
     return 60.0 / median_interval, median_interval
 
 
-def compute_beat_offset(beats: np.ndarray, downbeats: np.ndarray) -> int:
-    """첫 다운비트가 마디 첫 박(4의 배수)에 오도록 하는 박 오프셋."""
+def _downbeat_indices(beats: np.ndarray, downbeats: np.ndarray) -> list[int]:
+    """각 다운비트에 가장 가까운 박의 번호 (중복 제거, 오름차순)."""
+    return sorted({int(np.argmin(np.abs(beats - d))) for d in downbeats})
+
+
+def estimate_beats_per_bar(beats: np.ndarray, downbeats: np.ndarray) -> int:
+    """다운비트 사이 박 수 중 가장 많이 나온 값을 곡 전체의 박자로 쓴다.
+
+    Beat This!가 마디 중간에 다운비트를 하나 더 찍거나(2+2) 하나 놓치는(8) 일이 있어도
+    대부분의 마디가 맞으면 결과가 흔들리지 않는다. 진짜로 박자가 바뀌는 곡은 따라가지 못한다.
+    다운비트가 2개 미만이거나 쓸 만한 간격이 없으면 4를 돌려준다.
+    """
+    beats = np.asarray(beats, dtype=float)
+    downbeats = np.asarray(downbeats, dtype=float)
+    if len(beats) == 0 or len(downbeats) < 2:
+        return DEFAULT_BEATS_PER_BAR
+    gaps = np.diff(_downbeat_indices(beats, downbeats))
+    gaps = [int(g) for g in gaps if MIN_BEATS_PER_BAR <= g <= MAX_BEATS_PER_BAR]
+    if not gaps:
+        return DEFAULT_BEATS_PER_BAR
+    counts = Counter(gaps)
+    top = max(counts.values())
+    tied = [g for g, c in counts.items() if c == top]
+    # 동률이면 4/4를 우선하고, 아니면 작은 값
+    return DEFAULT_BEATS_PER_BAR if DEFAULT_BEATS_PER_BAR in tied else min(tied)
+
+
+def compute_beat_offset(beats: np.ndarray, downbeats: np.ndarray,
+                        beats_per_bar: int = DEFAULT_BEATS_PER_BAR) -> int:
+    """첫 다운비트가 마디 첫 박(beats_per_bar의 배수)에 오도록 하는 박 오프셋."""
     if len(downbeats) == 0:
         return 0
     nearest_idx = int(np.argmin(np.abs(beats - downbeats[0])))
-    return (-nearest_idx) % BEATS_PER_BAR
+    return (-nearest_idx) % beats_per_bar
 
 
 def align_pretty_midi(midi: pretty_midi.PrettyMIDI, beats: Sequence[float],
                       downbeats: Sequence[float]) -> tuple[pretty_midi.PrettyMIDI, AlignResult]:
-    """PrettyMIDI 객체를 박에 맞춰 보정한 새 객체를 돌려준다."""
+    """PrettyMIDI 객체를 박에 맞춰 보정한 새 객체를 돌려준다.
+
+    박자는 곡 전체에 하나만 쓴다 (다운비트 사이 박 수의 최빈값).
+    """
     beats = np.asarray(beats, dtype=float)
     downbeats = np.asarray(downbeats, dtype=float)
 
@@ -112,7 +148,8 @@ def align_pretty_midi(midi: pretty_midi.PrettyMIDI, beats: Sequence[float],
 
     bpm, median_interval = estimate_bpm(beats)
     beat_duration = 60.0 / bpm
-    beat_offset = compute_beat_offset(beats, downbeats)
+    beats_per_bar = estimate_beats_per_bar(beats, downbeats)
+    beat_offset = compute_beat_offset(beats, downbeats, beats_per_bar)
     beat_index = np.arange(len(beats))
 
     def time_to_beat_position(t: float) -> float:
@@ -142,8 +179,10 @@ def align_pretty_midi(midi: pretty_midi.PrettyMIDI, beats: Sequence[float],
             note_count += 1
         out.instruments.append(new_inst)
 
-    out.time_signature_changes.append(pretty_midi.TimeSignature(BEATS_PER_BAR, 4, 0))
-    return out, AlignResult(bpm=bpm, note_count=note_count, beat_offset=beat_offset)
+    # 분모는 4로 쓴다: Beat This!의 박이 4분음표인지 점4분음표인지(예: 6/8)는 구분하지 않는다
+    out.time_signature_changes.append(pretty_midi.TimeSignature(beats_per_bar, 4, 0))
+    return out, AlignResult(bpm=bpm, note_count=note_count, beat_offset=beat_offset,
+                            beats_per_bar=beats_per_bar)
 
 
 def align_midi(midi_path: str | Path, out_path: str | Path, *,
@@ -250,7 +289,7 @@ def align_batch(midi_dir: str | Path, out_dir: str | Path, *,
                 beats, downbeats = load_beats(sources[song])
             r = align_midi(midis[song], out_dir / f"{song}_aligned.mid", beats=beats, downbeats=downbeats)
             report.succeeded.append(song)
-            log(f"[{i}/{len(songs)}] OK   {song} · BPM {r.bpm:.2f} · notes {r.note_count}")
+            log(f"[{i}/{len(songs)}] OK   {song} · BPM {r.bpm:.2f} · {r.beats_per_bar}/4 · notes {r.note_count}")
         except Exception as e:  # 한 곡 실패로 전체가 멈추지 않게
             report.failed[song] = str(e)
             log(f"[{i}/{len(songs)}] FAIL {song} · {e}")
@@ -268,7 +307,7 @@ def align_batch(midi_dir: str | Path, out_dir: str | Path, *,
 # ----------------------------------------------------------------------
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        description="MuScriptor MIDI를 Beat This! 박에 맞춰 4/4 마디로 정리",
+        description="MuScriptor MIDI를 Beat This! 박·다운비트에 맞춰 마디로 정리",
         epilog="한 곡: --midi --out (+ --audio 또는 --beats)\n"
                "여러 곡: --midi-dir --out-dir (+ --audio-dir 또는 --beats-dir)",
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -311,7 +350,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.save_beats:
             save_beats(args.save_beats, beats, downbeats)
     r = align_midi(args.midi, args.out, beats=beats, downbeats=downbeats)
-    print(f"BPM {r.bpm:.2f} · notes {r.note_count} · beat offset {r.beat_offset} → {args.out}")
+    print(f"BPM {r.bpm:.2f} · {r.beats_per_bar}/4 · notes {r.note_count} · beat offset {r.beat_offset} → {args.out}")
     return 0
 
 

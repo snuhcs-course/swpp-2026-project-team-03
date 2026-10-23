@@ -10,7 +10,8 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from align import align_midi, align_pretty_midi, compute_beat_offset, estimate_bpm  # noqa: E402
+from align import (align_midi, align_pretty_midi, compute_beat_offset,  # noqa: E402
+                   estimate_beats_per_bar, estimate_bpm)
 
 
 def make_midi(notes):
@@ -45,6 +46,66 @@ def test_first_downbeat_becomes_bar_start():
     downbeats = beats[1::4]  # 두 번째 박부터 다운비트
     assert compute_beat_offset(beats, downbeats) == 3
     assert compute_beat_offset(beats, []) == 0
+
+
+# ----------------------------------------------------------------------
+# 박자 추정 (다운비트 사이 박 수)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("n", [2, 3, 4, 5, 6, 7])
+def test_meter_from_regular_downbeats(n):
+    beats = np.arange(0, 30, 0.5)
+    assert estimate_beats_per_bar(beats, beats[1::n]) == n
+
+
+def test_meter_defaults_to_four_without_enough_downbeats():
+    beats = np.arange(0, 10, 0.5)
+    assert estimate_beats_per_bar(beats, []) == 4
+    assert estimate_beats_per_bar(beats, beats[:1]) == 4
+
+
+def test_meter_defaults_to_four_when_no_usable_gap():
+    """다운비트가 매 박마다 찍히면(간격 1) 쓸 만한 간격이 없으므로 4"""
+    beats = np.arange(0, 10, 0.5)
+    assert estimate_beats_per_bar(beats, beats) == 4
+
+
+def test_meter_ignores_occasional_wrong_downbeats():
+    """마디 중간 다운비트(2+2)와 놓친 다운비트(8)가 섞여도 4로 본다"""
+    beats = np.arange(0, 100, 0.5)
+    idx = [0, 4, 8, 10, 12, 16, 24, 28, 32, 36]   # 간격 4,4,2,2,4,8,4,4,4
+    assert estimate_beats_per_bar(beats, beats[idx]) == 4
+
+
+def test_meter_tie_prefers_four():
+    beats = np.arange(0, 30, 0.5)
+    idx = [0, 3, 6, 10, 14]                        # 3,3,4,4
+    assert estimate_beats_per_bar(beats, beats[idx]) == 4
+
+
+def test_offset_uses_meter():
+    beats = np.arange(0, 10, 0.5)
+    assert compute_beat_offset(beats, beats[2::3], beats_per_bar=3) == 1
+
+
+def test_three_four_song_gets_three_four_bars():
+    beats = np.arange(0, 20, 0.5)                  # 120 BPM
+    downbeats = beats[1::3]                        # 두 번째 박부터 3박마다
+    midi = make_midi([(60, 0.5, 1.0), (62, 2.0, 2.5)])
+    out, r = align_pretty_midi(midi, beats, downbeats)
+    assert r.beats_per_bar == 3 and r.beat_offset == 2
+    ts = out.time_signature_changes
+    assert len(ts) == 1 and (ts[0].numerator, ts[0].denominator) == (3, 4)
+    # 첫 다운비트(0.5 s)의 음표가 마디 시작(3박 = 1.5 s)에 온다
+    starts = sorted(n.start for n in out.instruments[0].notes)
+    assert starts[0] == pytest.approx(1.5)
+    assert starts[1] == pytest.approx(3.0)        # 다음 다운비트(2.0 s) → 2마디 시작
+
+
+def test_four_four_unchanged_with_regular_downbeats():
+    beats = np.arange(0, 20, 0.5)
+    out, r = align_pretty_midi(make_midi([(60, 0.5, 1.0)]), beats, beats[1::4])
+    assert r.beats_per_bar == 4
+    assert (out.time_signature_changes[0].numerator, out.time_signature_changes[0].denominator) == (4, 4)
 
 
 def test_notes_snap_to_sixteenth_grid():
