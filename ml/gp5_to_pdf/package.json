@@ -1,0 +1,13 @@
+{
+  "name": "rocky-gp5-to-pdf",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Convert a GP5 tab to PDF through Tabtify's browser editor",
+  "scripts": {
+    "convert": "node convert.js"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1",
+    "playwright": "1.62.1"
+  }
+}
