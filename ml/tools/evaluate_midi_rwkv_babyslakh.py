@@ -316,6 +316,91 @@ def main() -> int:
         case["case_fit_score"] = statistics.fmean(components)
     write_csv(output_dir / "metrics_all_cases.csv", all_case_rows)
 
+    instrument_order = ["Piano", "Guitar", "Bass", "Drums"]
+    instrument_rows = []
+    instrument_lines = [
+        "# Results by instrument",
+        "",
+        "Each section ranks completed generations by the derived fit proxy. Failed and skipped cases remain in the table without a rank.",
+        "",
+        "- Higher CP, GS match, PCHE match, and fit proxy are better.",
+        "- GS match = 1 - |generated GS - reference GS|.",
+        "- PCHE match = 1 - min(|generated PCHE - reference PCHE| / log2(12), 1).",
+        "- The fit proxy is the equal-weight mean of CP, GS match, and PCHE match. Drums use CP and GS match because PCHE is not applicable.",
+        "- The fit proxy is a screening score and is not an original MIDI-RWKV paper metric.",
+    ]
+    for target in instrument_order:
+        target_cases = [case for case in all_case_rows if case["target"] == target]
+        completed = sorted(
+            (case for case in target_cases if case["status"] == "completed"),
+            key=lambda case: (case["case_fit_score"], case["track"]),
+            reverse=True,
+        )
+        rank_lookup = {
+            case["track"]: rank for rank, case in enumerate(completed, start=1)
+        }
+        ordered_cases = completed + sorted(
+            (case for case in target_cases if case["status"] != "completed"),
+            key=lambda case: case["track"],
+        )
+        for case in ordered_cases:
+            instrument_rows.append(
+                {
+                    "target": target,
+                    "instrument_rank": rank_lookup.get(case["track"]),
+                    "track": case["track"],
+                    "status": case["status"],
+                    "reason": case["reason"],
+                    "CP": case["CP"],
+                    "GS_generated": case["GS_generated"],
+                    "GS_reference": case["GS_reference"],
+                    "GS_match": case["GS_match"],
+                    "PCHE_absolute_difference": case["PCHE_absolute_difference"],
+                    "PCHE_match": case["PCHE_match"],
+                    "case_fit_score": case["case_fit_score"],
+                }
+            )
+
+        instrument_lines.extend(
+            [
+                "",
+                f"## {target}",
+                "",
+                f"Completed: **{len(completed)}/{len(target_cases)}**",
+                "",
+                "| Rank | Track | Status | CP | GS match | PCHE abs. diff. | PCHE match | Fit proxy |",
+                "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for case in ordered_cases:
+            rank = rank_lookup.get(case["track"])
+            if case["status"] == "completed":
+                pche_difference = (
+                    "N/A"
+                    if case["PCHE_absolute_difference"] is None
+                    else f"{case['PCHE_absolute_difference']:.6f}"
+                )
+                pche_match = (
+                    "N/A"
+                    if case["PCHE_match"] is None
+                    else f"{case['PCHE_match']:.6f}"
+                )
+                instrument_lines.append(
+                    f"| {rank} | {case['track']} | completed | {case['CP']:.6f} | "
+                    f"{case['GS_match']:.6f} | {pche_difference} | {pche_match} | "
+                    f"{case['case_fit_score']:.6f} |"
+                )
+            else:
+                status = f"{case['status']}: {case['reason']}"
+                instrument_lines.append(
+                    f"| - | {case['track']} | {status} | N/A | N/A | N/A | N/A | N/A |"
+                )
+
+    write_csv(output_dir / "metrics_by_instrument.csv", instrument_rows)
+    (output_dir / "metrics_by_instrument.md").write_text(
+        "\n".join(instrument_lines) + "\n", encoding="utf-8"
+    )
+
     case_lines = [
         "# Metrics by track and target",
         "",

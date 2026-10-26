@@ -21,10 +21,14 @@ MIDI-RWKV model as a missing-instrument generator on BabySlakh symbolic MIDI.
 | --- | --- |
 | `experiments/midi_rwkv_babyslakh_generation_prompt.md` | Complete experiment specification |
 | `tools/run_midi_rwkv_babyslakh.py` | Generation runner |
-| `tools/evaluate_midi_rwkv_babyslakh.py` | CP, GS, PCHE and track ranking evaluator |
+| `tools/evaluate_midi_rwkv_babyslakh.py` | CP, GS, PCHE, per-instrument tables and track ranking evaluator |
 | `tools/MIDI_RWKV_BABYSLAKH.md` | Setup and command reference |
 | `external/MIDI-RWKV/` | Ignored official repository, checkpoint, tokenizer and rwkv.cpp build |
 | `outputs/midi_rwkv_babyslakh/` | Ignored generated MIDI, manifests and evaluation reports |
+
+The evaluation directory includes `metrics_by_instrument.md` for a readable
+Piano, Guitar, Bass, and Drums comparison and `metrics_by_instrument.csv` for
+analysis in spreadsheet or data-processing tools.
 
 BabySlakh is read from the sibling directory
 `C:\Users\USER\AndroidStudioProjects\babyslakh_16k` by default. This experiment

@@ -30,6 +30,9 @@ the decoded track count can be smaller than the number of input stems.
 The official repository is cloned locally at `ml/external/MIDI-RWKV` with its
 pinned submodules. It is ignored by the Rocky repository because it is an
 independent Git repository and contains the pretrained checkpoint.
+The evaluated local checkout was `christianazinn/MIDI-RWKV` at
+`7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530`; record or restore its
+submodule revisions when recreating the environment.
 
 Use Python 3.11 and install the MIDI-RWKV dependencies plus PyYAML:
 
