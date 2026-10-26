@@ -18,6 +18,15 @@ sharing one issue tracker and CI configuration.
 
 Each component has its own README with a suggested boundary and setup notes.
 
+## Current worktree: M2M Arranger
+
+This worktree evaluates the pretrained band arrangement model from the NeurIPS
+2025 paper *Unifying Symbolic Music Arrangement: Track-Aware Reconstruction
+and Structured Tokenization*. The model accepts multitrack symbolic MIDI and
+generates tracks for a requested instrument set using REMI-z. See
+[`ml/README.md`](ml/README.md) for model files, setup notes, and the BabySlakh
+experiment scope.
+
 ## Development workflow
 
 1. Create a focused branch from `main`, using a prefix such as `app/`,

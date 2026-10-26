@@ -57,6 +57,8 @@ artifacts/
 checkpoints/
 models/
 outputs/
+ml/external/music2music_code/
+ml/external/REMI-z/
 *.wav
 *.mp3
 *.flac
