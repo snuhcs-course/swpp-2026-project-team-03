@@ -27,3 +27,11 @@ selectors depend on Tabtify's current editor UI;
 recheck them if that site changes. Input files are provided to Tabtify through
 the browser. Do not use this route for private scores unless that service is an
 approved destination for them.
+
+## Published reference PDFs
+
+The [results](results/README.md) directory contains PDF exports of all 18 GP5
+files in `ml/guitar-tab` at commit `0f0eab8` (10 lead+rhythm scores and 8
+merged scores). Its manifest maps each PDF to its source GP5 and records file
+hashes and page counts. These are render compatibility examples, not a
+note-by-note comparison against the source MIDI.

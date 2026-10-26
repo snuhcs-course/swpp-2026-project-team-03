@@ -13,7 +13,8 @@ Suggested subdirectories:
 
 Do not commit datasets, audio files, checkpoints, or generated outputs. Keep
 those in ignored local directories and document download or preparation steps
-in this README.
+in this README. The explicitly published GP5-to-PDF reference files under
+`gp5_to_pdf/results/` are the exception.
 
 ## GP5 to PDF
 
