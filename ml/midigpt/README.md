@@ -10,8 +10,9 @@ ROCKY 파이프라인에서 **원곡에 없는 악기 파트를 새로 만드는
 
 원곡에 있는 악기는 채보 결과를 그대로 쓰고, 사용자가 고른 악기 중 원곡에 없는 것만 이 단계에서 생성해요.
 
-- 모델: [midigpt](https://pypi.org/project/midigpt/) 0.3.2 (Metacreation-Lab), `yellow_medium`
-  - 코드는 MIT 라이선스, 모델 가중치는 비상업 라이선스라서 저장소에 올리지 않아요. 첫 실행 때 자동으로 내려받아요.
+- 모델: [midigpt](https://pypi.org/project/midigpt/) 0.4.2 (Metacreation-Lab), `yellow_medium`
+  - 코드는 MIT, 모델 가중치는 **CC-BY-NC-4.0**(비상업적 이용, 출처 표시)이라 저장소에 올리지 않아요.
+  - 가중치는 Hugging Face에서 **라이선스 동의 + 토큰**이 있어야 받을 수 있어요 (아래 "모델 다운로드 권한").
 - 실행 환경: Python 3.10 이상, GPU 권장 (Colab T4에서 확인). CPU로도 돌지만 오래 걸려요.
 
 ## 폴더 구조
@@ -30,6 +31,21 @@ cd ml/midigpt
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### 모델 다운로드 권한 (처음 한 번)
+MIDI-GPT 모델은 라이선스 동의 후에만 받을 수 있어요.
+1. https://huggingface.co/Metacreation/MIDI-GPT 에서 로그인 후 라이선스에 동의
+2. Hugging Face → Settings → Access Tokens → **Read** 토큰 생성
+3. 실행 전에 토큰 설정 (**토큰은 절대 git에 올리지 않기**)
+   - 터미널/서버: `export HF_TOKEN=hf_...` (쿠버네티스는 Secret으로 넣어도 됨)
+   - Colab: 왼쪽 🔑 보안 비밀에 `HF_TOKEN` 추가 → 노트북 액세스 켜기 → 셀에서
+     ```python
+     from google.colab import userdata; import os
+     os.environ['HF_TOKEN'] = userdata.get('HF_TOKEN')
+     ```
+- 토큰은 팀원마다 각자 만들어 쓰고 공유하지 않기
+- 수업 GPU/CPU 파드는 종료되면 모델 파일도 사라져서, 새 파드마다 다시 다운로드돼요
+- `401` / `GatedRepoError`가 나면 라이선스 동의 또는 `HF_TOKEN` 설정을 확인하세요
 
 ## 사용법
 ```bash
