@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from skyline_tab import (TUNINGS, choose_tuning, fold_range, guitar_notes, playable,  # noqa: E402
-                         reduce_chord, split_and_clean, split_len, track_events, write_gp5)
+                         reduce_chord, reduce_chords, split_and_clean, split_len, track_events, write_gp5)
 
 gp = pytest.importorskip("guitarpro")
 
@@ -59,6 +59,35 @@ def test_seven_notes_become_at_most_six_playable_notes():
     kept = reduce_chord([40, 45, 50, 55, 59, 64, 67], "standard")
     assert len(kept) <= 6 and playable(kept, "standard")
     assert kept[0] == 40 and kept[-1] == 67           # lowest and highest are kept
+
+
+def test_merged_chords_are_reduced_to_playable_shapes():
+    notes = [N(p, 0.0, 1.0) for p in (40, 45, 50, 55, 59, 64, 67)] + [N(41, 1.0, 2.0), N(84, 1.0, 2.0)]
+    out, st = reduce_chords(notes, "standard")
+    first = sorted(n.pitch for n in out if n.start == 0.0)
+    second = [n.pitch for n in out if n.start == 1.0]
+    assert len(first) <= 6 and playable(first, "standard")
+    assert second == [41]
+    assert st["notes_in"] == 9 and st["notes_dropped"] == 9 - len(out)
+
+
+def test_merged_same_pitch_at_same_onset_becomes_one_note():
+    out, st = reduce_chords([N(52, 0.0, 0.5), N(52, 0.0, 1.5), N(28, 0.0, 1.0)], "standard")
+    assert sorted((n.pitch, n.end) for n in out) == [(40, 1.0), (52, 1.5)]   # 28 folds to 40
+    assert st["notes_in"] == 2
+
+
+def test_merged_single_notes_are_kept():
+    out, st = reduce_chords([N(60, 0.0, 1.0), N(62, 1.0, 2.0)], "standard")
+    assert [n.pitch for n in out] == [60, 62] and st["notes_dropped"] == 0
+
+
+def test_rhythm_chords_are_kept_without_chord_reduction():
+    notes = [N(41, 0.0, 1.0), N(84, 0.0, 1.0), N(86, 0.0, 1.0)]
+    _, rhythm, st = split_and_clean(notes, "standard", chord_reduction=False)
+    assert sorted(n.pitch for n in rhythm) == [41, 84] and st["rhythm_notes_dropped"] == 0
+    _, rhythm, _ = split_and_clean(notes, "standard")
+    assert [n.pitch for n in rhythm] == [41]
 
 
 # ----------------------------------------------------------------------

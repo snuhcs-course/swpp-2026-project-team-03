@@ -3,7 +3,8 @@
 MuScriptor often merges two guitars into one part. This script
 1. picks a tuning (standard / half step down / drop D) from the lowest notes,
 2. splits the part with the skyline rule: the highest note at each onset -> lead, the rest -> rhythm,
-3. makes rhythm chords playable (max 6 notes, fretted notes within 4 frets),
+3. makes chords playable (max 6 notes, fretted notes within 4 frets) in the rhythm part and
+   the merged part, by default; --no-chord-reduction turns this off,
 4. chooses string/fret with tuttut (Viterbi over fingerings, b=0.1),
 5. writes MIDI, text TAB and Guitar Pro (.gp5) files, and reports fret jumps > 5.
 
@@ -11,9 +12,9 @@ Comparison baseline only, not the team's guitar-guitar separation module.
 The skyline rule comes from melody-extraction research; the tuning, chord-reduction and
 jump-count rules are our own choices.
 
-    python skyline_tab.py song_aligned.mid out_dir/ [--no-merged]
+    python skyline_tab.py song_aligned.mid out_dir/ [--no-merged] [--no-chord-reduction]
 
-Input: beat-aligned MIDI from ml/beat_align. --no-merged skips the slow merged-part TAB.
+Input: beat-aligned MIDI from ml/beat_align. --no-merged skips the merged-part TAB.
 
 Written with Claude (AI); reviewed by Soobin Jo.
 """
@@ -90,7 +91,28 @@ def reduce_chord(pitches, tuning):
     return ps
 
 
-def split_and_clean(notes, tuning):
+def reduce_chords(notes, tuning):
+    """Merged part: fold into range, then reduce each onset's chord with reduce_chord.
+
+    Notes with the same pitch at the same onset become one note (the longer end is kept).
+    """
+    groups = collections.OrderedDict()
+    for n in notes:
+        groups.setdefault(round(n.start, 4), []).append(n)
+    out, stats = [], collections.Counter()
+    for grp in groups.values():
+        ends = {}
+        for n in grp:
+            p = fold_range(n.pitch, tuning)
+            ends[p] = max(ends.get(p, 0.0), n.end)
+        kept = reduce_chord(list(ends), tuning) if len(ends) > 1 else list(ends)
+        stats["notes_in"] += len(ends)
+        stats["notes_dropped"] += len(ends) - len(kept)
+        out += [pretty_midi.Note(100, p, grp[0].start, ends[p]) for p in kept]
+    return out, stats
+
+
+def split_and_clean(notes, tuning, chord_reduction=True):
     groups = collections.OrderedDict()
     for n in notes:
         groups.setdefault(round(n.start, 4), []).append(n)
@@ -103,7 +125,7 @@ def split_and_clean(notes, tuning):
         rest = grp[:-1]
         if rest:
             ps = [fold_range(n.pitch, tuning) for n in rest]
-            kept = reduce_chord(ps, tuning)
+            kept = reduce_chord(ps, tuning) if chord_reduction else sorted(set(ps))
             stats["rhythm_notes_in"] += len(set(ps))
             stats["rhythm_notes_dropped"] += len(set(ps)) - len(kept)
             end = max(n.end for n in rest)
@@ -272,18 +294,24 @@ def write_gp5(path, title, bpm, beats_per_bar, tuning, tracks):
     return n_measures
 
 
-def main(src, out_dir, merged_tab=True):
+def main(src, out_dir, merged_tab=True, chord_reduction=True):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pm = pretty_midi.PrettyMIDI(src)
     notes = guitar_notes(pm)
     tuning = choose_tuning([n.pitch for n in notes])
     print(f"guitar notes {len(notes)} · tuning {tuning} {NAMES[tuning]}")
-    lead, rhythm, st = split_and_clean(notes, tuning)
+    lead, rhythm, st = split_and_clean(notes, tuning, chord_reduction)
     print(f"lead {st['lead_notes']} notes · rhythm {st['rhythm_notes']} notes "
           f"(dropped {st['rhythm_notes_dropped']} of {st['rhythm_notes_in']} to make chords playable)")
 
-    merged = part_midi(pm, [pretty_midi.Note(100, fold_range(n.pitch, tuning), n.start, n.end) for n in notes], "Guitar (merged)")
+    if chord_reduction:
+        merged_notes, mst = reduce_chords(notes, tuning)
+        if merged_tab:
+            print(f"merged {len(merged_notes)} notes (dropped {mst['notes_dropped']} of {mst['notes_in']} to make chords playable)")
+    else:
+        merged_notes = [pretty_midi.Note(100, fold_range(n.pitch, tuning), n.start, n.end) for n in notes]
+    merged = part_midi(pm, merged_notes, "Guitar (merged)")
     both = part_midi(pm, lead, "Guitar 1 (lead)")
     r = pretty_midi.Instrument(program=29, name="Guitar 2 (rhythm)")
     r.notes = rhythm
@@ -317,9 +345,12 @@ def cli(argv=None):
     p = argparse.ArgumentParser(description="Skyline lead/rhythm split + tuttut TAB + Guitar Pro export")
     p.add_argument("midi", help="beat-aligned MIDI (ml/beat_align output)")
     p.add_argument("out_dir", help="output folder")
-    p.add_argument("--no-merged", action="store_true", help="skip the merged-part TAB (slow on large songs)")
+    p.add_argument("--no-merged", action="store_true", help="skip the merged-part TAB")
+    p.add_argument("--no-chord-reduction", action="store_true",
+                   help="keep every chord note (default: max 6 notes, fretted notes within 4 frets; "
+                        "without it tuttut can take over an hour on large songs)")
     a = p.parse_args(argv)
-    main(a.midi, a.out_dir, merged_tab=not a.no_merged)
+    main(a.midi, a.out_dir, merged_tab=not a.no_merged, chord_reduction=not a.no_chord_reduction)
 
 
 if __name__ == "__main__":
