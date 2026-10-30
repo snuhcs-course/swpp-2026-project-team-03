@@ -29,7 +29,8 @@ def main(gp_path, mid_path):
     print(f"{gp_path.split('/')[-1]}: tempo {song.tempo}, measures {len(song.measureHeaders)}, tracks {len(song.tracks)}")
     for ti, track in enumerate(song.tracks):
         tuning = {s.number: s.value for s in track.strings}
-        bar16 = song.measureHeaders[0].timeSignature.numerator * 4
+        sig = song.measureHeaders[0].timeSignature
+        bar16 = sig.numerator * 16 // sig.denominator.value      # 4/4 -> 16, 12/8 -> 24
         bad_bars, onsets, pos = 0, collections.defaultdict(set), 0
         span_bad = 0
         for m in track.measures:

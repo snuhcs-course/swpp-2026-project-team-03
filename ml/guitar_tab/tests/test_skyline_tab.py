@@ -9,7 +9,7 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from skyline_tab import (TUNINGS, choose_tuning, fold_range, guitar_notes, playable,  # noqa: E402
+from skyline_tab import (TUNINGS, choose_tuning, decide_split, fold_range, guitar_notes, playable,  # noqa: E402
                          reduce_chord, reduce_chords, split_and_clean, split_len, track_events, write_gp5)
 
 gp = pytest.importorskip("guitarpro")
@@ -163,6 +163,59 @@ def test_gp5_roundtrip_keeps_frets_and_bar_lengths(tmp_path):
     assert (first[0].notes[0].string, first[0].notes[0].value) == (1, 3)
     tied = song.tracks[0].measures[1].voices[0].beats[0].notes[0]
     assert tied.type == gp.NoteType.tie and tied.value == 5
+
+
+def test_gp5_twelve_eight_bars_are_24_sixteenths(tmp_path):
+    path = tmp_path / "c.gp5"
+    n = write_gp5(path, "12-8 song", 162, 12, "standard", [("g", [(0, 6, [(1, 0)]), (20, 8, [(2, 1)])])], denominator=8)
+    song = gp.parse(str(path))
+    sig = song.measureHeaders[0].timeSignature
+    assert (sig.numerator, sig.denominator.value) == (12, 8) and n == 2
+    for m in song.tracks[0].measures:
+        total = sum({1: 16, 2: 8, 4: 4, 8: 2, 16: 1}[b.duration.value] * (1.5 if b.duration.isDotted else 1)
+                    for b in m.voices[0].beats)
+        assert total == 24
+
+
+# ----------------------------------------------------------------------
+# auto split: two guitars or one?
+# ----------------------------------------------------------------------
+def _onsets(chords, step=0.5):
+    return [N(p, k * step, k * step + 0.4) for k, ps in enumerate(chords) for p in ps]
+
+
+def test_two_guitars_in_two_registers_are_split():
+    # low rhythm power chord + high lead note, three octaves apart, every onset: unplayable and wide
+    split, st = decide_split(_onsets([[40, 47, 52, 84]] * 20), "standard")
+    assert split and st["unplayable"] == 1.0 and st["wide"] == 1.0
+
+
+def test_one_guitar_with_extra_notes_is_not_split():
+    # cramped cluster: unplayable as one chord, but within two octaves -> chord reduction, not a second guitar
+    split, st = decide_split(_onsets([[52, 53, 54, 55, 56, 57, 58]] * 20), "standard")
+    assert not split and st["unplayable"] == 1.0 and st["wide"] == 0.0
+
+
+def test_playable_chords_are_not_split():
+    split, st = decide_split(_onsets([[40, 47, 52, 56, 59, 64]] * 20), "standard")   # open E major
+    assert not split and st["unplayable"] == 0.0
+
+
+def test_wide_but_playable_is_not_split():
+    # open low E + fret 20 on the high E: wider than two octaves but one guitar can play it
+    split, st = decide_split(_onsets([[40, 84]] * 20), "standard")
+    assert not split and st["wide"] == 1.0 and st["unplayable"] == 0.0
+
+
+def test_split_thresholds_are_shares_of_onsets():
+    chords = [[40, 47, 52, 84]] * 2 + [[60]] * 18          # 10% unplayable and wide
+    assert decide_split(_onsets(chords), "standard")[0]
+    chords = [[40, 47, 52, 84]] * 1 + [[60]] * 19          # 5% unplayable, 5% wide -> wide below 6%
+    assert not decide_split(_onsets(chords), "standard")[0]
+
+
+def test_empty_part():
+    assert decide_split([], "standard") == (False, {"onsets": 0, "unplayable": 0.0, "wide": 0.0})
 
 
 # ----------------------------------------------------------------------
