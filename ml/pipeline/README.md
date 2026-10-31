@@ -36,14 +36,37 @@ are never regenerated. The output directory must be new, or contain a
 `manifest.json` from the same input and configuration when `--resume` is used.
 Every stage checks its files before marking completion. Failures leave the
 manifest in `failed` status with a log path; rerunning with `--resume` retries
-the failed stage. `full_score.mid` and `manifest.json` are the final contract.
+the failed stage. `full_score.mid` and `manifest.json` complete the GPU stage.
 The stem MIDI files, `beats.json`, `aligned.mid`, TAB GP5 files, and model logs
 are retained under the same output directory for inspection.
 
+## PDF score publication
+
+Run the PDF stage as a separate CPU Job after the GPU MIDI stage. Copy
+`publish_scores.py` to `/data/pipeline`, then apply
+`sgs/score-pdf-job.example.yaml` with a unique Job name and the song ID filled
+in. The image installs MuseScore 3 and Poppler in its ephemeral filesystem and
+uses the existing `gp5_to_pdf` module on the shared volume.
+
+The frontend contract is `scores/score_outputs.json`: a full-band PDF plus a
+PDF for every present instrument family (guitar, bass, piano, drums).
+`scores/piano.pdf` contains acoustic piano, electric piano and organ tracks
+from the piano stem together. Guitar and bass PDFs come from their processed
+GP5 files through `gp5_to_pdf/convert.js` (Tabtify). Full-band, piano and drums
+PDFs come from the assembled MIDI through MuseScore. The full-band PDF uses
+standard notation; guitar and bass part PDFs include TAB. MuseScore 3 omits
+GM drum pitches 39 (clap), 70 (maracas) and 82 (shaker) on import, so
+render-only MIDI copies map them to visible surrogate drum symbols. The
+original `full_score.mid` and `scores/drums.mid` keep their pitches; the
+JSON records the exact mapping and affected note counts. The JSON also records
+source paths, converter, pages, bytes and SHA-256. `manifest.json` points to
+that file through `score_outputs`, and `score_publication` becomes `complete`.
+Keeping this CPU stage separate releases the
+GPU after transcription and assembly.
+
 The branch's earlier `audio_to_midi.sh` remains a two-stage alternative.
 `unified.py` is an independent server workflow; Android still shows bundled
-demo results. GP5-to-PDF uses a separate browser/CPU runtime and is not part of
-this eight-step MIDI workflow yet. Instrument presence currently uses GM
+demo results. Instrument presence currently uses GM
 program groups and excludes tracks from the vocal stem; ambiguous instruments
 still need user review. Beat alignment assumes one tempo and one meter per
 song. The `htdemucs_6s` piano stem is experimental.

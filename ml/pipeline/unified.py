@@ -381,6 +381,7 @@ class Runner:
                 raise ValueError("Final score extends beyond the input song duration")
             self.manifest["final_tracks"] = describe_tracks(score)
         self.stage("assemble", [final], final_assembly)
+        self.manifest.setdefault("score_publication", "pending")
         self.manifest["status"] = "complete"
         atomic_json(self.manifest_path, self.manifest)
         return final

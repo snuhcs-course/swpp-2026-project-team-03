@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rocky-score-pdf-example
+  namespace: ws-qt1ja5byz6220
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: muscriptor-data
+      containers:
+        - name: scores
+          image: mcr.microsoft.com/playwright:v1.62.1-noble
+          workingDir: /data/rocky-unified/ml/gp5_to_pdf
+          command: [/bin/bash, -lc]
+          args:
+            - |
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive QT_QPA_PLATFORM=offscreen
+              export XDG_RUNTIME_DIR=/tmp/rocky-qt-runtime
+              mkdir -p "$XDG_RUNTIME_DIR"
+              chmod 700 "$XDG_RUNTIME_DIR"
+              sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+              apt-get -o Acquire::Retries=5 update -qq
+              apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils
+              /data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py \
+                /data/rocky-unified/runs/REPLACE_WITH_SONG_ID \
+                --musescore musescore3 \
+                --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
