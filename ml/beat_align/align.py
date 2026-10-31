@@ -12,9 +12,13 @@ MuScriptor가 기본 120 BPM 그리드로 써 준 MIDI를 Beat This!가 찾은
 --triplets: 박마다 16분음표 칸과 셋잇단 8분음표 칸 중 음들에 더 잘 맞는 쪽으로 맞춘다 (4/4 곡 안의 셋잇단).
 --compound: 겹박자(6/8, 12/8). 한 박 = 점4분음표로 보고 8분음표 3개(16분음표 6개)로 나눠 맞추고, n/8 박자표를 쓴다.
 
+드럼 기준 타이밍 보정 (기본으로 켜짐, --no-drum-sync로 끔): 정렬 전에 drum_sync.py로
+다른 악기의 음 시각을 드럼에 맞춘다. 자세한 내용은 drum_sync.py.
+
 자동 판별 (기본으로 켜짐, --no-auto-meter로 끔):
-  - 12/8 감지: Beat This! 박 간격에 "한 박"과 "그 2/3"이 둘 다 많고, 박 안의 음이 셋잇단 자리에 많으면
-    겹박자로 보고 박을 점4분음표 단위로 다시 센다 (detect_compound → fix_beats).
+  - 겹박자 감지 (detect_compound → fix_beats): 박을 점4분음표 단위로 다시 센다.
+    A. 박 간격에 "한 박"과 "그 2/3"이 둘 다 많고 박 안의 음이 셋잇단 자리에 많으면 → 12/8 등
+    B. 다운비트 사이가 대부분 박 6개이고 박이 빠르면(8분음표마다 박을 찍음) → 6/8
   - 마디선: 드럼 MIDI의 스네어가 2·4박, 킥이 1박에 오도록 마디 첫 박을 고른다 (drum_bar_phase).
   --compound, --downbeat-shift를 직접 주면 그 값을 쓴다.
 
@@ -36,6 +40,13 @@ from typing import Sequence
 import numpy as np
 import pretty_midi
 
+import sys
+
+# 같은 폴더의 drum_sync.py: 스크립트 실행, Colab의 sys.path 추가, 패키지 import 어느 경우든 찾도록
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from drum_sync import DrumSyncResult, drum_sync as _drum_sync  # noqa: E402
+
 # BPM 계산에서 제외할 비정상 박 간격 (초). 0.2 s = 300 BPM, 2.0 s = 30 BPM
 MIN_BEAT_INTERVAL = 0.2
 MAX_BEAT_INTERVAL = 2.0
@@ -52,6 +63,7 @@ RESOLUTION = 480         # 3과 4로 모두 나누어떨어져야 셋잇단 위�
 TEMPO_MEAN_WINDOW = 0.08 # 템포: 중앙값 ±8% 안의 박 간격 평균 (박 시각이 0.02 s 단위라 중앙값만 쓰면 1~2% 틀어짐)
 COMPOUND_MIN_LEVEL = 0.10    # 자동 12/8: 두 박 단위(x1, x2/3) 중 적은 쪽이 박 간격의 10% 이상이고
 COMPOUND_MIN_TRIPLET = 0.12  #           박 위가 아닌 음 중 셋잇단 자리에 확실히 가까운 음이 12% 이상
+EIGHTH_LEVEL_MAX_INTERVAL = 0.4  # 겹박자 B: 박 간격이 이보다 짧고 마디당 6박이면 8분음표 박으로 본다
 PHASE_MIN_GAIN = 0.25        # 자동 마디선: 드럼 점수가 이만큼 좋아질 때만 Beat This! 마디선을 옮긴다
 KICK_PITCHES = (35, 36)
 SNARE_PITCHES = (37, 38, 40)
@@ -66,6 +78,7 @@ class AlignResult:
     triplet_beats: int = 0
     compound: bool = False
     downbeat_shift: int = 0
+    drum_sync: DrumSyncResult | None = None
 
     @property
     def meter(self) -> str:
@@ -166,12 +179,12 @@ def compute_beat_offset(beats: np.ndarray, downbeats: np.ndarray,
     return (-nearest_idx) % beats_per_bar
 
 
-BPM_FIX_RATIOS = (1.0, 2 / 3, 0.5, 2.0)   # 찍힌 박 간격 = 실제 박 x 이 값
+BPM_FIX_RATIOS = (1.0, 2 / 3, 0.5, 2.0, 1 / 3)   # 찍힌 박 간격 = 실제 박 x 이 값 (1/3 = 겹박자의 8분음표)
 BPM_FIX_MIN_RUN = 3                      # 같은 배수가 이만큼 이어진 구간만 믿는다
 
 
 def fix_beats(beats: Sequence[float], downbeats: Sequence[float],
-              bpm: float) -> tuple[np.ndarray, np.ndarray]:
+              bpm: float, beats_per_bar: int | None = None) -> tuple[np.ndarray, np.ndarray]:
     """곡의 실제 템포(bpm)를 알 때 박을 그 템포로 다시 센다.
 
     Beat This!는 셋잇단이 많은 구간에서 박을 1.5배 빠르게(실제 박의 2/3 간격) 찍거나,
@@ -209,7 +222,7 @@ def fix_beats(beats: Sequence[float], downbeats: Sequence[float],
         if t0 is None:
             c0, t0 = 0.0, b[s]
         else:
-            step = 1 / 3 if r == 2 / 3 else 0.5 if r == 0.5 else 1.0   # 2/3 간격 구간은 1/3 박 단위로 시작할 수 있다
+            step = 1 / 3 if r in (2 / 3, 1 / 3) else 0.5 if r == 0.5 else 1.0   # 2/3·1/3 간격 구간은 1/3 박 단위로 시작할 수 있다
             c0 = float(np.round((b[s] - t0) / period / step) * step)
         c = c0 + np.concatenate([[0.0], np.cumsum(np.full(e - s, r))])
         count[s:e + 1] = c
@@ -230,7 +243,7 @@ def fix_beats(beats: Sequence[float], downbeats: Sequence[float],
     downbeats = np.asarray(downbeats, dtype=float)
     if len(downbeats) == 0:
         return new, np.array([])
-    per_bar = estimate_beats_per_bar(b, downbeats)
+    per_bar = beats_per_bar or estimate_beats_per_bar(b, downbeats)
     first = int(np.argmin(np.abs(new - downbeats[0])))
     return new, new[first % per_bar::per_bar]
 
@@ -271,18 +284,29 @@ def triplet_share(positions: Sequence[float]) -> float:
     return float(np.mean(d3 < d16 * 0.5))
 
 
-def detect_compound(beats: Sequence[float], onsets: Sequence[float]) -> tuple[bool, float]:
-    """겹박자(12/8, 6/8)인지와 점4분음표 기준 BPM을 돌려준다. (is_compound, dotted_quarter_bpm)
+def detect_compound(beats: Sequence[float], onsets: Sequence[float],
+                    downbeats: Sequence[float] = ()) -> tuple[bool, float, int | None]:
+    """겹박자(12/8, 6/8)인지, 점4분음표 기준 BPM, 다시 센 박 기준 마디당 박 수를 돌려준다.
 
-    11곡(4/4 10곡, 12/8 1곡)으로 정한 기준이다. 4/4 곡은 두 지표가 모두 0~6%, 12/8 곡은 46%·22%였다.
+    두 경우를 잡는다.
+    A. Beat This!가 점4분음표와 8분음표 2개(2/3배)를 오가며 박을 찍음 (적재): 두 단위가 둘 다 10% 이상이고
+       박 안의 음이 셋잇단 자리에 12% 이상. 마디당 박 수는 다운비트로 정한다 (None).
+    B. Beat This!가 8분음표 하나하나를 박으로 찍음 (여수 밤바다): 다운비트 사이가 대부분 박 6개이고
+       박 간격이 0.4 s(150 BPM)보다 짧음. 박 3개를 점4분음표 하나로 묶고, 마디는 2박(6/8)으로 쓴다.
+    A는 11곡(4/4 10곡, 12/8 1곡), B는 여수 밤바다 1곡으로 정한 기준이다.
     """
     b = np.asarray(beats, dtype=float)
     if len(b) < 2 or len(onsets) == 0:
-        return False, 0.0
+        return False, 0.0, None
     v, level = beat_levels(b)
     trip = triplet_share(np.interp(onsets, b, np.arange(len(b))))
-    is_compound = level >= COMPOUND_MIN_LEVEL and trip >= COMPOUND_MIN_TRIPLET
-    return is_compound, (60.0 / v if v else 0.0)
+    if level >= COMPOUND_MIN_LEVEL and trip >= COMPOUND_MIN_TRIPLET:
+        return True, (60.0 / v if v else 0.0), None
+    if len(downbeats) >= 2 and estimate_beats_per_bar(b, np.asarray(downbeats, dtype=float)) == 6:
+        _, eighth = estimate_bpm(b)
+        if eighth < EIGHTH_LEVEL_MAX_INTERVAL:
+            return True, 60.0 / (3 * eighth), 2
+    return False, (60.0 / v if v else 0.0), None
 
 
 def drum_bar_phase(midi: pretty_midi.PrettyMIDI, beats: Sequence[float],
@@ -367,9 +391,9 @@ def align_pretty_midi(midi: pretty_midi.PrettyMIDI, beats: Sequence[float],
         compound = False
         if auto_meter:
             onsets = [n.start for inst in midi.instruments for n in inst.notes]
-            found, dotted_bpm = detect_compound(beats, onsets)
+            found, dotted_bpm, bar_beats = detect_compound(beats, onsets, downbeats)
             if found:
-                beats, downbeats = fix_beats(beats, downbeats, dotted_bpm)
+                beats, downbeats = fix_beats(beats, downbeats, dotted_bpm, bar_beats)
                 compound = True
 
     bpm, median_interval = estimate_bpm(beats)
@@ -441,7 +465,8 @@ def align_midi(midi_path: str | Path, out_path: str | Path, *,
                downbeats: Sequence[float] | None = None,
                device: str = "auto", bpm: float | None = None,
                triplets: bool = False, compound: bool | None = None,
-               downbeat_shift: int | None = None, auto_meter: bool = True) -> AlignResult:
+               downbeat_shift: int | None = None, auto_meter: bool = True,
+               drum_sync: bool = True) -> AlignResult:
     """MIDI 파일을 박에 맞춰 보정해 저장한다.
 
     audio_path를 주면 Beat This!로 박을 찾고, beats/downbeats를 주면 그대로 쓴다.
@@ -455,8 +480,10 @@ def align_midi(midi_path: str | Path, out_path: str | Path, *,
     if bpm:
         beats, downbeats = fix_beats(beats, downbeats, bpm)
     midi = pretty_midi.PrettyMIDI(str(midi_path))
+    sync = _drum_sync(midi) if drum_sync else None
     aligned, result = align_pretty_midi(midi, beats, downbeats, triplets=triplets, compound=compound,
                                         downbeat_shift=downbeat_shift, auto_meter=auto_meter)
+    result.drum_sync = sync
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     aligned.write(str(out_path))
     return result
@@ -522,7 +549,8 @@ class BatchReport:
 def align_batch(midi_dir: str | Path, out_dir: str | Path, *,
                 audio_dir: str | Path | None = None,
                 beats_dir: str | Path | None = None,
-                device: str = "auto", auto_meter: bool = True, log=print) -> BatchReport:
+                device: str = "auto", auto_meter: bool = True, drum_sync: bool = True,
+                log=print) -> BatchReport:
     """폴더 단위로 보정한다. 곡 이름이 같은 MIDI와 오디오(또는 박 JSON)를 짝짓는다.
 
     출력: out_dir/곡_aligned.mid, 오디오로 박을 찾았다면 out_dir/곡_beats.json도 저장.
@@ -545,7 +573,7 @@ def align_batch(midi_dir: str | Path, out_dir: str | Path, *,
             else:
                 beats, downbeats = load_beats(sources[song])
             r = align_midi(midis[song], out_dir / f"{song}_aligned.mid", beats=beats, downbeats=downbeats,
-                           auto_meter=auto_meter)
+                           auto_meter=auto_meter, drum_sync=drum_sync)
             report.succeeded.append(song)
             shift = f" · bar shift {r.downbeat_shift:+d}" if r.downbeat_shift else ""
             log(f"[{i}/{len(songs)}] OK   {song} · BPM {r.bpm:.2f} · {r.meter} · notes {r.note_count}{shift}")
@@ -585,6 +613,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--bpm", type=float, help="곡의 실제 템포. 1.5배·2배·절반으로 찍힌 박을 이 템포로 다시 센다 (한 곡 모드)")
     p.add_argument("--triplets", action="store_true",
                    help="박마다 16분음표/셋잇단 8분음표 중 맞는 칸으로 정렬 (4/4 곡 안의 셋잇단, 한 곡 모드)")
+    p.add_argument("--no-drum-sync", action="store_true",
+                   help="드럼 기준 타이밍 보정(drum_sync.py)을 끈다")
     p.add_argument("--no-auto-meter", action="store_true",
                    help="자동 판별(12/8 감지, 드럼 기준 마디선)을 끈다")
     p.add_argument("--compound", action="store_true", default=None,
@@ -607,7 +637,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if bool(args.audio_dir) == bool(args.beats_dir):
             p.error("--audio-dir와 --beats-dir 중 하나만 주세요.")
         report = align_batch(args.midi_dir, args.out_dir, audio_dir=args.audio_dir,
-                             beats_dir=args.beats_dir, device=args.device, auto_meter=not args.no_auto_meter)
+                             beats_dir=args.beats_dir, device=args.device, auto_meter=not args.no_auto_meter,
+                             drum_sync=not args.no_drum_sync)
         return 1 if report.failed else 0
 
     if not (args.midi and args.out):
@@ -622,8 +653,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_beats(args.save_beats, beats, downbeats)
     r = align_midi(args.midi, args.out, beats=beats, downbeats=downbeats, bpm=args.bpm,
                    triplets=args.triplets, compound=args.compound, downbeat_shift=args.downbeat_shift,
-                   auto_meter=not args.no_auto_meter)
+                   auto_meter=not args.no_auto_meter, drum_sync=not args.no_drum_sync)
     extra = f" · triplet beats {r.triplet_beats}" if args.triplets and not r.compound else ""
+    if r.drum_sync:
+        extra += f" · drum sync {r.drum_sync.moved_notes} notes (max {r.drum_sync.max_shift * 1000:.0f} ms)"
     extra += f" · bar shift {r.downbeat_shift:+d}" if r.downbeat_shift else ""
     meter = f"{r.meter} (dotted quarter = {r.bpm:.2f})" if r.compound else r.meter
     print(f"BPM {r.bpm:.2f} · {meter} · notes {r.note_count} · beat offset {r.beat_offset}{extra} → {args.out}")

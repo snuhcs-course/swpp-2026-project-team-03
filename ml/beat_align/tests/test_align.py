@@ -507,11 +507,35 @@ def test_beat_levels_and_triplet_share():
 
 def test_detect_compound():
     det, onsets = _compound_song()
-    found, bpm = detect_compound(det, onsets)
-    assert found and bpm == pytest.approx(100, abs=2)
+    found, bpm, bar = detect_compound(det, onsets)
+    assert found and bpm == pytest.approx(100, abs=2) and bar is None
     simple = np.arange(0, 60) * 0.5
-    assert detect_compound(simple, [k * 0.125 for k in range(200)])[0] is False
-    assert detect_compound([], [0.1]) == (False, 0.0)
+    assert detect_compound(simple, [k * 0.125 for k in range(200)], simple[::4])[0] is False
+    assert detect_compound([], [0.1]) == (False, 0.0, None)
+
+
+def test_detect_compound_from_eighth_note_beats():
+    # 점4분음표 = 0.9 s 겹박자를 Beat This!가 8분음표(0.3 s)마다 찍고, 다운비트를 6박마다 찍은 경우
+    eighths = np.arange(0, 120) * 0.3
+    found, bpm, bar = detect_compound(eighths, [k * 0.3 for k in range(100)], eighths[::6])
+    assert found and bpm == pytest.approx(60 / 0.9, abs=0.5) and bar == 2
+    # 같은 6박 마디라도 박이 느리면(4분음표 박의 6/4) 겹박자로 보지 않는다
+    quarters = np.arange(0, 60) * 0.6
+    assert detect_compound(quarters, [k * 0.6 for k in range(50)], quarters[::6])[0] is False
+
+
+def test_eighth_note_beats_become_six_eight():
+    eighths = np.arange(0, 120) * 0.3
+    out, r = align_pretty_midi(make_midi([(60, k * 0.3, k * 0.3 + 0.2) for k in range(100)]), eighths, eighths[::6])
+    ts = out.time_signature_changes[0]
+    assert r.compound and (ts.numerator, ts.denominator) == (6, 8)
+    assert r.bpm == pytest.approx(60 / 0.9, abs=0.5)
+
+
+def test_fix_beats_counts_one_third_intervals():
+    det = np.concatenate([np.arange(0, 5) * 0.9, 3.6 + np.arange(1, 31) * 0.3])   # 점4분음표 4간격, 이어서 8분음표 30개
+    new, _ = fix_beats(det, [], 60 / 0.9)
+    assert np.allclose(new, np.arange(0, 15) * 0.9, atol=1e-6)
 
 
 def test_auto_compound_end_to_end():
@@ -532,3 +556,31 @@ def test_cli_no_auto_meter(tmp_path, capsys):
     args = ["--midi", str(tmp_path / "in.mid"), "--beats", str(tmp_path / "b.json"), "--out", str(tmp_path / "o.mid")]
     assert main(args) == 0 and "bar shift -1" in capsys.readouterr().out
     assert main(args + ["--no-auto-meter"]) == 0 and "bar shift" not in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------
+# 드럼 기준 타이밍 보정 (align_midi에서 기본으로 켜짐)
+# ----------------------------------------------------------------------
+def test_align_midi_runs_drum_sync_by_default(tmp_path, capsys):
+    from align import main, save_beats
+    beats = np.arange(0, 33) * 0.5
+    pm = pretty_midi.PrettyMIDI()
+    d = pretty_midi.Instrument(program=0, is_drum=True)
+    d.notes = [pretty_midi.Note(100, 38, t, t + 0.1) for t in beats[1::2]] + \
+              [pretty_midi.Note(100, 36, t, t + 0.1) for t in beats[::4]]
+    g = pretty_midi.Instrument(program=29)
+    g.notes = [pretty_midi.Note(100, 60, t + 0.07, t + 0.3) for t in beats[:-1]]   # 기타가 70 ms 늦음
+    pm.instruments += [d, g]
+    pm.write(str(tmp_path / "in.mid"))
+    save_beats(tmp_path / "b.json", list(beats), list(beats[::4]))
+    r = align_midi(tmp_path / "in.mid", tmp_path / "o.mid", beats=list(beats), downbeats=list(beats[::4]))
+    assert r.drum_sync is not None and r.drum_sync.moved_notes == 32
+    s16 = 0.125
+    on = [round(n.start / s16, 3) for n in pretty_midi.PrettyMIDI(str(tmp_path / "o.mid")).instruments[1].notes]
+    assert all(x == int(x) and int(x) % 4 == 0 for x in on)                    # 모두 박 위로
+    r = align_midi(tmp_path / "in.mid", tmp_path / "o2.mid", beats=list(beats), downbeats=list(beats[::4]),
+                   drum_sync=False)
+    assert r.drum_sync is None
+    args = ["--midi", str(tmp_path / "in.mid"), "--beats", str(tmp_path / "b.json"), "--out", str(tmp_path / "o3.mid")]
+    assert main(args) == 0 and "drum sync 32 notes" in capsys.readouterr().out
+    assert main(args + ["--no-drum-sync"]) == 0 and "drum sync" not in capsys.readouterr().out
