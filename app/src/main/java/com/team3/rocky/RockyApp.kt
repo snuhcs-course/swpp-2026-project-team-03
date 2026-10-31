@@ -9,7 +9,9 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -77,10 +79,16 @@ import com.team3.rocky.band.BandRepository
 import com.team3.rocky.band.LocalBandRepository
 import com.team3.rocky.band.PickScoreScreen
 import com.team3.rocky.band.ShareToBandScreen
+import com.team3.rocky.progress.DemoProgress
+import com.team3.rocky.progress.JobProgress
+import com.team3.rocky.progress.ProgressSource
+import com.team3.rocky.progress.Stage
+import com.team3.rocky.progress.formatEta
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 // ---------- 화면 목록 ----------
 sealed class Screen {
@@ -450,26 +458,28 @@ fun UploadScreen(onBack: () -> Unit, onStart: (String) -> Unit) {
     }
 }
 
-// ---------- 4. 처리 중 (시연용 애니메이션) ----------
+// ---------- 4. 처리 중 (진행률 · 남은 시간) ----------
 @Composable
-fun ProcessingScreen(title: String, onDone: () -> Unit) {
+fun ProcessingScreen(title: String, onDone: () -> Unit, source: ProgressSource = DemoProgress) {
     val cs = MaterialTheme.colorScheme
-    val steps = listOf(
-        "채보 중" to "음원에서 악기별 음을 찾고 있어요",
-        "박자 맞추는 중" to "박과 마디 위치를 찾고 있어요",
-        "밴드 편곡 중" to "고른 악기로 악보를 만들고 있어요",
-    )
-    var current by remember { mutableStateOf(0) }
+    var state by remember { mutableStateOf<JobProgress?>(null) }
     LaunchedEffect(Unit) {
-        for (i in steps.indices) {
-            current = i
-            delay(2200)
-        }
-        current = steps.size
-        delay(600)
+        source.track("demo").collect { state = it }
+        delay(500)
         onDone()
     }
-    val progress by animateFloatAsState(targetValue = current / steps.size.toFloat())
+    val p = state
+    // 서버는 5초 구간이 끝날 때마다 한 번씩 알려주므로, 그 사이를 부드럽게 이어 준다.
+    val shown by animateFloatAsState(
+        targetValue = p?.overall ?: 0f,
+        animationSpec = tween(durationMillis = 400, easing = LinearEasing),
+        label = "overall",
+    )
+    val currentIndex = when {
+        p == null -> 0
+        p.done -> Stage.entries.size
+        else -> p.stage.ordinal
+    }
 
     Column(
         Modifier.fillMaxSize().padding(28.dp),
@@ -478,29 +488,56 @@ fun ProcessingScreen(title: String, onDone: () -> Unit) {
         Text(title, fontSize = 15.sp, color = cs.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(6.dp))
         Text("악보를 만드는 중이에요", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(36.dp))
-        steps.forEachIndexed { i, (name, desc) ->
-            Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(20.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${(shown * 100).roundToInt()}", fontSize = 64.sp, fontWeight = FontWeight.Black,
+                color = cs.primary, lineHeight = 64.sp,
+            )
+            Text("%", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = cs.primary,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (p?.done == true) "완료!" else formatEta(p?.etaSec),
+                fontSize = 15.sp, color = cs.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(cs.surfaceVariant)) {
+            Box(Modifier.fillMaxWidth(shown).height(8.dp).background(cs.primary))
+        }
+        Spacer(Modifier.height(28.dp))
+        Stage.entries.forEachIndexed { i, stage ->
+            val active = i == currentIndex
+            Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                     when {
-                        i < current -> Text("✓", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = cs.primary)
-                        i == current -> CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 3.dp)
+                        i < currentIndex -> Text("✓", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = cs.primary)
+                        active -> CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 3.dp)
                         else -> Text("${i + 1}", fontSize = 18.sp, color = cs.onSurfaceVariant)
                     }
                 }
                 Spacer(Modifier.width(16.dp))
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text(
-                        name, fontSize = 19.sp, fontWeight = FontWeight.Bold,
-                        color = if (i <= current) cs.onSurface else cs.onSurfaceVariant,
+                        stage.title, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                        color = if (i <= currentIndex) cs.onSurface else cs.onSurfaceVariant,
                     )
-                    Text(desc, fontSize = 13.sp, color = cs.onSurfaceVariant)
+                    Text(
+                        // 채보 중에는 MuScriptor가 처리한 5초 구간 수를 그대로 보여준다.
+                        if (active && p != null && stage == Stage.TRANSCRIBE && p.total > 1)
+                            "5초 구간 ${p.completed} / ${p.total} 처리"
+                        else stage.desc,
+                        fontSize = 13.sp, color = cs.onSurfaceVariant,
+                    )
+                }
+                if (active && p != null) {
+                    Text(
+                        "${(p.stageFraction * 100).roundToInt()}%",
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold, color = cs.primary,
+                    )
                 }
             }
-        }
-        Spacer(Modifier.height(32.dp))
-        Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(cs.surfaceVariant)) {
-            Box(Modifier.fillMaxWidth(progress).height(8.dp).background(cs.primary))
         }
     }
 }
