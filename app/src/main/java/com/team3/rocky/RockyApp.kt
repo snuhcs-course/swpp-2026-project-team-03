@@ -51,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +70,13 @@ import com.team3.rocky.auth.AuthRepository
 import com.team3.rocky.auth.LoginScreen
 import com.team3.rocky.auth.SignUpScreen
 import com.team3.rocky.auth.User
+import com.team3.rocky.band.BandDetailScreen
+import com.team3.rocky.band.BandJoinScreen
+import com.team3.rocky.band.BandListScreen
+import com.team3.rocky.band.BandRepository
+import com.team3.rocky.band.LocalBandRepository
+import com.team3.rocky.band.PickScoreScreen
+import com.team3.rocky.band.ShareToBandScreen
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -84,14 +92,21 @@ sealed class Screen {
     object Instruments : Screen()                                 // 2. 악기 선택
     object Upload : Screen()                                      // 3. 음원 업로드
     object Processing : Screen()                                  // 4. 처리 중
-    class Result(val work: Work, val fresh: Boolean) : Screen()   // 5. 결과
+    // 5. 결과. 밴드에서 열면 myPart(이 밴드에서 내 악기) 악보를 먼저 보여준다.
+    class Result(val work: Work, val fresh: Boolean, val myPart: String? = null) : Screen()
     class Export(val work: Work) : Screen()                       // 6. 내보내기
+    object Bands : Screen()                                       // 7. 나의 밴드
+    object BandJoin : Screen()                                    // 7-1. 밴드 만들기·참여
+    class BandDetail(val bandId: Long) : Screen()                 // 7-2. 밴드 상세
+    class ShareToBand(val work: Work) : Screen()                  // 7-3. 결과 → 밴드에 공유
+    class PickScore(val bandId: Long) : Screen()                  // 7-4. 밴드 → 보관함 악보 공유
 }
 
 @Composable
 fun RockyApp() {
     val ctx = LocalContext.current
     val auth = remember { AuthRepository(ctx) }
+    val bands: BandRepository = remember { LocalBandRepository(ctx) }
     // 앱을 켤 때 로그인 상태가 남아 있으면 바로 홈, 아니면 로그인 화면에서 시작한다.
     var user by remember { mutableStateOf(auth.currentUser()) }
     val stack = remember { mutableStateListOf(if (user != null) Screen.Home else Screen.Login) }
@@ -115,13 +130,18 @@ fun RockyApp() {
                     auth.logout(); user = null; restart(Screen.Login)
                 })
             }
-            Screen.Home -> HomeScreen(
-                nickname = user?.nickname.orEmpty(),
-                // 회원가입 때 고른 악기를 새 악보의 기본 선택으로 쓴다.
-                onNew = { selected = user?.instruments.orEmpty().toSet(); songTitle = ""; go(Screen.Instruments) },
-                onStorage = { go(Screen.Storage) },
-                onAccount = { go(Screen.Account) },
-            )
+            Screen.Home -> {
+                val bandCount by produceState<Int?>(null, user) { value = user?.let { bands.myBands(it).size } }
+                HomeScreen(
+                    nickname = user?.nickname.orEmpty(),
+                    bandCount = bandCount,
+                    // 회원가입 때 고른 악기를 새 악보의 기본 선택으로 쓴다.
+                    onNew = { selected = user?.instruments.orEmpty().toSet(); songTitle = ""; go(Screen.Instruments) },
+                    onBands = { go(Screen.Bands) },
+                    onStorage = { go(Screen.Storage) },
+                    onAccount = { go(Screen.Account) },
+                )
+            }
             Screen.Storage -> StorageScreen(
                 onBack = { back() },
                 onOpen = { go(Screen.Result(it, fresh = false)) },
@@ -152,10 +172,51 @@ fun RockyApp() {
             is Screen.Result -> ResultScreen(
                 work = s.work,
                 fresh = s.fresh,
+                myPart = s.myPart,
                 onBack = { back() },
                 onExport = { go(Screen.Export(s.work)) },
+                onShareToBand = { go(Screen.ShareToBand(s.work)) },
             )
             is Screen.Export -> ExportScreen(work = s.work, onBack = { back() })
+
+            // ---------- 나의 밴드 ----------
+            Screen.Bands -> user?.let { u ->
+                BandListScreen(
+                    u, bands,
+                    onBack = { back() },
+                    onOpen = { go(Screen.BandDetail(it)) },
+                    onAdd = { go(Screen.BandJoin) },
+                )
+            }
+            Screen.BandJoin -> user?.let { u ->
+                BandJoinScreen(u, bands, onBack = { back() }, onDone = { id ->
+                    // 만들기·참여 화면은 뒤로가기에서 빼고 바로 밴드 상세로 간다.
+                    stack.removeAt(stack.lastIndex)
+                    go(Screen.BandDetail(id))
+                })
+            }
+            is Screen.BandDetail -> user?.let { u ->
+                BandDetailScreen(
+                    u, bands, s.bandId,
+                    onBack = { back() },
+                    onOpenScore = { work, part -> go(Screen.Result(work, fresh = false, myPart = part)) },
+                    onShareScore = { go(Screen.PickScore(s.bandId)) },
+                    // 밴드 멤버들이 맡은 악기를 새 악보의 기본 선택으로 쓴다.
+                    onNewScore = { insts -> selected = insts; songTitle = ""; go(Screen.Instruments) },
+                    onLeft = { back() },
+                )
+            }
+            is Screen.ShareToBand -> user?.let { u ->
+                ShareToBandScreen(
+                    u, bands, s.work,
+                    onBack = { back() },
+                    onShared = { back() },
+                    onAddBand = { go(Screen.BandJoin) },
+                )
+            }
+            is Screen.PickScore -> user?.let { u ->
+                PickScoreScreen(u, bands, s.bandId, onBack = { back() })
+            }
         }
     }
 }
@@ -194,11 +255,18 @@ fun Page(
 
 // ---------- 1. 홈 ----------
 @Composable
-fun HomeScreen(nickname: String, onNew: () -> Unit, onStorage: () -> Unit, onAccount: () -> Unit) {
+fun HomeScreen(
+    nickname: String,
+    bandCount: Int?,
+    onNew: () -> Unit,
+    onBands: () -> Unit,
+    onStorage: () -> Unit,
+    onAccount: () -> Unit,
+) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val count = remember { WorkStore.load(ctx).size }
-    Column(Modifier.fillMaxSize().padding(24.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("${nickname}님, 반가워요", color = cs.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1)
             TextButton(onClick = onAccount) { Text("내 정보") }
@@ -208,6 +276,16 @@ fun HomeScreen(nickname: String, onNew: () -> Unit, onStorage: () -> Unit, onAcc
         Text("어떤 곡이든, 우리 밴드 악보로", fontSize = 16.sp, color = cs.onSurfaceVariant)
         Spacer(Modifier.height(48.dp))
         BigCard("NEW", "새 악보 만들기", "음원을 올리면 밴드 악보로 바꿔드려요", cs.primary, cs.onPrimary, onNew)
+        Spacer(Modifier.height(16.dp))
+        BigCard(
+            "BAND", "나의 밴드",
+            when (bandCount) {
+                null -> " "
+                0 -> "멤버들과 악보를 함께 봐요"
+                else -> "참여 중인 밴드 ${bandCount}개"
+            },
+            cs.secondary, cs.onSecondary, onBands,
+        )
         Spacer(Modifier.height(16.dp))
         BigCard("STORAGE", "보관함", "저장한 악보 ${count}개", cs.surfaceVariant, cs.onSurface, onStorage)
     }
@@ -429,12 +507,21 @@ fun ProcessingScreen(title: String, onDone: () -> Unit) {
 
 // ---------- 5. 결과 (밴드 전체 악보 + 전체 재생) ----------
 @Composable
-fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () -> Unit) {
+fun ResultScreen(
+    work: Work,
+    fresh: Boolean,
+    onBack: () -> Unit,
+    onExport: () -> Unit,
+    onShareToBand: () -> Unit,
+    myPart: String? = null,
+) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
-    var saved by remember { mutableStateOf(!fresh) }
+    // 밴드에서 연 악보는 보관함에 없을 수 있으니 실제로 저장돼 있는지 확인한다.
+    var saved by remember { mutableStateOf(!fresh && WorkStore.load(ctx).any { it.id == work.id }) }
     var playing by remember { mutableStateOf(false) }
-    var selectedPart by remember { mutableStateOf<String?>(null) }
+    val bandPart = myPart?.takeIf { it in work.instruments }
+    var selectedPart by remember { mutableStateOf(bandPart) }
     val player = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { player.release() } }
 
@@ -481,13 +568,16 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
     }
 
     Page(work.title, onBack, bottom = {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = { WorkStore.add(ctx, work); saved = true }, enabled = !saved,
                 modifier = Modifier.weight(1f).height(52.dp),
-            ) { Text(if (saved) "저장됨 ✓" else "저장") }
+            ) { Text(if (saved) "저장됨 ✓" else "저장", maxLines = 1) }
+            OutlinedButton(onClick = onShareToBand, modifier = Modifier.weight(1f).height(52.dp)) {
+                Text("밴드 공유", maxLines = 1)
+            }
             OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f).height(52.dp)) {
-                Text("내보내기")
+                Text("내보내기", maxLines = 1)
             }
         }
     }) {
@@ -520,6 +610,13 @@ fun ResultScreen(work: Work, fresh: Boolean, onBack: () -> Unit, onExport: () ->
                     )
                 }
             }
+        }
+        if (bandPart != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "밴드에서 내 파트(${Demo.kor(bandPart)})를 먼저 보여드려요",
+                fontSize = 12.sp, color = cs.primary,
+            )
         }
         if (work.instruments.any { it in Demo.AI_GENERATED }) {
             Spacer(Modifier.height(6.dp))
