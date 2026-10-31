@@ -2,11 +2,19 @@
 
 This module opens a completed GP5 tab in the Tabtify browser editor and exports
 its printable layout to PDF. It does not perform MIDI-to-GP5 conversion.
+The editor navigation retries up to three times for transient network failures.
+If Tabtify's print SVG duplicates a numeric tempo mark on top of a tempo name,
+the converter removes only the overlapping copy before saving the PDF. The
+tempo name and the second numeric mark remain visible.
 
 ## Setup
 
-Install Node.js and Google Chrome, then run `npm install` in this directory.
-The dependencies are pinned in `package.json`. No account or API key is needed.
+Install Node.js, run `npm ci` in this directory, and install Playwright's
+Chromium browser with `npx playwright install chromium`. On Linux, the pinned
+Playwright container image `mcr.microsoft.com/playwright:v1.62.1-noble`
+provides the browser and its system libraries; run `npm ci` inside that
+container to install this module's Node dependencies. The versions are
+recorded in `package-lock.json`. No account or API key is needed.
 
 ## Convert
 
@@ -14,7 +22,7 @@ The dependencies are pinned in `package.json`. No account or API key is needed.
 node convert.js C:\path\to\input.gp5 C:\path\to\output.pdf
 ```
 
-Optional arguments: `--chrome C:\path\to\chrome.exe` to select Chrome,
+Optional arguments: `--chrome C:\path\to\chrome.exe` to select a specific browser,
 `--timeout-ms 120000` to allow a longer load, and `--force` to replace an
 existing PDF. The process exits nonzero if the GP5 cannot be opened or the PDF
 is not produced. The output is written only after conversion succeeds.

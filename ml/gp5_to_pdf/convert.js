@@ -8,6 +8,7 @@ const { PDFDocument } = require('pdf-lib');
 
 const EDITOR_URL = 'https://tabtify.com/tab';
 const DEFAULT_TIMEOUT_MS = 90_000;
+const NAVIGATION_ATTEMPTS = 3;
 
 function usage() {
   return 'Usage: node convert.js INPUT.gp5 OUTPUT.pdf [--chrome PATH] [--timeout-ms N] [--force]';
@@ -52,10 +53,56 @@ function parseArgs(argv) {
   return args;
 }
 
+async function openEditor(page, timeoutMs) {
+  let lastError;
+  for (let attempt = 1; attempt <= NAVIGATION_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await page.goto(EDITOR_URL, {
+        waitUntil: 'domcontentloaded', timeout: timeoutMs,
+      });
+      if (!response?.ok()) throw new Error(`Tabtify returned HTTP ${response?.status() ?? 'unknown'}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === NAVIGATION_ATTEMPTS) break;
+      await page.waitForTimeout(2000);
+    }
+  }
+  throw lastError;
+}
+
+async function removeOverlappingTempoDuplicate(printView) {
+  return printView.evaluate(() => {
+    let removed = 0;
+    for (const svg of document.querySelectorAll('svg')) {
+      const texts = [...svg.querySelectorAll('text')];
+      for (let index = 1; index + 3 < texts.length; index += 1) {
+        const [firstSymbol, firstBpm, name, secondSymbol, secondBpm] = texts.slice(index - 1, index + 4);
+        const bpm = firstBpm.textContent?.trim();
+        if (!/^=\s*\d+(?:\.\d+)?$/.test(bpm) || bpm !== secondBpm.textContent?.trim()) continue;
+        const symbol = firstSymbol.textContent || '';
+        if (!/\p{L}/u.test(name.textContent || '') || symbol !== secondSymbol.textContent ||
+            [...symbol].length !== 1 || symbol.codePointAt(0) < 0xE000) continue;
+        const first = firstBpm.getBoundingClientRect();
+        const label = name.getBoundingClientRect();
+        const second = secondBpm.getBoundingClientRect();
+        const overlap = Math.min(first.right, label.right) - Math.max(first.left, label.left);
+        if (Math.abs(first.top - label.top) > 2 || Math.abs(first.top - second.top) > 2) continue;
+        if (overlap < first.width / 2 || second.left < label.right || second.left - label.right > 30) continue;
+        firstSymbol.remove();
+        firstBpm.remove();
+        removed += 1;
+        index += 3;
+      }
+    }
+    return removed;
+  });
+}
+
 async function convert(args) {
   const browser = await chromium.launch({
     headless: true,
-    ...(args.chrome ? { executablePath: path.resolve(args.chrome) } : { channel: 'chrome' }),
+    ...(args.chrome ? { executablePath: path.resolve(args.chrome) } : {}),
   });
   const temporaryPdf = `${args.output}.${process.pid}.tmp`;
   try {
@@ -70,7 +117,7 @@ async function convert(args) {
     await context.addInitScript(() => { window.print = () => {}; });
     const page = await context.newPage();
     page.setDefaultTimeout(args.timeoutMs);
-    await page.goto(EDITOR_URL, { waitUntil: 'domcontentloaded', timeout: args.timeoutMs });
+    await openEditor(page, args.timeoutMs);
     await page.locator('#alphatab-container').waitFor({ state: 'visible' });
 
     const score = page.locator('#alphatab-container');
@@ -136,6 +183,8 @@ async function convert(args) {
         (document.body.textContent || '').trim().length > 50,
       );
       await printView.evaluate(() => document.fonts.ready);
+      const duplicates = await removeOverlappingTempoDuplicate(printView);
+      if (duplicates) console.log(`Removed ${duplicates} overlapping duplicate tempo mark(s) from print view.`);
       const trackPdf = await PDFDocument.load(await printView.pdf({
         format: 'A4',
         printBackground: true,
