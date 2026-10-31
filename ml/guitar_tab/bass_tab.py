@@ -6,9 +6,11 @@
 4. chooses string/fret with tuttut (same weights as the guitar, b=0.1),
 5. writes bass.mid, tab_bass.txt and "<title> - bass.gp5".
 
-The tuning is given by the user (default 4-string standard); it is not detected.
+Tuning (auto, default): follows the guitar of the same MIDI, because a band tunes together.
+skyline_tab.choose_tuning picks the guitar tuning (standard / half step down / drop D) and the bass
+gets the 4-string version of it; no guitar notes -> 4-string standard. --tuning overrides it.
 
-    python bass_tab.py song_aligned.mid out_dir/ [--tuning bass_standard|bass_half_step_down|bass_drop_d|bass5_standard]
+    python bass_tab.py song_aligned.mid out_dir/ [--tuning auto|bass_standard|bass_half_step_down|bass_drop_d|bass5_standard]
 
 Input: beat-aligned MIDI from ml/beat_align. Reuses the helpers of skyline_tab.py.
 
@@ -27,6 +29,7 @@ BASS_TUNINGS = {  # thin -> thick, MIDI numbers
     "bass_drop_d": [43, 38, 33, 26],
     "bass5_standard": [43, 38, 33, 28, 23],     # + low B0
 }
+GUITAR_TO_BASS = {"standard": "bass_standard", "half_step_down": "bass_half_step_down", "drop_d": "bass_drop_d"}
 BASS_PROGRAM = 33  # electric bass (finger)
 
 st.TUNINGS.update(BASS_TUNINGS)
@@ -36,6 +39,15 @@ st.NAMES.update({k: [pretty_midi.note_number_to_name(p) for p in v] for k, v in 
 def bass_notes(pm):
     return sorted((n for i in pm.instruments if 32 <= i.program <= 39 and not i.is_drum for n in i.notes),
                   key=lambda n: (n.start, n.pitch))
+
+
+def choose_bass_tuning(pm):
+    """Bass tuning that follows the guitar tuning. Returns (bass_tuning, guitar_tuning or None)."""
+    g = st.guitar_notes(pm)
+    if not g:
+        return "bass_standard", None
+    gt = st.choose_tuning([n.pitch for n in g])
+    return GUITAR_TO_BASS[gt], gt
 
 
 def bass_line(notes, tuning):
@@ -48,10 +60,13 @@ def bass_line(notes, tuning):
     return out, {"notes_in": len(notes), "chord_notes_dropped": len(notes) - len(out), "octave_folded": folded}
 
 
-def main(src, out_dir, tuning="bass_standard"):
+def main(src, out_dir, tuning="auto"):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pm = pretty_midi.PrettyMIDI(src)
+    if tuning == "auto":
+        tuning, gt = choose_bass_tuning(pm)
+        print(f"tuning auto: guitar {gt or 'none'} -> {tuning}")
     notes, s = bass_line(bass_notes(pm), tuning)
     print(f"bass notes {len(notes)} · tuning {tuning} {st.NAMES[tuning]} · "
           f"chord notes dropped {s['chord_notes_dropped']} (kept lowest per onset) · octave-folded {s['octave_folded']}")
@@ -81,8 +96,8 @@ def cli(argv=None):
     p = argparse.ArgumentParser(description="Bass TAB (lowest note per onset) with tuttut + Guitar Pro export")
     p.add_argument("midi", help="beat-aligned MIDI (ml/beat_align output)")
     p.add_argument("out_dir", help="output folder")
-    p.add_argument("--tuning", choices=sorted(BASS_TUNINGS), default="bass_standard",
-                   help="bass tuning (default: 4-string standard E1 A1 D2 G2)")
+    p.add_argument("--tuning", choices=["auto"] + sorted(BASS_TUNINGS), default="auto",
+                   help="auto (default): follow the guitar tuning of the same MIDI; or a fixed bass tuning")
     a = p.parse_args(argv)
     main(a.midi, a.out_dir, a.tuning)
 

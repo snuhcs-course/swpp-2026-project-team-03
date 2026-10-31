@@ -8,7 +8,7 @@ from pathlib import Path
 import pretty_midi
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from bass_tab import BASS_TUNINGS, bass_line, bass_notes  # noqa: E402
+from bass_tab import BASS_TUNINGS, bass_line, bass_notes, choose_bass_tuning  # noqa: E402
 from full_score import build, guitar_tracks  # noqa: E402
 from skyline_tab import TUNINGS  # noqa: E402
 
@@ -48,6 +48,24 @@ def test_notes_below_the_low_string_move_up_an_octave():
     assert out[0].pitch == 38 and st["octave_folded"] == 1
     out, st = bass_line([N(26, 0.0, 1.0)], "bass_drop_d")            # D1 is the open low string
     assert out[0].pitch == 26 and st["octave_folded"] == 0
+
+
+def _with_guitar(pitches):
+    pm = pretty_midi.PrettyMIDI()
+    pm.instruments += [inst(29, [N(p, k * 0.5, k * 0.5 + 0.4) for k, p in enumerate(pitches)]), inst(33, [N(28, 0, 1)])]
+    return pm
+
+
+def test_bass_tuning_follows_the_guitar():
+    assert choose_bass_tuning(_with_guitar([40, 45, 52] * 50)) == ("bass_standard", "standard")
+    assert choose_bass_tuning(_with_guitar([39] * 5 + [50] * 95)) == ("bass_half_step_down", "half_step_down")
+    assert choose_bass_tuning(_with_guitar([38] * 5 + [50] * 95)) == ("bass_drop_d", "drop_d")
+
+
+def test_bass_tuning_without_guitar_is_standard():
+    pm = pretty_midi.PrettyMIDI()
+    pm.instruments.append(inst(33, [N(27, 0, 1)]))
+    assert choose_bass_tuning(pm) == ("bass_standard", None)
 
 
 def test_empty_bass():

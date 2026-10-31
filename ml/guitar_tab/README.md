@@ -86,14 +86,16 @@ MIDI에는 줄·프렛 정보가 없어서, MuseScore에서 MIDI를 TAB 보표�
 2. 조율 음역 밖의 음은 옥타브를 옮깁니다.
 3. tuttut로 줄·프렛을 고릅니다 (기타와 같은 가중치, `b=0.1`).
 
-조율은 자동으로 고르지 않고 사용자가 정합니다 (기본: 4현 표준 E1 A1 D2 G2).
+**조율 (자동, 기본):** 밴드는 보통 기타와 베이스를 같이 조율하므로, 같은 MIDI의 기타 조율을 따라갑니다. 기타 조율은 위 "동작" 1번 규칙(`choose_tuning`)으로 고르고, 베이스는 그 4현 버전을 씁니다 (표준 → E1 A1 D2 G2, 반음 내림 → D#1 G#1 C#2 F#2, Drop D → D1 A1 D2 G2). 기타 음이 없으면 4현 표준입니다. 기타는 표준인데 베이스만 낮게 조율한 곡은 잡지 못하고, 그런 낮은 음은 옥타브를 올립니다.
 
 ```bash
-python bass_tab.py "song_aligned.mid" out/song_bass/                                # 4현 표준
-python bass_tab.py "song_aligned.mid" out/song_bass/ --tuning bass_half_step_down   # 반음 내림 (예: Sweet Child O' Mine)
+python bass_tab.py "song_aligned.mid" out/song_bass/                                # 자동 (기타 조율 따라감)
+python bass_tab.py "song_aligned.mid" out/song_bass/ --tuning bass5_standard        # 조율 직접 지정
 ```
 
-`--tuning`: `bass_standard`, `bass_half_step_down`, `bass_drop_d`, `bass5_standard`(5현, 낮은 B0 추가).
+`--tuning`: `auto`(기본), `bass_standard`, `bass_half_step_down`, `bass_drop_d`, `bass5_standard`(5현, 낮은 B0 추가).
+
+14곡(10곡 테스트셋 + 사용자 평가 3곡, 2곡 겹침) 중 Sweet Child O' Mine만 기타가 반음 내림이라 베이스도 반음 내림이 되고, 나머지는 모두 표준입니다.
 출력: `bass.mid`, `tab_bass.txt`, `곡명 - bass.gp5`.
 
 ## 전체 악보 MIDI (`full_score.py`)
@@ -154,6 +156,6 @@ MuseScore로 열면 네 악기를 한 악보로 볼 수 있습니다. 운지는 
 python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov-report=term-missing
 ```
 
-2026-10-31 기준: 65 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 39%, `full_score.py` 65%.
+2026-10-31 기준: 67 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 44%, `full_score.py` 65%.
 tuttut를 부르는 `tab()`과 각 파일의 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
 `bass_tab.py`와 `full_score.py`는 사용자 평가 3곡(Sweet Child O' Mine, 한 페이지가 될 수 있게, 적재 - 우연을 믿어요)에서 이전에 임시 스크립트로 만든 베이스 .gp5와 전체 악보 MIDI와 결과가 같은 것을 확인했습니다.
