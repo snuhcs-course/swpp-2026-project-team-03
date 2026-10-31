@@ -64,6 +64,28 @@ that needs beats has to estimate them from the audio.
 Instruments are not collapsed to piano, guitar, bass, and drums. That mapping
 belongs to the arrangement stage.
 
+## Transcription progress
+
+MuScriptor transcribes in 5-second chunks and reports each finished chunk,
+but the `muscriptor transcribe` command drops those reports when it writes
+MIDI. `transcribe_with_progress.py` makes the same call through the Python
+API and writes one JSON line per finished chunk, so a server can show the app
+a percentage and the time left:
+
+```bash
+uvx --python 3.13 --from muscriptor==0.4.0 python ml/pipeline/transcribe_with_progress.py \
+    out/stems/no_vocals.wav out/transcription.mid --model large --progress out/progress.jsonl
+```
+
+```json
+{"stage": "transcribe", "completed": 12, "total": 30, "fraction": 0.4, "elapsed_sec": 61.8, "eta_sec": 92.7}
+```
+
+`eta_sec` is null until the first chunk finishes. On a 26-second clip
+(`small`, Mac CPU) its MIDI was byte-identical to the command's, and the
+estimate after the first chunk (38.5 s left) was within 2 s of the actual
+time. `audio_to_midi.sh` still uses the command.
+
 ## Running on the team GPU server (SGS)
 
 The team workspace on [SGS](https://sgs-docs.snucse.org/) has one A100 GPU and
