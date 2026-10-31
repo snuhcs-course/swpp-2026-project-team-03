@@ -78,6 +78,39 @@ python verify_gp5.py "out/song/song - skyline lead+rhythm.gp5" out/song/skyline_
 
 MIDI에는 줄·프렛 정보가 없어서, MuseScore에서 MIDI를 TAB 보표로 바꾸면 MuseScore가 운지를 새로 정합니다. 이 스크립트의 운지를 보려면 `.gp5`를 여세요.
 
+## 베이스 TAB (`bass_tab.py`)
+
+베이스는 나누지 않고 tuttut만 씁니다. 정렬된 MIDI의 베이스 트랙(MIDI 프로그램 32~39)을 모아서
+
+1. 같은 시각에 시작하는 음 중 **가장 낮은 음만** 남깁니다 (베이스 라인으로 보고 화음은 뺌).
+2. 조율 음역 밖의 음은 옥타브를 옮깁니다.
+3. tuttut로 줄·프렛을 고릅니다 (기타와 같은 가중치, `b=0.1`).
+
+조율은 자동으로 고르지 않고 사용자가 정합니다 (기본: 4현 표준 E1 A1 D2 G2).
+
+```bash
+python bass_tab.py "song_aligned.mid" out/song_bass/                                # 4현 표준
+python bass_tab.py "song_aligned.mid" out/song_bass/ --tuning bass_half_step_down   # 반음 내림 (예: Sweet Child O' Mine)
+```
+
+`--tuning`: `bass_standard`, `bass_half_step_down`, `bass_drop_d`, `bass5_standard`(5현, 낮은 B0 추가).
+출력: `bass.mid`, `tab_bass.txt`, `곡명 - bass.gp5`.
+
+## 전체 악보 MIDI (`full_score.py`)
+
+기타·베이스 처리 결과와 나머지 악기를 한 MIDI로 합칩니다. 순서는 기타(리드·리듬 또는 한 대) → 베이스 → 그 밖의 악기(피아노 등) → 드럼입니다.
+정렬된 MIDI의 기타·베이스 트랙은 처리된 것으로 바꾸고, 나머지 트랙은 그대로 복사합니다. 템포·박자표·해상도는 정렬된 MIDI를 따릅니다.
+기타 음색은 정렬된 MIDI의 첫 기타 트랙 음색을 씁니다.
+
+```bash
+python skyline_tab.py "song_aligned.mid" out/song/
+python bass_tab.py    "song_aligned.mid" out/song_bass/
+python full_score.py  "song_aligned.mid" out/song/ out/song_bass/ out/song_full_score.mid
+```
+
+베이스 폴더에 `bass.mid`가 없으면 베이스 없이 합칩니다 (정렬된 MIDI의 원래 베이스도 넣지 않음).
+MuseScore로 열면 네 악기를 한 악보로 볼 수 있습니다. 운지는 MIDI에 없으므로 TAB은 각 `.gp5`를 여세요.
+
 ## 결과 (`results/`, 10곡)
 
 입력은 `ml/beat_align`으로 정렬한 MuScriptor large 출력(10곡 테스트셋)입니다.
@@ -118,8 +151,9 @@ MIDI에는 줄·프렛 정보가 없어서, MuseScore에서 MIDI를 TAB 보표�
 ## 테스트
 
 ```bash
-python -m pytest -q --cov=skyline_tab --cov-report=term-missing
+python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov-report=term-missing
 ```
 
-2026-10-30 기준: 57 passed, `skyline_tab.py` 커버리지 74%.
-tuttut를 부르는 `tab()`과 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
+2026-10-31 기준: 65 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 39%, `full_score.py` 65%.
+tuttut를 부르는 `tab()`과 각 파일의 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
+`bass_tab.py`와 `full_score.py`는 사용자 평가 3곡(Sweet Child O' Mine, 한 페이지가 될 수 있게, 적재 - 우연을 믿어요)에서 이전에 임시 스크립트로 만든 베이스 .gp5와 전체 악보 MIDI와 결과가 같은 것을 확인했습니다.
