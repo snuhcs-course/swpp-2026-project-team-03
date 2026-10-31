@@ -1,0 +1,28 @@
+# CPU-only pod for copying files in and out of the volume.  No GPU is
+# allocated, so it is not subject to the 30-minute idle-GPU termination.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-files
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: muscriptor-data
+  containers:
+    - name: app
+      image: debian:bookworm
+      command: ['/bin/bash', '-c', 'sleep inf']
+      resources:
+        # the workspace has no guaranteed CPU or memory, so requests must be 0
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data
