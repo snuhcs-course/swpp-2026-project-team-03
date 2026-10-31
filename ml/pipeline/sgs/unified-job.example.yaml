@@ -1,0 +1,52 @@
+# Copy and set ROCKY_INPUT_AUDIO, ROCKY_OUTPUT_DIR and ROCKY_REQUESTED before apply.
+# This Job never deletes the PVC or an existing pod.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rocky-unified-example
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "1"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: muscriptor-data
+      containers:
+        - name: pipeline
+          image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+          command: ["/bin/bash", "-lc"]
+          args:
+            - >-
+              set -euo pipefail;
+              export HF_HOME=/data/cache/hf TORCH_HOME=/data/cache/torch
+              UV_CACHE_DIR=/data/cache/uv UV_TOOL_DIR=/data/cache/uv-tools
+              UV_PYTHON_INSTALL_DIR=/data/cache/python XDG_CACHE_HOME=/data/cache/xdg;
+              exec /data/rocky-unified/.venv/bin/python /data/pipeline/unified.py
+              "$ROCKY_INPUT_AUDIO" "$ROCKY_OUTPUT_DIR"
+              --requested "$ROCKY_REQUESTED" --resume
+          env:
+            - name: ROCKY_INPUT_AUDIO
+              value: /data/input/song.wav
+            - name: ROCKY_OUTPUT_DIR
+              value: /data/output_unified/song
+            - name: ROCKY_REQUESTED
+              value: piano,guitar,bass,drums
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: data
+              mountPath: /data

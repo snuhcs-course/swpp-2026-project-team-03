@@ -39,8 +39,10 @@ def main():
     parser.add_argument("output", type=Path, help="MIDI file to write")
     parser.add_argument("--model", default="large", help="small | medium | large | path to a .safetensors file")
     parser.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
+    parser.add_argument("--instruments", help="comma-separated MuScriptor instrument hints for a stem")
     parser.add_argument("--progress", type=Path, help="append progress as JSON lines to this file")
     args = parser.parse_args()
+    instruments = [name.strip() for name in args.instruments.split(",") if name.strip()] if args.instruments else None
 
     progress_file = args.progress.open("a", buffering=1) if args.progress else None
 
@@ -70,7 +72,7 @@ def main():
     events = []
     started = time.perf_counter()
     for event in model.transcribe(
-        args.audio, use_sampling=False, temperature=1.0, cfg_coef=1.0, instruments=None,
+        args.audio, use_sampling=False, temperature=1.0, cfg_coef=1.0, instruments=instruments,
         batch_size=None, no_eos_is_ok=True, beam_size=1, prelude_forcing=True,
     ):
         events.append(event)

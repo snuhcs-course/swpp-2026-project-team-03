@@ -1,5 +1,53 @@
 # ROCKY pipeline
 
+## Unified GPU workflow (Iteration 3, in progress)
+
+`unified.py` connects the current independent modules for **one song** on the
+SGS shared volume. It uses `htdemucs_6s` to separate six audio stems, then
+transcribes only four band stems (`drums`, `bass`, `guitar`, `piano`) with
+MuScriptor large. `vocals.wav` and `other.wav` remain Demucs audio outputs;
+neither is transcribed or merged. Beat This! receives `no_vocals.wav` (which
+still includes the `other` audio), then beat alignment applies its default drum sync. Existing
+guitar and bass are processed with skyline/tuttut. Only a user-requested
+instrument absent from the four-band-stem transcription is sent to MIDI-GPT. The
+final MIDI contains processed guitar/bass, every other original band track, and
+only the newly generated tracks (the MIDI-GPT `_band.mid` files are not merged
+again). If MIDI-GPT generates a missing guitar or bass, that part also goes
+through TAB processing before assembly.
+MIDI-GPT can generate notes past the input song's end; its raw `_only.mid` is
+retained for audit, while `generated_normalized/<part>.mid` is capped at the
+larger of the audio duration and the aligned MIDI end before TAB and assembly.
+
+On SGS, use the common Python 3.11 environment for model stages and the
+isolated Python 3.10 environment for guitar/bass TAB. The source paths are
+`/data/pipeline` and `/data/rocky-unified/ml/{beat_align,guitar_tab,midigpt}`.
+Set `HF_HOME`, `TORCH_HOME` and the uv cache paths to `/data/cache` in the GPU
+Job. Example inside that Job:
+
+```bash
+/data/rocky-unified/.venv/bin/python /data/pipeline/unified.py \
+  /data/input/song.wav /data/output_unified/song \
+  --requested piano,guitar,bass,drums --resume
+```
+
+`--requested` is the user's selected lineup. Omit it to preserve the
+transcribed lineup without creating missing parts. Existing requested parts
+are never regenerated. The output directory must be new, or contain a
+`manifest.json` from the same input and configuration when `--resume` is used.
+Every stage checks its files before marking completion. Failures leave the
+manifest in `failed` status with a log path; rerunning with `--resume` retries
+the failed stage. `full_score.mid` and `manifest.json` are the final contract.
+The stem MIDI files, `beats.json`, `aligned.mid`, TAB GP5 files, and model logs
+are retained under the same output directory for inspection.
+
+The branch's earlier `audio_to_midi.sh` remains a two-stage alternative.
+`unified.py` is an independent server workflow; Android still shows bundled
+demo results. GP5-to-PDF uses a separate browser/CPU runtime and is not part of
+this eight-step MIDI workflow yet. Instrument presence currently uses GM
+program groups and excludes tracks from the vocal stem; ambiguous instruments
+still need user review. Beat alignment assumes one tempo and one meter per
+song. The `htdemucs_6s` piano stem is experimental.
+
 One command that takes a song and produces a MIDI transcription. Later stages
 (beat alignment, arrangement, part generation) are added to the same script.
 
