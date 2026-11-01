@@ -8,7 +8,7 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unified import Runner, STEMS, TRANSCRIBE_STEMS, describe_tracks, merge_stem_midis, normalize_generated, present_parts, tab_ready  # noqa: E402
+from unified import Runner, STEMS, TRANSCRIBE_STEMS, describe_tracks, merge_stem_midis, merge_tracks, normalize_generated, present_parts, tab_ready  # noqa: E402
 
 
 def instrument(program, name, *, drum=False):
@@ -34,6 +34,34 @@ def test_merge_keeps_only_four_band_stems(tmp_path):
     assert sum(len(i.notes) for i in merged.instruments) == 4
     assert all(not i.name.startswith(("vocals:", "other:")) for i in merged.instruments)
     assert present_parts(merged) == {"piano", "guitar", "bass", "drums"}
+
+
+def test_piano_stem_tracks_become_one_piano_track(tmp_path):
+    paths = {}
+    for stem in STEMS:
+        midi = pretty_midi.PrettyMIDI()
+        if stem == "piano":
+            for program, notes in ((0, [(60, 0.0, 1.0)]), (2, [(60, 0.02, 1.5), (64, 2.0, 3.0)]), (16, [(67, 4.0, 5.0)])):
+                inst = pretty_midi.Instrument(program)
+                inst.notes = [pretty_midi.Note(90, p, s, e) for p, s, e in notes]
+                midi.instruments.append(inst)
+        else:
+            midi.instruments.append(instrument({"drums": 0, "bass": 33}.get(stem, 29), stem, drum=stem == "drums"))
+        midi.write(str(tmp_path / f"{stem}.mid"))
+        paths[stem] = tmp_path / f"{stem}.mid"
+    merged = merge_stem_midis(paths, tmp_path / "merged.mid")
+    pianos = [i for i in merged.instruments if i.name.startswith("piano:")]
+    assert [(i.name, i.program) for i in pianos] == [("piano: piano", 0)]
+    assert [(n.pitch, n.start, n.end) for n in pianos[0].notes] == [(60, 0.0, 1.5), (64, 2.0, 3.0), (67, 4.0, 5.0)]
+    assert present_parts(merged) == {"piano", "guitar", "bass", "drums"}
+
+
+def test_merge_tracks_cuts_overlapping_same_pitch():
+    a, b = pretty_midi.Instrument(0), pretty_midi.Instrument(2)
+    a.notes = [pretty_midi.Note(80, 60, 0.0, 2.0)]
+    b.notes = [pretty_midi.Note(100, 60, 1.0, 3.0)]
+    out = merge_tracks([a, b], 0, "piano: piano")
+    assert [(n.start, n.end) for n in out.notes] == [(0.0, 1.0), (1.0, 3.0)]
 
 
 def test_final_track_metadata_accepts_numpy_programs():

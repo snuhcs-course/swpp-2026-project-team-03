@@ -8,7 +8,10 @@ transcribes only four band stems (`drums`, `bass`, `guitar`, `piano`) with
 MuScriptor large. `vocals.wav` and `other.wav` remain Demucs audio outputs;
 neither is transcribed or merged. Beat This! receives `no_vocals.wav` (which
 still includes the `other` audio), then beat alignment applies its default drum sync. Existing
-guitar and bass are processed with skyline/tuttut. Only a user-requested
+guitar and bass are processed with skyline/tuttut. MuScriptor labels each piano-stem note as
+acoustic piano, electric piano or organ (the `--instruments` candidates), so one keyboard part
+comes out as up to three tracks; `merge_stems` joins them into one `piano: piano` track
+(program 0; the same pitch starting within 50 ms in two tracks is kept once). Only a user-requested
 instrument absent from the four-band-stem transcription is sent to MIDI-GPT. The
 final MIDI contains processed guitar/bass, every other original band track, and
 only the newly generated tracks (the MIDI-GPT `_band.mid` files are not merged
@@ -50,8 +53,7 @@ uses the existing `gp5_to_pdf` module on the shared volume.
 
 The frontend contract is `scores/score_outputs.json`: a full-band PDF plus a
 PDF for every present instrument family (guitar, bass, piano, drums).
-`scores/piano.pdf` contains acoustic piano, electric piano and organ tracks
-from the piano stem together. Guitar and bass PDFs come from their processed
+`scores/piano.pdf` contains the merged piano-stem track (and an AI generated piano, if any). Guitar and bass PDFs come from their processed
 GP5 files through `gp5_to_pdf/convert.js` (Tabtify). Full-band, piano and drums
 PDFs come from the assembled MIDI through MuseScore. The full-band PDF uses
 standard notation; guitar and bass part PDFs include TAB. MuseScore 3 omits

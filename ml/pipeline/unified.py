@@ -30,6 +30,11 @@ HINTS = {
     "piano": "acoustic_piano,electric_piano,organ",
 }
 TARGETS = ("piano", "guitar", "bass", "drums")
+# MuScriptor labels each note of the piano stem as one of the HINTS candidates, so one keyboard part
+# comes out as up to three tracks (acoustic piano / electric piano / organ). Guitar and bass are
+# regrouped later by their TAB stages; the piano stem has no such stage, so it is merged here.
+PIANO_STEM_PROGRAM = 0      # merged track: acoustic grand piano
+SAME_NOTE_WINDOW = 0.05     # same pitch starting within 50 ms in two tracks = one note
 
 
 def digest(path: Path) -> str:
@@ -70,16 +75,40 @@ def tab_ready(directory: Path, midi_names: tuple[str, ...]) -> bool:
             and any(p.is_file() and p.stat().st_size > 0 for p in directory.glob("*.gp5")))
 
 
+def merge_tracks(tracks: list[pretty_midi.Instrument], program: int, name: str) -> pretty_midi.Instrument:
+    """One track from several: a note repeated in two tracks (same pitch, onsets within
+    SAME_NOTE_WINDOW) is kept once with the later end; other overlaps of the same pitch are cut
+    at the next onset so that note-on/off pairs stay valid."""
+    notes = sorted((copy.copy(n) for t in tracks for n in t.notes), key=lambda n: (n.pitch, n.start, -n.end))
+    out: list[pretty_midi.Note] = []
+    for n in notes:
+        prev = out[-1] if out and out[-1].pitch == n.pitch else None
+        if prev is not None and n.start - prev.start < SAME_NOTE_WINDOW:
+            prev.end = max(prev.end, n.end)
+            prev.velocity = max(prev.velocity, n.velocity)
+            continue
+        if prev is not None and prev.end > n.start:
+            prev.end = n.start
+        out.append(n)
+    merged = pretty_midi.Instrument(program=program, name=name)
+    merged.notes = sorted(out, key=lambda n: (n.start, n.pitch))
+    return merged
+
+
 def merge_stem_midis(paths: dict[str, Path], output: Path) -> pretty_midi.PrettyMIDI:
-    """Keep every nonempty instrument transcription; vocal stem is excluded."""
+    """Keep every nonempty instrument transcription; vocal stem is excluded.
+    The piano stem's tracks (piano / electric piano / organ labels) become one piano track."""
     merged = pretty_midi.PrettyMIDI(initial_tempo=120, resolution=480)
     for stem in TRANSCRIBE_STEMS:
         midi = pretty_midi.PrettyMIDI(str(paths[stem]))
-        for inst in midi.instruments:
-            if inst.notes:
-                track = copy.deepcopy(inst)
-                track.name = f"{stem}: {inst.name or pretty_midi.program_to_instrument_name(inst.program)}"
-                merged.instruments.append(track)
+        tracks = [inst for inst in midi.instruments if inst.notes]
+        if stem == "piano" and tracks:
+            merged.instruments.append(merge_tracks(tracks, PIANO_STEM_PROGRAM, "piano: piano"))
+            continue
+        for inst in tracks:
+            track = copy.deepcopy(inst)
+            track.name = f"{stem}: {inst.name or pretty_midi.program_to_instrument_name(inst.program)}"
+            merged.instruments.append(track)
     if not merged.instruments:
         raise ValueError("All four instrument MuScriptor outputs are empty")
     merged.write(str(output))
@@ -191,7 +220,7 @@ class Runner:
         self.model_python = args.model_python.absolute()
         self.tab_python = args.tab_python.absolute()
         self.config = {
-            "pipeline_contract": 5,
+            "pipeline_contract": 6,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "requested": args.requested, "model": args.model,
             "midigpt_model": args.midigpt_model, "device": args.device,
