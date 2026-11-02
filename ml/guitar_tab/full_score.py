@@ -3,7 +3,8 @@
 Track order: guitar(s) from skyline_tab.py -> bass from bass_tab.py -> other instruments of the
 beat-aligned MIDI (piano, ...) -> drums. Guitar and bass tracks of the aligned MIDI are replaced, every
 other track is copied unchanged. Tempo, time signature and resolution come from the aligned MIDI.
-Each processed guitar part gets the sound (GM program) most of its notes had in the aligned MIDI.
+Each processed guitar part gets the sound (GM program) most of its notes had in the aligned MIDI;
+nylon (24) becomes steel acoustic (25), since the TAB allows 20 frets and a classical guitar usually has 19.
 
     python full_score.py song_aligned.mid guitar_out_dir/ bass_out_dir/ song_full_score.mid
 
@@ -18,6 +19,9 @@ import copy
 from pathlib import Path
 
 import pretty_midi
+
+
+NYLON, STEEL = 24, 25   # GM: Acoustic Guitar (nylon), Acoustic Guitar (steel)
 
 
 def is_guitar(i):
@@ -71,6 +75,8 @@ def build(aligned, guitars, basses):
     for g in guitars:
         g = copy.deepcopy(g)
         sound = part_sound(g, aligned, first)
+        if sound == NYLON:
+            sound = STEEL   # TAB allows 20 frets; a classical (nylon) guitar usually has 19
         if sound is not None:
             g.program = sound
         out.instruments.append(g)

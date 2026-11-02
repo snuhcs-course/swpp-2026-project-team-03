@@ -122,6 +122,13 @@ def test_part_sound_without_matching_notes_falls_back():
     assert part_sound(inst(0, [N(61, 7.0, 8.0)]), al, default=29) == 29
 
 
+def test_full_score_turns_nylon_into_steel_acoustic():
+    al = _two_sounds(nylon=5, overdrive=1)
+    part = inst(0, [N(60, k, k + 0.5) for k in range(5)], "Guitar")
+    assert part_sound(part, al, default=24) == 24                    # the vote itself is nylon
+    assert build(al, [part], []).instruments[0].program == 25
+
+
 def test_full_score_without_bass_drops_the_raw_bass():
     out = build(_aligned(), [inst(29, [N(64, 0, 1)], "Guitar")], [])
     assert [i.name for i in out.instruments] == ["Guitar", "piano", "drums"]
