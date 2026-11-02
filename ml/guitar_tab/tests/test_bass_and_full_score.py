@@ -9,7 +9,7 @@ import pretty_midi
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bass_tab import BASS_TUNINGS, bass_line, bass_notes, choose_bass_tuning  # noqa: E402
-from full_score import build, guitar_tracks  # noqa: E402
+from full_score import build, guitar_tracks, part_sound  # noqa: E402
 from skyline_tab import TUNINGS  # noqa: E402
 
 
@@ -85,14 +85,41 @@ def _aligned():
 
 
 def test_full_score_replaces_guitar_and_bass_and_keeps_the_rest():
-    guitars = [inst(29, [N(64, 0, 1)], "Guitar 1 (lead)"), inst(29, [N(52, 0, 1)], "Guitar 2 (rhythm)")]
+    guitars = [inst(29, [N(64, 0, 1)], "Guitar 1 (lead)"), inst(29, [N(48, 0, 1)], "Guitar 2 (rhythm)")]
     out = build(_aligned(), guitars, [inst(33, [N(28, 0, 1)], "Bass")])
     assert [i.name for i in out.instruments] == ["Guitar 1 (lead)", "Guitar 2 (rhythm)", "Bass (TAB processed)", "piano", "drums"]
-    assert [i.program for i in out.instruments[:2]] == [26, 26]      # sound of the first aligned guitar
+    # lead E4 came from "raw guitar 2" (29); rhythm C3 is an octave-moved C4 from "raw guitar 1" (26)
+    assert [i.program for i in out.instruments[:2]] == [29, 26]
     assert out.instruments[2].notes[0].pitch == 28 and out.instruments[-1].is_drum
     ts = out.time_signature_changes[0]
     assert (ts.numerator, ts.denominator) == (12, 8) and out.resolution == 480
     assert round(out.get_tempo_changes()[1][0]) == 150
+
+
+def _two_sounds(nylon, overdrive):
+    """Aligned MIDI with `nylon` notes on program 24 and `overdrive` notes on 29, one per onset."""
+    pm = pretty_midi.PrettyMIDI()
+    pm.instruments += [inst(24, [N(60, k, k + 0.5) for k in range(nylon)], "nylon"),
+                       inst(29, [N(64, k + 0.25, k + 0.5) for k in range(overdrive)], "overdrive")]
+    return pm
+
+
+def test_part_sound_is_the_majority_of_its_notes():
+    al = _two_sounds(nylon=2, overdrive=5)
+    part = inst(0, [N(60, k, k + 0.5) for k in range(2)] + [N(64, k + 0.25, k + 0.5) for k in range(5)])
+    assert part_sound(part, al, default=24) == 29
+
+
+def test_part_sound_tie_keeps_the_first_aligned_guitar():
+    al = _two_sounds(nylon=3, overdrive=3)
+    part = inst(0, [N(60, k, k + 0.5) for k in range(3)] + [N(64, k + 0.25, k + 0.5) for k in range(3)])
+    assert part_sound(part, al, default=24) == 24
+    assert part_sound(part, al, default=None) == 24                 # no default: lowest program
+
+
+def test_part_sound_without_matching_notes_falls_back():
+    al = _two_sounds(nylon=1, overdrive=1)
+    assert part_sound(inst(0, [N(61, 7.0, 8.0)]), al, default=29) == 29
 
 
 def test_full_score_without_bass_drops_the_raw_bass():

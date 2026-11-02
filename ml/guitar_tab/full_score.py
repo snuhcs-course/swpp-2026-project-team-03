@@ -3,6 +3,7 @@
 Track order: guitar(s) from skyline_tab.py -> bass from bass_tab.py -> other instruments of the
 beat-aligned MIDI (piano, ...) -> drums. Guitar and bass tracks of the aligned MIDI are replaced, every
 other track is copied unchanged. Tempo, time signature and resolution come from the aligned MIDI.
+Each processed guitar part gets the sound (GM program) most of its notes had in the aligned MIDI.
 
     python full_score.py song_aligned.mid guitar_out_dir/ bass_out_dir/ song_full_score.mid
 
@@ -12,6 +13,7 @@ bass_out_dir:   bass_tab.py output (bass.mid); if missing, the aligned MIDI's ba
 Written with Claude (AI); reviewed by Soobin Jo.
 """
 import argparse
+import collections
 import copy
 from pathlib import Path
 
@@ -34,15 +36,41 @@ def guitar_tracks(guitar_dir):
     raise FileNotFoundError(f"{d}: no skyline_lead_rhythm.mid or guitar.mid (run skyline_tab.py first)")
 
 
+def part_sound(part, aligned, default=None):
+    """Majority sound (GM program) of one processed guitar part.
+
+    Each processed note votes with the program of the aligned guitar note it came from: same onset
+    (skyline_tab keeps onsets), same pitch class (it may move notes by octaves), nearest pitch.
+    Ties go to `default` (the aligned MIDI's first guitar track), then to the lowest program.
+    Returns `default` when no note can be matched.
+    """
+    by_onset = collections.defaultdict(list)
+    for i in aligned.instruments:
+        if is_guitar(i):
+            for n in i.notes:
+                by_onset[round(n.start, 4)].append((n.pitch, i.program))
+    votes = collections.Counter()
+    for n in part.notes:
+        cands = [c for c in by_onset.get(round(n.start, 4), []) if (c[0] - n.pitch) % 12 == 0]
+        if cands:
+            votes[min(cands, key=lambda c: abs(c[0] - n.pitch))[1]] += 1
+    if not votes:
+        return default
+    top = max(votes.values())
+    winners = sorted(p for p, v in votes.items() if v == top)
+    return default if default in winners else winners[0]
+
+
 def build(aligned, guitars, basses):
     """aligned: PrettyMIDI; guitars/basses: processed Instrument lists. Returns a new PrettyMIDI."""
     out = pretty_midi.PrettyMIDI(initial_tempo=aligned.get_tempo_changes()[1][0], resolution=aligned.resolution)
     out.time_signature_changes = copy.deepcopy(aligned.time_signature_changes)
     out.key_signature_changes = copy.deepcopy(aligned.key_signature_changes)
-    # the processed guitar keeps the sound of the aligned MIDI's first guitar track
-    sound = next((i.program for i in aligned.instruments if is_guitar(i)), None)
+    # each processed guitar part (lead, rhythm or the single guitar) takes its own majority sound
+    first = next((i.program for i in aligned.instruments if is_guitar(i)), None)
     for g in guitars:
         g = copy.deepcopy(g)
+        sound = part_sound(g, aligned, first)
         if sound is not None:
             g.program = sound
         out.instruments.append(g)
