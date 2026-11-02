@@ -22,7 +22,7 @@ On SGS, use the common Python 3.11 environment for model stages and the
 isolated Python 3.10 environment for guitar/bass TAB. The source paths are
 `/data/pipeline` and `/data/rocky-unified/ml/{beat_align,guitar_tab,midigpt}`.
 Set `HF_HOME`, `TORCH_HOME` and the uv cache paths to `/data/cache` in the GPU
-Job. Example inside that Job:
+pod (`sgs/unified-pod.example.yaml`). Example inside that pod:
 
 ```bash
 /data/rocky-unified/.venv/bin/python /data/pipeline/unified.py \
@@ -42,9 +42,9 @@ are retained under the same output directory for inspection.
 
 ## PDF score publication
 
-Run the PDF stage as a separate CPU Job after the GPU MIDI stage. Copy
+Run the PDF stage as a separate CPU pod after the GPU MIDI stage. Copy
 `publish_scores.py` to `/data/pipeline`, then apply
-`sgs/score-pdf-job.example.yaml` with a unique Job name and the song ID filled
+`sgs/score-pdf-pod.example.yaml` with a unique pod name and the song ID filled
 in. The image installs MuseScore 3 and Poppler in its ephemeral filesystem and
 uses the existing `gp5_to_pdf` module on the shared volume.
 
@@ -159,7 +159,7 @@ time. `audio_to_midi.sh` still uses the command.
 
 ## Running on the team GPU server (SGS)
 
-The team workspace on [SGS](https://sgs-docs.snucse.org/) has one A100 GPU and
+The team workspace on [SGS](https://sgs-docs.snucse.org/) has one GPU and
 a 20 GiB volume, `muscriptor-data`, that already holds the MuScriptor `large`
 weights. No Hugging Face login is needed there. Set up `kubectl` and
 `kubelogin` as the SGS manual describes, and download the kubeconfig from the
@@ -198,18 +198,27 @@ skipped; delete that folder to redo a song.
 | `/data/pipeline/` | copy of this directory |
 | `/data/input/` | songs to process |
 | `/data/output/<name>/` | results, same layout as above |
-| `/data/cache/` | installed Python packages and downloaded Demucs weights (11 GiB) |
+| `/data/cache/` | installed Python packages and downloaded Demucs weights (7.1 GiB on 2026-11-02) |
 
 Things to know:
 
-- The workspace has **one GPU**. A second GPU pod is rejected until the first
-  one ends, so tell the team before a long run.
-- A GPU pod that leaves the GPU idle for 30 minutes is killed by SGS. The job
+- Run work as Pods, not Jobs (TA guidance, 2026-11). The `sgs/*-pod.example.yaml`
+  files and `gpu-job.yaml` are Pods despite the latter's name.
+- The workspace has **one GPU** (quota `requests.nvidia.com/gpu: 1`; a Pending
+  GPU pod already counts). A second GPU pod is rejected until the first one
+  ends, so tell the team before a long run. The team has a second SGS
+  workspace with one more GPU and a 50 GiB storage quota; it starts empty
+  (no volume, no environment), so running there needs its own volume and setup.
+- A GPU pod that leaves the GPU idle for 30 minutes is killed by SGS. The pipeline
   pod exits by itself when it finishes; do not keep GPU shells open.
-- The volume is on the `ferrari` node, so the job waits for a free GPU on that
-  node.
-- About 3.7 GiB of the volume is free. Put the weights of another large model
-  on a new volume (the workspace quota has 30 GiB left) and mount both.
+- The volume is on the `ferrari` node, so a GPU pod waits for a free GPU on that
+  node (the examples pin `kubernetes.io/hostname: ferrari`). On a busy evening
+  (2026-11-01) the wait was about 40 minutes.
+- On 2026-11-02, 4.5 GiB of the 20 GiB volume was free (`/data/model` 5.1 GiB,
+  `/data/cache` 7.1 GiB). The BS-RoFormer SW 6-stem weights (667 MB) fit; if a
+  larger model is added, put it on a new volume (the workspace quota has 30 GiB
+  left) and mount both. Check with
+  `kubectl exec <pod> -- df -h /data` before copying large files.
 - Deleting the `muscriptor-data` volume claim erases the weights and the
   installed packages. `sgs/volume.yaml` creates the volume; it is needed only
   in a new workspace.
