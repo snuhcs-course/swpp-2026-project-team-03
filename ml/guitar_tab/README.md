@@ -114,6 +114,21 @@ python full_score.py  "song_aligned.mid" out/song/ out/song_bass/ out/song_full_
 베이스 폴더에 `bass.mid`가 없으면 베이스 없이 합칩니다 (정렬된 MIDI의 원래 베이스도 넣지 않음).
 MuseScore로 열면 네 악기를 한 악보로 볼 수 있습니다. 운지는 MIDI에 없으므로 TAB은 각 `.gp5`를 여세요.
 
+## 키보드 연주 가능하게 (`piano_playable.py`)
+
+`full_score.py`는 합치기 전에 키보드 트랙(GM 0-7 피아노류, 16-23 오르간류)을 두 손으로 칠 수 있게 줄입니다 (`--no-keyboard-limit`이면 그대로 복사).
+MuScriptor가 길게 누른 화음(신스 패드 등)을 16분음표마다 다시 누르는 화음으로 적거나, 3옥타브에 걸친 9~10음 화음을 내는 경우가 있어서입니다.
+
+1. 다시 누르기 합치기: 한 음이 16분음표마다(중간에 16분 하나까지 빠져도 됨) 6번 이상 이어서 다시 눌리면 하나의 긴 음으로 합칩니다. 8분음표마다 반복하는 것은 그대로 둡니다.
+2. 손 제한: 같은 순간에 시작하는 음 중 오른손은 맨 위 음부터 14반음(9도) 아래까지, 왼손은 맨 아래 음부터 14반음 위까지 맡고, 어느 손에도 안 들어가는 음은 뺍니다. 손마다 최대 5음이고, 넘치면 바깥 음(오른손 맨 위, 왼손 맨 아래)은 남기고 옥타브 중복 음부터 뺍니다.
+
+피아노 stem이 피아노/일렉 피아노/오르간 트랙으로 나뉘어 있어도 한 사람이 치는 것으로 보고 함께 제한하며, 같은 순간 두 트랙에 있는 같은 음은 하나만 남깁니다.
+같은 순간에 시작하는 음만 봅니다. 앞에서 누른 채 이어지는 음은 세지 않으므로, 길게 누른 화음 위로 빠른 아르페지오가 지나가는 구간(예: Heavy Is the Crown 88~91마디)은 여전히 한 사람이 치기 어려울 수 있습니다.
+
+```bash
+python piano_playable.py "song_aligned.mid" out/song_keys.mid
+```
+
 ## 결과 (`results/`, 10곡)
 
 입력은 `ml/beat_align`으로 정렬한 MuScriptor large 출력(10곡 테스트셋)입니다.
@@ -154,9 +169,9 @@ MuseScore로 열면 네 악기를 한 악보로 볼 수 있습니다. 운지는 
 ## 테스트
 
 ```bash
-python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov-report=term-missing
+python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov=piano_playable --cov-report=term-missing
 ```
 
-2026-11-02 기준: 71 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 44%, `full_score.py` 75%.
+2026-11-02 기준: 80 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 44%, `full_score.py` 73%, `piano_playable.py` 91%.
 tuttut를 부르는 `tab()`과 각 파일의 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
 `bass_tab.py`와 `full_score.py`는 사용자 평가 3곡(Sweet Child O' Mine, 한 페이지가 될 수 있게, 적재 - 우연을 믿어요)에서 이전에 임시 스크립트로 만든 베이스 .gp5와 전체 악보 MIDI와 결과가 같은 것을 확인했습니다.
