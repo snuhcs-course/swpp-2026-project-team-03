@@ -102,7 +102,8 @@ python bass_tab.py "song_aligned.mid" out/song_bass/ --tuning bass5_standard    
 
 기타·베이스 처리 결과와 나머지 악기를 한 MIDI로 합칩니다. 순서는 기타(리드·리듬 또는 한 대) → 베이스 → 그 밖의 악기(피아노 등) → 드럼입니다.
 정렬된 MIDI의 기타·베이스 트랙은 처리된 것으로 바꾸고, 나머지 트랙은 그대로 복사합니다. 템포·박자표·해상도는 정렬된 MIDI를 따릅니다.
-기타 음색은 정렬된 MIDI의 첫 기타 트랙 음색을 씁니다.
+기타 음색은 파트(리드·리듬 또는 한 대)마다 다수결로 정합니다. 처리된 각 음이 정렬된 MIDI에서 같은 시각·같은 음이름의 원래 음에 붙어 있던 음색을 세고, 가장 많은 것을 씁니다(동점이면 첫 기타 트랙 음색).
+나일론(24)으로 정해지면 스틸 통기타(25)로 바꿉니다. TAB은 20프렛까지 쓰는데 클래식 기타는 보통 19프렛이기 때문입니다.
 
 ```bash
 python skyline_tab.py "song_aligned.mid" out/song/
@@ -156,6 +157,6 @@ MuseScore로 열면 네 악기를 한 악보로 볼 수 있습니다. 운지는 
 python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov-report=term-missing
 ```
 
-2026-10-31 기준: 67 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 44%, `full_score.py` 65%.
+2026-11-02 기준: 71 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 44%, `full_score.py` 75%.
 tuttut를 부르는 `tab()`과 각 파일의 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
 `bass_tab.py`와 `full_score.py`는 사용자 평가 3곡(Sweet Child O' Mine, 한 페이지가 될 수 있게, 적재 - 우연을 믿어요)에서 이전에 임시 스크립트로 만든 베이스 .gp5와 전체 악보 MIDI와 결과가 같은 것을 확인했습니다.
