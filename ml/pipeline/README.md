@@ -159,7 +159,7 @@ time. `audio_to_midi.sh` still uses the command.
 
 ## Running on the team GPU server (SGS)
 
-The team workspace on [SGS](https://sgs-docs.snucse.org/) has two GPUs and
+The team workspace on [SGS](https://sgs-docs.snucse.org/) has one GPU and
 a 20 GiB volume, `muscriptor-data`, that already holds the MuScriptor `large`
 weights. No Hugging Face login is needed there. Set up `kubectl` and
 `kubelogin` as the SGS manual describes, and download the kubeconfig from the
@@ -204,9 +204,11 @@ Things to know:
 
 - Run work as Pods, not Jobs (TA guidance, 2026-11). The `sgs/*-pod.example.yaml`
   files and `gpu-job.yaml` are Pods despite the latter's name.
-- The workspace has **two GPUs**, so two GPU pods should be able to run at the
-  same time, one song each (not tried yet); a third GPU pod is rejected until
-  one ends. Tell the team before a long run.
+- The workspace has **one GPU** (quota `requests.nvidia.com/gpu: 1`; a Pending
+  GPU pod already counts). A second GPU pod is rejected until the first one
+  ends, so tell the team before a long run. The team has a second SGS
+  workspace with one more GPU and a 50 GiB storage quota; it starts empty
+  (no volume, no environment), so running there needs its own volume and setup.
 - A GPU pod that leaves the GPU idle for 30 minutes is killed by SGS. The pipeline
   pod exits by itself when it finishes; do not keep GPU shells open.
 - The volume is on the `ferrari` node, so a GPU pod waits for a free GPU on that

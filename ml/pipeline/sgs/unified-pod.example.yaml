@@ -2,7 +2,7 @@
 # Copy, give the pod a unique name, set ROCKY_INPUT_AUDIO, ROCKY_OUTPUT_DIR and ROCKY_REQUESTED, then
 #   kubectl apply -f <copy>.yaml && kubectl logs -f <name>
 # and delete the finished pod (kubectl delete pod <name>). This pod never deletes the PVC or another pod.
-# SGS runs work as Pods (TA guidance, 2026-11); the workspace has two GPUs, so two such pods can run at once.
+# SGS runs work as Pods (TA guidance, 2026-11). The workspace has one GPU: a second GPU pod waits until this one ends.
 apiVersion: v1
 kind: Pod
 metadata:
