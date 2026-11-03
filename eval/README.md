@@ -57,6 +57,9 @@ bash rwc_separation/setup_env.sh                       # once: /data/envs/{sep,m
 
 Whole pipeline (band14): `ml/pipeline/unified.py` on the team SGS volume, as in
 `ml/pipeline/README.md`; times from the per-stage logs.
+T6 for the guitar and bass TAB: `python eval/t6_tab.py RESULTS_DIR` (one folder per song with `guitar/*.gp5`
+and `bass/*.gp5`; needs `pyguitarpro`). It checks each onset against the rules `ml/guitar_tab/skyline_tab.py`
+enforces (one note per string, no more notes than strings, fretted notes within 4 frets, frets 0-20).
 
 ## Additions
 
