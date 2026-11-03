@@ -2,77 +2,161 @@
 
 ## Unified GPU workflow (Iteration 3, in progress)
 
-`unified.py` connects the current independent modules for **one song** on the
-SGS shared volume. It uses `htdemucs_6s` to separate six audio stems, then
-transcribes only four band stems (`drums`, `bass`, `guitar`, `piano`) with
-MuScriptor large. `vocals.wav` and `other.wav` remain Demucs audio outputs;
-neither is transcribed or merged. Beat This! receives `no_vocals.wav` (which
-still includes the `other` audio), then beat alignment applies its default drum sync. Existing
-guitar and bass are processed with skyline/tuttut. Only a user-requested
-instrument absent from the four-band-stem transcription is sent to MIDI-GPT. The
-final MIDI contains processed guitar/bass, every other original band track, and
-only the newly generated tracks (the MIDI-GPT `_band.mid` files are not merged
-again). If MIDI-GPT generates a missing guitar or bass, that part also goes
-through TAB processing before assembly.
+> **SGS course rule:** Active deployment manifests under `sgs/` use
+> `kind: Pod`. The team confirmed that CPU, memory, and a PVC mount may be
+> added to the TA's Pod format, as in `pod-bench.yaml`. They pin to `ferrari`
+> and mount the existing `muscriptor-data` PVC at `/data`. Historical Job/PVC
+> manifests remain under `sgs/legacy/` for reference only; do not apply them.
+
+`unified.py` connects the current independent modules for **one song**. The
+server layout uses the SGS shared volume. The unified workflow now uses
+the fixed BS-RoFormer SW six-stem model to produce `vocals`, `drums`, `bass`,
+`guitar`, `piano`, and `other` audio. With a known original lineup, MuScriptor
+large transcribes only the declared original band instruments. An explicitly
+absent instrument is excluded from transcription, aligned MIDI and MIDI-GPT
+context. With an unknown original lineup, all four band stems are transcribed.
+For either lineup, Beat This! always receives `no_vocals.wav`, the sum of all
+five non-vocal stems including `other`; the original-lineup selection does not
+filter its audio. `vocals.wav` and `other.wav` are never transcribed or merged.
+Drum sync runs before alignment to Beat This!
+beats. Original instruments omitted from the requested output remain in the
+MIDI-GPT context but are removed from the final score.
+
+The app sends an original lineup (`--original unknown` for the entire song, or
+selected `keyboard,bass,guitar1/guitar2,drums`) and a required output lineup
+(`--requested` with the same instrument names). `guitar1` and `guitar2` mean
+one or two guitars, not independent checkboxes. `keyboard` covers piano,
+electric piano and organ. When the original is unknown, skyline first decides
+whether its guitar TAB should split; that result is treated as one or two
+original guitars for the same cases below:
+
+| Original guitars | Requested guitars | Action |
+| --- | --- | --- |
+| 2 | 2 | skyline `--split always` |
+| 2 | 1 | skyline `--split never`, compress chords into one playable part |
+| 1 | 1 | skyline `--split never` |
+| 1 | 2 | skyline `--split never`, then MIDI-GPT generates a separate second guitar |
+| 0 | 1 | MIDI-GPT generates one guitar |
+| 0 | 2 | rejected in this iteration |
+
+Only requested parts absent from the declared original (or detected original
+when unknown) are generated. A generated second guitar keeps the original
+guitar in MIDI-GPT's context; both receive independent TAB processing before
+final assembly. The MIDI-GPT `_band.mid` files are not merged again.
 MIDI-GPT can generate notes past the input song's end; its raw `_only.mid` is
 retained for audit, while `generated_normalized/<part>.mid` is capped at the
 larger of the audio duration and the aligned MIDI end before TAB and assembly.
 
-On SGS, use the common Python 3.11 environment for model stages and the
-isolated Python 3.10 environment for guitar/bass TAB. The source paths are
-`/data/pipeline` and `/data/rocky-unified/ml/{beat_align,guitar_tab,midigpt}`.
-Set `HF_HOME`, `TORCH_HOME` and the uv cache paths to `/data/cache` in the GPU
-Job. Example inside that Job:
+On SGS, model stages used the common Python 3.11
+environment and guitar/bass TAB used the isolated Python 3.10 environment.
+The source paths are `/data/pipeline` and
+`/data/rocky-unified/ml/{beat_align,guitar_tab,midigpt}`.
+Set `HF_HOME`, `TORCH_HOME` and the uv cache paths to `/data/cache`. The
+command below shows a MIDI/GP5-only run using the current source and the
+existing `/data` layout:
 
 ```bash
 /data/rocky-unified/.venv/bin/python /data/pipeline/unified.py \
-  /data/input/song.wav /data/output_unified/song \
-  --requested piano,guitar,bass,drums --resume
+  /data/input/song.wav /data/output_unified/new-song \
+  --original keyboard,bass,guitar1,drums \
+  --requested keyboard,bass,guitar2,drums --no-publish
 ```
 
-`--requested` is the user's selected lineup. Omit it to preserve the
-transcribed lineup without creating missing parts. Existing requested parts
-are never regenerated. The output directory must be new, or contain a
+For the current source, the first stage requires `bs-roformer-infer==0.1.5`
+and the fixed SW checkpoint/config. On the existing SGS environment,
+the team staged them at `/data/bsrofo/pylib` and `/data/bsrofo/models`:
+
+```bash
+uv pip install --python /data/rocky-unified/.venv/bin/python \
+  --target /data/bsrofo/pylib --no-deps \
+  bs-roformer-infer==0.1.5 beartype einops ml-collections absl-py \
+  rotary-embedding-torch requests urllib3 idna certifi charset-normalizer
+/data/rocky-unified/.venv/bin/python /data/pipeline/unified.py \
+  /data/input/song.wav /data/output_unified/new-song \
+  --original unknown --requested keyboard,bass,guitar1,drums \
+  --bsroformer-models-dir /data/bsrofo/models \
+  --bsroformer-lib-dir /data/bsrofo/pylib --no-publish
+```
+
+The model files must be under
+`/data/bsrofo/models/roformer-model-bs-roformer-sw-by-jarredou/` as
+`BS-Rofo-SW-Fixed.ckpt` and `BS-Rofo-SW-Fixed.yaml`. The adapter checks both
+SHA-256 values before inference and never downloads a model implicitly. It
+passes a safe `song.wav` name to inference, writes the six canonical stems as
+32-bit float WAVs, builds a peak-limited `no_vocals.wav` from all five non-vocal
+stems, and discards the
+large temporary inference files after success. The model and package paths
+can be changed with the two `--bsroformer-*` options. The sample command uses
+`--no-publish` because the GPU image may lack the PDF/MP3 tools;
+omit it once those tools are available to produce all deliverables.
+
+The Beat This! input rule raised the manifest contract to version 8. Start a **new**
+output directory; older `manifest.json` files cannot be resumed with this code.
+
+`--requested` is required. The output directory must be new, or contain a
 `manifest.json` from the same input and configuration when `--resume` is used.
 Every stage checks its files before marking completion. Failures leave the
 manifest in `failed` status with a log path; rerunning with `--resume` retries
 the failed stage. `full_score.mid` and `manifest.json` complete the GPU stage.
 The stem MIDI files, `beats.json`, `aligned.mid`, TAB GP5 files, and model logs
-are retained under the same output directory for inspection.
+are retained under the same output directory for inspection. By default,
+`unified.py` then publishes the PDFs and MP3 playback files before reporting
+completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
+`--resume` and without that flag to publish the same result.
 
-## PDF score publication
+## Automatic score and playback publication
 
-Run the PDF stage as a separate CPU Job after the GPU MIDI stage. Copy
-`publish_scores.py` to `/data/pipeline`, then apply
-`sgs/score-pdf-job.example.yaml` with a unique Job name and the song ID filled
-in. The image installs MuseScore 3 and Poppler in its ephemeral filesystem and
-uses the existing `gp5_to_pdf` module on the shared volume.
+`unified.py` calls `publish_scores.py` after assembling `full_score.mid`.
+This stage needs MuseScore, Poppler `pdfinfo`, Node.js, the `gp5_to_pdf`
+module with Playwright/Chromium, and access to Tabtify for guitar/bass GP5
+PDF export. That converter uploads the GP5 to Tabtify, so the caller must
+approve that service for the input score. Set `--musescore`, `--pdfinfo`,
+`--node`, and `--gp5-converter`
+if the executable or module paths differ from the defaults. MuseScore and
+`pdfinfo` are checked before model stages; Node and GP5 converter availability
+are checked if the finished MIDI contains guitar or bass. The earlier
+CPU Job is archived under `sgs/legacy/`. The active
+`sgs/score-pdf-pod.example.yaml` uses a CPU-only Pod, which releases the GPU
+after transcription and TAB processing. When the PDF/MP3 tools are installed
+in the GPU Pod, omitting `--no-publish` also lets `unified.py` run this stage
+automatically inside that Pod.
 
-The frontend contract is `scores/score_outputs.json`: a full-band PDF plus a
-PDF for every present instrument family (guitar, bass, piano, drums).
+The frontend contract is `scores/score_outputs.json` (version 3): a full-band
+PDF and MP3, plus a PDF and MP3 for every present instrument family (guitar,
+bass, piano, drums). The MP3 names follow the iteration 2 demo:
+`scores/band.mp3`, `scores/guitar.mp3`, `scores/bass.mp3`,
+`scores/piano.mp3`, and `scores/drums.mp3`. All playback audio is synthesized
+from `full_score.mid` or an instrument-only copy; it is not the original
+recording or a separated stem. The stage also writes `scores/<part>.mid` for each
+present instrument. When a second guitar is generated, `guitar.pdf` is the
+combined standard-notation score and `guitar_1.pdf` and `guitar_2.pdf` are
+separate TAB PDFs. Matching MIDI and MP3 files are also provided. When
+skyline splits two original guitars, `guitar.pdf` contains both TAB parts.
 `scores/piano.pdf` contains acoustic piano, electric piano and organ tracks
-from the piano stem together. Guitar and bass PDFs come from their processed
-GP5 files through `gp5_to_pdf/convert.js` (Tabtify). Full-band, piano and drums
+from the piano stem together. TAB PDFs for guitar and bass come from their
+processed GP5 files through `gp5_to_pdf/convert.js` (Tabtify). When MIDI-GPT
+adds a second guitar, the combined `guitar.pdf` uses MIDI notation while
+`guitar_1.pdf` and `guitar_2.pdf` carry the separate TABs. Full-band, piano and drums
 PDFs come from the assembled MIDI through MuseScore. The full-band PDF uses
 standard notation; guitar and bass part PDFs include TAB. MuseScore 3 omits
 GM drum pitches 39 (clap), 70 (maracas) and 82 (shaker) on import, so
 render-only MIDI copies map them to visible surrogate drum symbols. The
 original `full_score.mid` and `scores/drums.mid` keep their pitches; the
 JSON records the exact mapping and affected note counts. The JSON also records
-source paths, converter, pages, bytes and SHA-256. `manifest.json` points to
-that file through `score_outputs`, and `score_publication` becomes `complete`.
-Keeping this CPU stage separate releases the
-GPU after transcription and assembly.
+PDF and MP3 source paths, converter, bytes and SHA-256, plus PDF page counts.
+`manifest.json` points to that file through `score_outputs`, and
+`score_publication` becomes `complete` only after every requested artifact is
+valid. `--resume` rechecks the contract and regenerates missing artifacts.
 
 The branch's earlier `audio_to_midi.sh` remains a two-stage alternative.
 `unified.py` is an independent server workflow; Android still shows bundled
 demo results. Instrument presence currently uses GM
 program groups and excludes tracks from the vocal stem; ambiguous instruments
 still need user review. Beat alignment assumes one tempo and one meter per
-song. The `htdemucs_6s` piano stem is experimental.
+song. The SW piano stem still requires listening and score review.
 
-One command that takes a song and produces a MIDI transcription. Later stages
-(beat alignment, arrangement, part generation) are added to the same script.
+The sections below document the earlier `audio_to_midi.sh` alternative. Its
+stage table does not describe the full `unified.py` workflow above.
 
 | Stage | Tool | Status |
 | --- | --- | --- |
@@ -159,60 +243,62 @@ time. `audio_to_midi.sh` still uses the command.
 
 ## Running on the team GPU server (SGS)
 
-The team workspace on [SGS](https://sgs-docs.snucse.org/) has one A100 GPU and
-a 20 GiB volume, `muscriptor-data`, that already holds the MuScriptor `large`
-weights. No Hugging Face login is needed there. Set up `kubectl` and
-`kubelogin` as the SGS manual describes, and download the kubeconfig from the
-workspace page on https://sgs.snucse.org. In October 2026 SGS moved to a new
-cluster (`zest.snucse.org`); a kubeconfig from before the move no longer
-connects, so download it again if `kubectl` cannot find the server. Then, from
-the repository root:
+All active SGS YAML files in this directory are `apiVersion: v1`, `kind: Pod`.
+They pin to `ferrari` and mount the existing `muscriptor-data` PVC at `/data`.
+They do not create, resize, or delete the PVC. Keep this node choice because
+the team data resides there. Choose **one** GPU Pod workflow:
+
+| File | Role |
+| --- | --- |
+| `sgs/pod.yaml` | Interactive GPU shell (`gpu-shell05`) with `/data` access |
+| `sgs/unified-pod.example.yaml` | One-song GPU transcription/TAB runner; edit input, output, and lineups first |
+| `sgs/score-pdf-pod.example.yaml` | CPU-only PDF/MP3 publication for the matching run directory |
+| `sgs/files-pod.yaml` | Optional CPU-only transfer shell; do not apply if `rocky-files` already exists |
+
+The interactive shell stays running until stopped; run the pipeline inside it
+with `kubectl exec`, then copy results and release the GPU Pod:
 
 ```bash
-# 1. Start the file-transfer pod (no GPU).
-kubectl apply -f ml/pipeline/sgs/files-pod.yaml
-kubectl wait --for=condition=Ready pod/rocky-files
-
-# 2. Copy the pipeline code and the songs to the volume.
-export COPYFILE_DISABLE=1   # macOS only: keeps ._ metadata files out of the archive
-tar -C ml/pipeline -cf - . | kubectl exec -i rocky-files -- tar -C /data/pipeline -xf -
-tar -C <folder with songs> -cf - . | kubectl exec -i rocky-files -- tar -C /data/input -xf -
-
-# 3. Run. The pod processes every file in /data/input and exits.
-kubectl apply -f ml/pipeline/sgs/gpu-job.yaml
-kubectl logs -f rocky-pipeline
-
-# 4. Fetch the results, then remove the finished pod.
-mkdir -p outputs/pipeline
-kubectl exec rocky-files -- tar -C /data/output -cf - . | tar -C outputs/pipeline -xf -
-kubectl delete pod rocky-pipeline
+kubectl auth whoami
+kubectl -n ws-qt1ja5byz6220 apply -f ml/pipeline/sgs/pod.yaml
+kubectl -n ws-qt1ja5byz6220 get pod gpu-shell05
+kubectl -n ws-qt1ja5byz6220 exec -it gpu-shell05 -- bash
+# Run unified.py with the intended --original and --requested values.
+# Copy results with kubectl cp before deleting the Pod.
+kubectl -n ws-qt1ja5byz6220 delete -f ml/pipeline/sgs/pod.yaml
 ```
 
-A 2 min 27 s song took 3 min 16 s in total on the A100 once the packages were
-installed. Songs that already have `/data/output/<name>/transcription.mid` are
-skipped; delete that folder to redo a song.
+For a one-song GPU run, set `ROCKY_INPUT_AUDIO`, `ROCKY_OUTPUT_DIR`,
+`ROCKY_ORIGINAL`, and `ROCKY_REQUESTED` in `sgs/unified-pod.example.yaml`.
+Its `--resume` option accepts a new output directory or a matching manifest.
+The GPU Pod stops after MIDI/GP5 with `--no-publish` so the GPU is released
+before CPU-only PDF/MP3 rendering. After the GPU Pod reaches `Succeeded`,
+set `ROCKY_RUN_DIR` in `sgs/score-pdf-pod.example.yaml` to the same output
+directory and run the CPU Pod:
 
-| Path on the volume | Content |
-| --- | --- |
-| `/data/model/model.safetensors` | MuScriptor `large` weights |
-| `/data/pipeline/` | copy of this directory |
-| `/data/input/` | songs to process |
-| `/data/output/<name>/` | results, same layout as above |
-| `/data/cache/` | installed Python packages and downloaded Demucs weights (11 GiB) |
+```bash
+kubectl -n ws-qt1ja5byz6220 apply -f ml/pipeline/sgs/unified-pod.example.yaml
+kubectl -n ws-qt1ja5byz6220 logs -f pod/rocky-unified-example
+kubectl -n ws-qt1ja5byz6220 get pod rocky-unified-example
+kubectl -n ws-qt1ja5byz6220 apply -f ml/pipeline/sgs/score-pdf-pod.example.yaml
+kubectl -n ws-qt1ja5byz6220 logs -f pod/rocky-score-pdf-example
+kubectl -n ws-qt1ja5byz6220 get pod rocky-score-pdf-example
+```
 
-Things to know:
-
-- The workspace has **one GPU**. A second GPU pod is rejected until the first
-  one ends, so tell the team before a long run.
-- A GPU pod that leaves the GPU idle for 30 minutes is killed by SGS. The job
-  pod exits by itself when it finishes; do not keep GPU shells open.
-- The volume is on the `ferrari` node, so the job waits for a free GPU on that
-  node.
-- About 3.7 GiB of the volume is free. Put the weights of another large model
-  on a new volume (the workspace quota has 30 GiB left) and mount both.
-- Deleting the `muscriptor-data` volume claim erases the weights and the
-  installed packages. `sgs/volume.yaml` creates the volume; it is needed only
-  in a new workspace.
+The CPU Pod writes `scores/score_outputs.json`, PDF scores, and MP3 playback
+files under the same `/data/output_unified/<song>` directory. Run it only
+after the GPU Pod succeeds. It installs MuseScore 3 and Poppler in its
+ephemeral container; the Playwright image supplies Node/Chromium. The GP5
+converter uses Tabtify for guitar and bass, so provide network access and
+confirm the input score may be uploaded there. Both Pod examples need the
+model environments, checkpoints, BS-RoFormer SW package, and current source
+code staged at the paths in `/data`. The CUDA base image in `sgs/pod.yaml`
+does not install the Python/PDF tools itself. Check the resulting
+`manifest.json` and `scores/score_outputs.json`, copy any wanted results
+before cleanup, and remove only the Pods created for the run. The old
+`*job*.yaml`, `gpu-job.yaml`, and `volume.yaml` remain in `sgs/legacy/`
+as history; never apply them for a new run. None of these steps changes the
+Android bundled demo.
 
 ## Adding a stage
 
@@ -221,9 +307,9 @@ Things to know:
    `"$out/transcription.mid"` (and `"$out/stems/"` if it needs audio) and
    writes its result into `"$out"` under a new file name.
 3. Add the output file to the table above.
-4. For the GPU server, copy the stage's weights to the volume and pass their
-   path to the stage, the way `sgs/run_all.sh` passes
-   `/data/model/model.safetensors`.
+4. For the SGS GPU Pod, stage weights on the existing `/data` PVC and pass
+   their paths as CLI arguments. `sgs/legacy/run_all.sh` documents the older
+   `/data/model/model.safetensors` workflow.
 
 The script skips Demucs when `stems/no_vocals.wav` already exists, so a later
 stage can be rerun on a song without separating it again.

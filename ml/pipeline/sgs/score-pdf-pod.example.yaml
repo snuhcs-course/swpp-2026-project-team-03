@@ -1,0 +1,45 @@
+# CPU-only publication Pod. Set ROCKY_RUN_DIR to the matching unified run.
+# Requires Tabtify access for guitar/bass GP5 export.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-score-pdf-example
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ferrari
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: muscriptor-data
+  containers:
+    - name: scores
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      workingDir: /data/rocky-unified/ml/gp5_to_pdf
+      command: ['/bin/bash', '-lc']
+      args:
+        - |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive QT_QPA_PLATFORM=offscreen
+          export XDG_RUNTIME_DIR=/tmp/rocky-qt-runtime
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          apt-get -o Acquire::Retries=5 update -qq
+          apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils
+          exec /data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py \
+            "$ROCKY_RUN_DIR" --musescore musescore3 \
+            --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js
+      env:
+        - name: ROCKY_RUN_DIR
+          value: /data/output_unified/song
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data

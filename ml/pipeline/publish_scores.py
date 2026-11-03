@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Publish full-band and instrument PDF scores from a completed unified run.
+"""Publish full-band and instrument PDF scores and MP3 playback from a unified run.
 
-Run this in a CPU environment with MuseScore, Node/Playwright, and the
-gp5-to-pdf module. Guitar and bass use their completed GP5 tablatures;
-full-band, keyboard, and drums use the final assembled MIDI.
+This stage needs MuseScore, Node/Playwright, and the gp5-to-pdf module.
+It can run without a GPU. For PDFs, guitar and bass use their completed GP5
+tablatures; full-band, keyboard, and drums use the final assembled MIDI. All
+playback audio is synthesized from that MIDI (or its instrument-only copies),
+not the input recording or Demucs stems.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 
 import pretty_midi
@@ -53,6 +56,68 @@ def pdf_pages(path: Path, pdfinfo: str) -> int:
     if not match or int(match.group(1)) < 1:
         raise ValueError(f"PDF has no readable pages: {path}")
     return int(match.group(1))
+
+
+def check_mp3(path: Path) -> None:
+    if not path.is_file() or path.stat().st_size < 1000:
+        raise ValueError(f"MP3 missing or too small: {path}")
+    with path.open("rb") as stream:
+        header = stream.read(3)
+    if header != b"ID3" and not (header[0] == 0xFF and header[1] & 0xE0 == 0xE0):
+        raise ValueError(f"MP3 has no MPEG audio header: {path}")
+
+
+def write_json(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def check_dependencies(musescore: str, node: str, gp5_converter: Path, pdfinfo: str,
+                       *, require_gp5: bool = True) -> None:
+    tools = [("MuseScore", musescore), ("pdfinfo", pdfinfo)]
+    if require_gp5:
+        tools.append(("Node.js", node))
+    for name, executable in tools:
+        if shutil.which(executable) is None:
+            raise FileNotFoundError(f"{name} executable not found: {executable}")
+    if require_gp5 and not gp5_converter.is_file():
+        raise FileNotFoundError(f"GP5-to-PDF converter not found: {gp5_converter}")
+
+
+def publication_ready(run: Path) -> bool:
+    """Validate the full publication contract before --resume skips the stage."""
+    try:
+        contract = json.loads((run / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
+        if contract.get("version") != 3 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
+            return False
+        families = {family(track) for track in pretty_midi.PrettyMIDI(str(run / "full_score.mid")).instruments
+                    if track.notes}
+        manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+        expected = families | ({"guitar_1", "guitar_2"} if manifest.get("guitar_extra_dir") else set())
+        if set(contract["instruments"]) != expected or set(contract["audio"]["instruments"]) != expected:
+            return False
+        pdfs = [contract["full_band"], *contract["instruments"].values()]
+        mp3s = [contract["audio"]["full_band"], *contract["audio"]["instruments"].values()]
+        for item in pdfs + mp3s:
+            relative = Path(item.get("pdf", item.get("mp3", "")))
+            if relative.is_absolute() or ".." in relative.parts:
+                return False
+            path = run / relative
+            if not path.is_file() or path.stat().st_size != item["bytes"] or sha256(path) != item["sha256"]:
+                return False
+        for item in pdfs + mp3s:
+            relative_source = Path(item["source"])
+            if relative_source.is_absolute() or ".." in relative_source.parts:
+                return False
+            source = run / relative_source
+            if not source.is_file() or sha256(source) != item["source_sha256"]:
+                return False
+        for item in mp3s:
+            check_mp3(run / item["mp3"])
+        return True
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+        return False
 
 
 def choose_gp5(directory: Path, part: str) -> Path:
@@ -102,21 +167,80 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     families = {family(track) for track in score.instruments if track.notes}
     if not families or not families <= {"guitar", "bass", "piano", "drums"}:
         raise ValueError(f"Unexpected band parts: {families}")
+    check_dependencies(musescore, node, gp5_converter, pdfinfo,
+                       require_gp5=bool(families & {"guitar", "bass"}))
+    def score_dir(key: str, default: str) -> Path:
+        relative = Path(manifest.get(key, default))
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"Invalid score directory in manifest: {relative}")
+        return run / relative
+
+    guitar_dir = score_dir("guitar_score_dir", "guitar")
+    guitar_extra_dir = score_dir("guitar_extra_dir", "") if manifest.get("guitar_extra_dir") else None
     out = run / "scores"
     out.mkdir(exist_ok=True)
     source_hash = sha256(final)
     outputs = {}
+    audio_outputs = {}
+    try:
+        previous = json.loads((out / "score_outputs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        previous = {}
+    if not isinstance(previous, dict):
+        previous = {}
+
+    def unchanged(target: Path, source: Path, prior: dict) -> bool:
+        return (isinstance(prior, dict) and target.is_file()
+                and prior.get("source_sha256") == sha256(source)
+                and prior.get("bytes") == target.stat().st_size
+                and prior.get("sha256") == sha256(target))
 
     def render(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
         target = out / f"{key}.pdf"
-        if force or not target.is_file() or target.stat().st_mtime < source.stat().st_mtime:
+        prior = previous.get("full_band", {}) if key == "full_band" else previous.get("instruments", {}).get(key, {})
+        if force or not unchanged(target, source, prior):
             target.unlink(missing_ok=True)
             subprocess.run(command, check=True)
         pages = pdf_pages(target, pdfinfo)
         outputs[key] = {"pdf": target.relative_to(run).as_posix(),
-                        "source": source.relative_to(run).as_posix(), "converter": converter,
+                        "source": source.relative_to(run).as_posix(),
+                        "source_sha256": sha256(source), "converter": converter,
                         "tracks": tracks, "pages": pages, "bytes": target.stat().st_size,
                         "sha256": sha256(target)}
+
+    def render_audio(key: str, source: Path, tracks: list[dict]) -> None:
+        target = out / f"{key}.mp3"
+        prior = (previous.get("audio", {}).get("full_band", {}) if key == "band"
+                 else previous.get("audio", {}).get("instruments", {}).get(key, {}))
+        if force or not unchanged(target, source, prior):
+            target.unlink(missing_ok=True)
+            subprocess.run([musescore, "-o", str(target), str(source)], check=True)
+        check_mp3(target)
+        audio_outputs[key] = {"mp3": target.relative_to(run).as_posix(),
+                              "source": source.relative_to(run).as_posix(),
+                              "source_sha256": sha256(source), "converter": "musescore-midi",
+                              "tracks": tracks, "bytes": target.stat().st_size,
+                              "sha256": sha256(target)}
+
+    part_midis = {}
+    part_tracks = {}
+    for part in ("guitar", "bass", "piano", "drums"):
+        if part in families:
+            part_midis[part] = out / f"{part}.mid"
+            part_tracks[part] = export_part_midi(score, part, part_midis[part])
+    if guitar_extra_dir is not None:
+        guitars = [track for track in score.instruments if track.notes and family(track) == "guitar"]
+        if len(guitars) != 2:
+            raise ValueError(f"Expected two guitar tracks for separate TAB PDFs, got {len(guitars)}")
+        for index, track in enumerate(guitars, start=1):
+            key = f"guitar_{index}"
+            one = copy.deepcopy(score)
+            one.instruments = [copy.deepcopy(track)]
+            path = out / f"{key}.mid"
+            one.write(str(path))
+            part_midis[key] = path
+            part_tracks[key] = [{"name": str(track.name), "program": int(track.program),
+                                 "notes": len(track.notes)}]
 
     full_render = out / "full_band_render.mid"
     drum_mapping_counts = notation_midi(score, full_render)
@@ -125,8 +249,8 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     for part in ("piano", "drums"):
         if part not in families:
             continue
-        part_midi = out / f"{part}.mid"
-        tracks = export_part_midi(score, part, part_midi)
+        part_midi = part_midis[part]
+        tracks = part_tracks[part]
         render_midi = out / f"{part}_render.mid" if part == "drums" else part_midi
         if part == "drums":
             notation_midi(pretty_midi.PrettyMIDI(str(part_midi)), render_midi)
@@ -135,21 +259,48 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     for part in ("guitar", "bass"):
         if part not in families:
             continue
-        gp5 = choose_gp5(run / part, part)
-        render(part, gp5, "gp5-to-pdf",
-               [node, str(gp5_converter), str(gp5), str(out / f"{part}.pdf"), "--timeout-ms", "180000"],
-               [{"name": part, "source_gp5": gp5.relative_to(run).as_posix()}])
+        if part == "guitar" and guitar_extra_dir is not None:
+            render("guitar", part_midis["guitar"], "musescore-midi",
+                   [musescore, "-o", str(out / "guitar.pdf"), str(part_midis["guitar"])],
+                   part_tracks["guitar"])
+            for key, directory in (("guitar_1", guitar_dir), ("guitar_2", guitar_extra_dir)):
+                gp5 = choose_gp5(directory, key)
+                render(key, gp5, "gp5-to-pdf",
+                       [node, str(gp5_converter), str(gp5), str(out / f"{key}.pdf"),
+                        "--timeout-ms", "180000"],
+                       [{"name": key, "source_gp5": gp5.relative_to(run).as_posix()}])
+        else:
+            directory = guitar_dir if part == "guitar" else run / "bass"
+            gp5 = choose_gp5(directory, part)
+            render(part, gp5, "gp5-to-pdf",
+                   [node, str(gp5_converter), str(gp5), str(out / f"{part}.pdf"),
+                    "--timeout-ms", "180000"],
+                   [{"name": part, "source_gp5": gp5.relative_to(run).as_posix()}])
 
-    contract = {"version": 1, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
+    render_audio("band", final,
+                 [{"name": str(track.name), "program": int(track.program), "notes": len(track.notes)}
+                  for track in score.instruments if track.notes])
+    for part in ("guitar", "bass", "piano", "drums"):
+        if part in families:
+            render_audio(part, part_midis[part], part_tracks[part])
+    if guitar_extra_dir is not None:
+        for key in ("guitar_1", "guitar_2"):
+            render_audio(key, part_midis[key], part_tracks[key])
+
+    extra_keys = ("guitar_1", "guitar_2") if guitar_extra_dir is not None else ()
+    contract = {"version": 3, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
                 "drum_notation_map": {str(k): v for k, v in DRUM_NOTATION_MAP.items()},
                 "drum_notation_mapped_counts": {str(k): v for k, v in drum_mapping_counts.items()},
                 "full_band": outputs["full_band"],
-                "instruments": {part: outputs[part] for part in ("guitar", "bass", "piano", "drums") if part in outputs}}
+                "instruments": {part: outputs[part] for part in ("guitar", "bass", "piano", "drums", *extra_keys) if part in outputs},
+                "audio": {"full_band": audio_outputs["band"],
+                          "instruments": {part: audio_outputs[part] for part in ("guitar", "bass", "piano", "drums", *extra_keys)
+                                          if part in audio_outputs}}}
     contract_path = out / "score_outputs.json"
-    contract_path.write_text(json.dumps(contract, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json(contract_path, contract)
     manifest["score_outputs"] = contract_path.relative_to(run).as_posix()
     manifest["score_publication"] = "complete"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json(manifest_path, manifest)
     return contract
 
 
@@ -166,7 +317,10 @@ def main() -> None:
     result = publish(args.run.resolve(), args.musescore, args.node,
                      args.gp5_converter.resolve(), args.pdfinfo, args.force)
     print(json.dumps({"full_band": result["full_band"]["pages"],
-                      "instruments": {key: value["pages"] for key, value in result["instruments"].items()}}))
+                      "instruments": {key: value["pages"] for key, value in result["instruments"].items()},
+                      "audio": {"full_band": result["audio"]["full_band"]["mp3"],
+                                "instruments": {key: value["mp3"] for key, value in
+                                                result["audio"]["instruments"].items()}}}))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one ROCKY song through separation, transcription, alignment and arrangement.
+"""Run one ROCKY song through transcription, arrangement, PDF and MP3 publication.
 
 The script runs in the common model Python environment. Guitar and bass TAB
 use their isolated Python 3.10 environment via subprocess. Every completed
@@ -19,9 +19,10 @@ import sys
 from typing import Callable
 
 import pretty_midi
+from separate_bs_roformer import (CHECKPOINT_SHA256, CONFIG_SHA256, NONVOCAL_STEMS,
+                                  PACKAGE_VERSION, STEMS, valid_stems)
 
 
-STEMS = ("vocals", "drums", "bass", "guitar", "piano", "other")
 TRANSCRIBE_STEMS = ("drums", "bass", "guitar", "piano")
 HINTS = {
     "drums": "drums",
@@ -30,6 +31,34 @@ HINTS = {
     "piano": "acoustic_piano,electric_piano,organ",
 }
 TARGETS = ("piano", "guitar", "bass", "drums")
+
+
+def parse_lineup(raw: str | list[str], *, original: bool) -> tuple[set[str], int, bool]:
+    """Parse the app's instrument selection; guitar1/guitar2 are counts."""
+    tokens = [s.strip().lower() for s in (raw.split(",") if isinstance(raw, str) else raw) if s.strip()]
+    if original and tokens in (["unknown"], ["모름"]):
+        return set(), 0, True
+    aliases = {"keyboard": "piano", "piano": "piano", "bass": "bass",
+               "drums": "drums", "guitar": "guitar1", "guitar1": "guitar1",
+               "guitar2": "guitar2"}
+    if any(token not in aliases for token in tokens) or len(tokens) != len(set(tokens)):
+        raise ValueError("Select keyboard,bass,guitar1 or guitar2,drums; original may be unknown")
+    selected = {aliases[token] for token in tokens}
+    if len(selected) != len(tokens) or {"guitar1", "guitar2"} <= selected:
+        raise ValueError("Select exactly one guitar count: guitar1 or guitar2")
+    guitars = 2 if "guitar2" in selected else 1 if "guitar1" in selected else 0
+    parts = {"guitar" if token.startswith("guitar") else token for token in selected}
+    return parts, guitars, False
+
+
+def guitar_case(original_guitars: int, requested_guitars: int) -> tuple[str | None, bool]:
+    """Return skyline split mode and whether one new guitar must be generated."""
+    if original_guitars == 0 and requested_guitars == 2:
+        raise ValueError("Generating two guitars from zero original guitars is not supported")
+    if requested_guitars == 0 or original_guitars == 0:
+        return None, requested_guitars > original_guitars
+    split = "always" if original_guitars == requested_guitars == 2 else "never"
+    return split, requested_guitars > original_guitars
 
 
 def digest(path: Path) -> str:
@@ -49,7 +78,7 @@ def atomic_json(path: Path, value: dict) -> None:
 def family(inst: pretty_midi.Instrument) -> str | None:
     if inst.is_drum:
         return "drums"
-    if 0 <= inst.program <= 7:
+    if 0 <= inst.program <= 7 or 16 <= inst.program <= 23:
         return "piano"
     if 24 <= inst.program <= 31:
         return "guitar"
@@ -70,18 +99,19 @@ def tab_ready(directory: Path, midi_names: tuple[str, ...]) -> bool:
             and any(p.is_file() and p.stat().st_size > 0 for p in directory.glob("*.gp5")))
 
 
-def merge_stem_midis(paths: dict[str, Path], output: Path) -> pretty_midi.PrettyMIDI:
-    """Keep every nonempty instrument transcription; vocal stem is excluded."""
+def merge_stem_midis(paths: dict[str, Path], output: Path,
+                     selected: tuple[str, ...] = TRANSCRIBE_STEMS) -> pretty_midi.PrettyMIDI:
+    """Keep only selected original instruments, including their correct GM family."""
     merged = pretty_midi.PrettyMIDI(initial_tempo=120, resolution=480)
-    for stem in TRANSCRIBE_STEMS:
+    for stem in selected:
         midi = pretty_midi.PrettyMIDI(str(paths[stem]))
         for inst in midi.instruments:
-            if inst.notes:
+            if inst.notes and family(inst) == stem:
                 track = copy.deepcopy(inst)
                 track.name = f"{stem}: {inst.name or pretty_midi.program_to_instrument_name(inst.program)}"
                 merged.instruments.append(track)
     if not merged.instruments:
-        raise ValueError("All four instrument MuScriptor outputs are empty")
+        raise ValueError("Selected original instrument MuScriptor outputs are empty")
     merged.write(str(output))
     return merged
 
@@ -143,7 +173,9 @@ def combine_for_tab(aligned: pretty_midi.PrettyMIDI, parts: list[Path], output: 
 
 
 def assemble(aligned_path: Path, guitar_dir: Path, bass_dir: Path,
-             generated: dict[str, Path], output: Path, guitar_code: Path) -> pretty_midi.PrettyMIDI:
+             generated: dict[str, Path], output: Path, guitar_code: Path,
+             requested: set[str] | None = None,
+             generated_guitar_dir: Path | None = None) -> pretty_midi.PrettyMIDI:
     """Replace raw string tracks and add only generated tracks, not GPT band copies."""
     aligned = pretty_midi.PrettyMIDI(str(aligned_path))
     sys.path.insert(0, str(guitar_code))
@@ -151,11 +183,16 @@ def assemble(aligned_path: Path, guitar_dir: Path, bass_dir: Path,
 
     guitars = guitar_tracks(guitar_dir) if any((guitar_dir / n).is_file()
                                            for n in ("guitar.mid", "skyline_lead_rhythm.mid")) else []
+    if generated_guitar_dir is not None:
+        extra = guitar_tracks(generated_guitar_dir)
+        for inst in extra:
+            inst.name = f"Guitar {len(guitars) + 1} (AI generated)"
+            guitars.append(inst)
     bass_file = bass_dir / "bass.mid"
     basses = pretty_midi.PrettyMIDI(str(bass_file)).instruments if bass_file.is_file() else []
     result = build(aligned, guitars, basses)
     for target in ("guitar", "bass"):
-        if target in generated:
+        if target in generated and not (target == "guitar" and generated_guitar_dir is not None):
             for inst in result.instruments:
                 if family(inst) == target:
                     inst.name = f"AI generated {target}: {inst.name}"
@@ -174,6 +211,11 @@ def assemble(aligned_path: Path, guitar_dir: Path, bass_dir: Path,
                           + [i for i in additions if not i.is_drum]
                           + [i for i in result.instruments if i.is_drum]
                           + [i for i in additions if i.is_drum])
+    if requested is not None:
+        result.instruments = [i for i in result.instruments if family(i) in requested and i.notes]
+        missing = requested - present_parts(result)
+        if missing:
+            raise ValueError(f"Requested instruments missing from final score: {sorted(missing)}")
     output.parent.mkdir(parents=True, exist_ok=True)
     result.write(str(output))
     return result
@@ -182,6 +224,13 @@ def assemble(aligned_path: Path, guitar_dir: Path, bass_dir: Path,
 class Runner:
     def __init__(self, args: argparse.Namespace):
         self.args = args
+        self.original_parts, self.original_guitars, self.original_unknown = parse_lineup(
+            getattr(args, "original", "unknown"), original=True)
+        self.requested_parts, self.requested_guitars, _ = parse_lineup(args.requested, original=False)
+        if not self.original_unknown and not self.original_parts:
+            raise ValueError("Known original needs at least one band instrument for Beat This! and MIDI-GPT")
+        if not self.original_unknown:
+            guitar_case(self.original_guitars, self.requested_guitars)
         self.audio = args.audio.resolve(strict=True)
         self.out = args.output_dir.resolve()
         self.pipeline = Path(__file__).resolve().parent
@@ -191,11 +240,19 @@ class Runner:
         self.model_python = args.model_python.absolute()
         self.tab_python = args.tab_python.absolute()
         self.config = {
-            "pipeline_contract": 5,
+            "pipeline_contract": 8,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
-            "requested": args.requested, "model": args.model,
+            "original": "unknown" if self.original_unknown else sorted(self.original_parts),
+            "original_guitars": self.original_guitars,
+            "requested": sorted(self.requested_parts), "requested_guitars": self.requested_guitars,
+            "model": args.model,
             "midigpt_model": args.midigpt_model, "device": args.device,
             "beat_checkpoint": args.beat_checkpoint, "seed": args.seed,
+            "separator": PACKAGE_VERSION + "/BS-RoFormer-SW-6stem",
+            "separator_checkpoint_sha256": CHECKPOINT_SHA256,
+            "separator_config_sha256": CONFIG_SHA256,
+            "separator_models_dir": str(args.bsroformer_models_dir.absolute()),
+            "beat_mix_stems": list(NONVOCAL_STEMS),
         }
         self.manifest_path = self.out / "manifest.json"
         if self.manifest_path.exists():
@@ -246,19 +303,38 @@ class Runner:
         self.manifest.pop("error", None)
         atomic_json(self.manifest_path, self.manifest)
 
+    def publish_outputs(self) -> None:
+        from publish_scores import publication_ready, publish
+
+        def action() -> None:
+            publish(self.out, self.args.musescore, self.args.node,
+                    self.args.gp5_converter, self.args.pdfinfo, force=False)
+
+        self.stage("publish_outputs", [self.out / "scores" / "score_outputs.json"],
+                   action, validate=lambda: publication_ready(self.out))
+        self.manifest["score_outputs"] = "scores/score_outputs.json"
+        self.manifest["score_publication"] = "complete"
+        self.manifest["status"] = "complete"
+        atomic_json(self.manifest_path, self.manifest)
+
     def run(self) -> Path:
         stems_dir = self.out / "stems"
         stem_files = [stems_dir / f"{s}.wav" for s in STEMS]
         no_vocals = stems_dir / "no_vocals.wav"
+        transcribe_stems = tuple(s for s in TRANSCRIBE_STEMS
+                                 if self.original_unknown or s in self.original_parts)
         stems_dir.mkdir(exist_ok=True)
-        self.stage("demucs", stem_files + [no_vocals], lambda: self.command(
-            "demucs", [str(self.model_python), str(self.pipeline / "separate_stems.py"),
-                       str(self.audio), str(stems_dir), "--model", "htdemucs_6s", "--no-vocals-mix"]))
+        self.stage("bs_roformer", stem_files + [no_vocals], lambda: self.command(
+            "bs_roformer", [str(self.model_python), str(self.pipeline / "separate_bs_roformer.py"),
+                            str(self.audio), str(stems_dir),
+                            "--models-dir", str(self.args.bsroformer_models_dir),
+                            "--lib-dir", str(self.args.bsroformer_lib_dir)]),
+                   validate=lambda: valid_stems(stems_dir))
 
         midi_dir = self.out / "stem_midi"
         midi_dir.mkdir(exist_ok=True)
-        stem_midis = {s: midi_dir / f"{s}.mid" for s in TRANSCRIBE_STEMS}
-        for stem in TRANSCRIBE_STEMS:
+        stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
+        for stem in transcribe_stems:
             def transcribe(stem=stem):
                 cmd = [str(self.model_python), str(self.pipeline / "transcribe_with_progress.py"),
                        str(stems_dir / f"{stem}.wav"), str(stem_midis[stem]),
@@ -270,7 +346,7 @@ class Runner:
             self.stage(f"muscriptor_{stem}", [stem_midis[stem]], transcribe)
 
         raw = self.out / "stems_merged.mid"
-        self.stage("merge_stems", [raw], lambda: merge_stem_midis(stem_midis, raw))
+        self.stage("merge_stems", [raw], lambda: merge_stem_midis(stem_midis, raw, transcribe_stems))
 
         beats_file = self.out / "beats.json"
         def beat_this():
@@ -295,23 +371,49 @@ class Runner:
         self.stage("align", [aligned], align)
 
         presence = present_parts(pretty_midi.PrettyMIDI(str(aligned)))
-        missing = [part for part in self.args.requested if part not in presence]
-        self.manifest["original_parts"] = sorted(presence)
-        self.manifest["generated_targets"] = missing
+        if not self.original_unknown:
+            lost = (self.original_parts & self.requested_parts) - presence
+            if lost:
+                raise ValueError(f"Declared original instruments produced no notes: {sorted(lost)}")
+        self.manifest["transcribed_parts"] = sorted(presence)
+        self.manifest["beat_mix_stems"] = list(NONVOCAL_STEMS)
         atomic_json(self.manifest_path, self.manifest)
 
         guitar_code = self.modules / "guitar_tab"
         guitar_dir = self.out / "guitar"
         bass_dir = self.out / "bass"
-        if "guitar" in presence:
+        source_guitars = self.original_guitars if not self.original_unknown else 0
+        if "guitar" in presence and self.requested_guitars:
+            split = "auto" if self.original_unknown else guitar_case(
+                self.original_guitars, self.requested_guitars)[0]
             def guitar():
                 guitar_dir.mkdir(exist_ok=True)
-                self.command("guitar_tab", [str(self.tab_python), str(guitar_code / "skyline_tab.py"),
-                                            str(aligned), str(guitar_dir), "--no-merged"])
+                command = [str(self.tab_python), str(guitar_code / "skyline_tab.py"),
+                           str(aligned), str(guitar_dir), "--no-merged"]
+                if not self.original_unknown:
+                    command += ["--split", split]
+                self.command("guitar_tab", command)
                 atomic_json(self.out / "guitar_done.json", {"done": True})
             self.stage("guitar_tab", [self.out / "guitar_done.json"], guitar,
                        validate=lambda: tab_ready(guitar_dir, ("guitar.mid", "skyline_lead_rhythm.mid")))
-        if "bass" in presence:
+            if self.original_unknown:
+                source_guitars = 2 if (guitar_dir / "skyline_lead_rhythm.mid").is_file() else 1
+                if source_guitars == 2 and self.requested_guitars == 1:
+                    guitar_dir = self.out / "guitar_compressed"
+                    def compress_guitar():
+                        guitar_dir.mkdir(exist_ok=True)
+                        self.command("guitar_compressed", [str(self.tab_python),
+                                     str(guitar_code / "skyline_tab.py"), str(aligned), str(guitar_dir),
+                                     "--no-merged", "--split", "never"])
+                    self.stage("guitar_compressed", [guitar_dir / "guitar.mid"], compress_guitar,
+                               validate=lambda: tab_ready(guitar_dir, ("guitar.mid",)))
+        _, generate_guitar = guitar_case(source_guitars, self.requested_guitars)
+        self.manifest["original_parts"] = sorted(presence if self.original_unknown else self.original_parts)
+        self.manifest["original_guitars_inferred"] = (
+            None if self.original_unknown and not self.requested_guitars else source_guitars)
+        self.manifest["guitar_score_dir"] = guitar_dir.relative_to(self.out).as_posix()
+
+        if "bass" in presence and "bass" in self.requested_parts:
             def bass():
                 bass_dir.mkdir(exist_ok=True)
                 self.command("bass_tab", [str(self.tab_python), str(guitar_code / "bass_tab.py"),
@@ -319,6 +421,12 @@ class Runner:
             self.stage("bass_tab", [bass_dir / "bass.mid"], bass,
                        validate=lambda: tab_ready(bass_dir, ("bass.mid",)))
 
+        original_parts = presence if self.original_unknown else self.original_parts
+        missing = [part for part in TARGETS if part in self.requested_parts
+                   and (part not in original_parts if part != "guitar"
+                        else generate_guitar)]
+        self.manifest["generated_targets"] = missing
+        atomic_json(self.manifest_path, self.manifest)
         gen_dir = self.out / "generated"
         raw_generated = {part: generated_only(gen_dir, aligned, part) for part in missing}
         gen_record = self.out / "generation.json"
@@ -336,7 +444,8 @@ class Runner:
                     tracks = pretty_midi.PrettyMIDI(str(path)).instruments
                     if not any(i.notes and family(i) == target for i in tracks):
                         raise RuntimeError(f"MIDI-GPT {target} output has no matching notes: {path}")
-            atomic_json(gen_record, {"requested": self.args.requested, "missing": missing,
+            atomic_json(gen_record, {"requested": sorted(self.requested_parts),
+                                     "requested_guitars": self.requested_guitars, "missing": missing,
                                      "generated_only": {k: str(v) for k, v in raw_generated.items()}})
         self.stage("midigpt", [gen_record, *raw_generated.values()], generate)
 
@@ -352,30 +461,42 @@ class Runner:
             atomic_json(normalization_record, {"duration_sec": round(duration, 3), "parts": stats})
         self.stage("normalize_generated", [normalization_record, *generated.values()], normalize)
 
-        if any(part in generated for part in ("guitar", "bass")):
+        if "guitar" in generated:
+            generated_guitar_dir = self.out / ("guitar_generated" if source_guitars else "guitar")
+            def new_guitar():
+                generated_guitar_dir.mkdir(exist_ok=True)
+                self.command("generated_guitar_tab", [str(self.tab_python),
+                             str(guitar_code / "skyline_tab.py"), str(generated["guitar"]),
+                             str(generated_guitar_dir), "--no-merged", "--split", "never"])
+            self.stage("generated_guitar_tab", [generated_guitar_dir / "guitar.mid"], new_guitar,
+                       validate=lambda: tab_ready(generated_guitar_dir, ("guitar.mid",)))
+            if not source_guitars:
+                guitar_dir = generated_guitar_dir
+                self.manifest["guitar_score_dir"] = guitar_dir.relative_to(self.out).as_posix()
+            else:
+                self.manifest["guitar_extra_dir"] = generated_guitar_dir.relative_to(self.out).as_posix()
+            atomic_json(self.manifest_path, self.manifest)
+        else:
+            generated_guitar_dir = None
+
+        if "bass" in generated:
             with_generated = self.out / "aligned_with_generated.mid"
             self.stage("combine_generated_strings", [with_generated], lambda: combine_for_tab(
-                pretty_midi.PrettyMIDI(str(aligned)),
-                [generated[p] for p in ("guitar", "bass") if p in generated], with_generated))
-            if "guitar" in generated:
-                def new_guitar():
-                    guitar_dir.mkdir(exist_ok=True)
-                    self.command("generated_guitar_tab", [str(self.tab_python), str(guitar_code / "skyline_tab.py"),
-                                                          str(with_generated), str(guitar_dir), "--no-merged"])
-                    atomic_json(self.out / "generated_guitar_done.json", {"done": True})
-                self.stage("generated_guitar_tab", [self.out / "generated_guitar_done.json"], new_guitar,
-                           validate=lambda: tab_ready(guitar_dir, ("guitar.mid", "skyline_lead_rhythm.mid")))
-            if "bass" in generated:
-                def new_bass():
-                    bass_dir.mkdir(exist_ok=True)
-                    self.command("generated_bass_tab", [str(self.tab_python), str(guitar_code / "bass_tab.py"),
-                                                        str(with_generated), str(bass_dir)])
-                self.stage("generated_bass_tab", [bass_dir / "bass.mid"], new_bass,
-                           validate=lambda: tab_ready(bass_dir, ("bass.mid",)))
+                pretty_midi.PrettyMIDI(str(aligned)), [generated["bass"]], with_generated))
+            def new_bass():
+                bass_dir.mkdir(exist_ok=True)
+                self.command("generated_bass_tab", [str(self.tab_python), str(guitar_code / "bass_tab.py"),
+                                                    str(with_generated), str(bass_dir)])
+            self.stage("generated_bass_tab", [bass_dir / "bass.mid"], new_bass,
+                       validate=lambda: tab_ready(bass_dir, ("bass.mid",)))
 
         final = self.out / "full_score.mid"
         def final_assembly():
-            score = assemble(aligned, guitar_dir, bass_dir, generated, final, guitar_code)
+            score = assemble(aligned, guitar_dir, bass_dir, generated, final, guitar_code,
+                             self.requested_parts, generated_guitar_dir if source_guitars else None)
+            guitar_tracks_count = sum(family(inst) == "guitar" for inst in score.instruments)
+            if guitar_tracks_count != self.requested_guitars:
+                raise ValueError(f"Expected {self.requested_guitars} guitar parts, got {guitar_tracks_count}")
             duration = json.loads(normalization_record.read_text(encoding="utf-8"))["duration_sec"]
             if score.get_end_time() > duration + 0.05:
                 raise ValueError("Final score extends beyond the input song duration")
@@ -384,6 +505,8 @@ class Runner:
         self.manifest.setdefault("score_publication", "pending")
         self.manifest["status"] = "complete"
         atomic_json(self.manifest_path, self.manifest)
+        if not self.args.no_publish:
+            self.publish_outputs()
         return final
 
 
@@ -391,7 +514,10 @@ def cli(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("audio", type=Path, help="one input song")
     p.add_argument("output_dir", type=Path, help="one empty directory for this song")
-    p.add_argument("--requested", default="", help="comma-separated instruments selected by the user: piano,guitar,bass,drums")
+    p.add_argument("--original", default="unknown",
+                   help="original lineup: unknown, or comma-separated keyboard,bass,guitar1/guitar2,drums")
+    p.add_argument("--requested", required=True,
+                   help="output lineup: comma-separated keyboard,bass,guitar1/guitar2,drums")
     p.add_argument("--resume", action="store_true", help="resume the same audio and configuration")
     p.add_argument("--modules-root", type=Path, default=Path("/data/rocky-unified/ml"))
     p.add_argument("--model-python", type=Path, default=Path("/data/rocky-unified/.venv/bin/python"))
@@ -399,14 +525,40 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--model", default="/data/model/model.safetensors", help="MuScriptor weights")
     p.add_argument("--midigpt-model", default="yellow_medium")
     p.add_argument("--beat-checkpoint", default="/data/cache/torch/hub/checkpoints/beat_this-final0.ckpt")
+    p.add_argument("--bsroformer-models-dir", type=Path, default=Path("/data/bsrofo/models"))
+    p.add_argument("--bsroformer-lib-dir", type=Path, default=Path("/data/bsrofo/pylib"))
     p.add_argument("--device", default="cuda", choices=("cpu", "cuda"))
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--musescore", default="musescore3", help="MuseScore executable for PDF and MP3 export")
+    p.add_argument("--node", default="node", help="Node.js executable for guitar/bass GP5 PDF export")
+    p.add_argument("--gp5-converter", type=Path,
+                   default=Path("/data/rocky-unified/ml/gp5_to_pdf/convert.js"))
+    p.add_argument("--pdfinfo", default="pdfinfo", help="Poppler pdfinfo executable")
+    p.add_argument("--no-publish", action="store_true", help="stop after MIDI/GP5 for diagnostics")
     args = p.parse_args(argv)
-    args.requested = [s.strip() for s in args.requested.split(",") if s.strip()]
-    if len(args.requested) != len(set(args.requested)) or any(s not in TARGETS for s in args.requested):
-        p.error("--requested must contain distinct names from piano,guitar,bass,drums")
+    try:
+        original_parts, original_guitars, original_unknown = parse_lineup(args.original, original=True)
+        requested_parts, requested_guitars, _ = parse_lineup(args.requested, original=False)
+        if not requested_parts:
+            raise ValueError("Select at least one output instrument")
+        if not original_unknown and not original_parts:
+            raise ValueError("Known original needs at least one band instrument")
+        if not original_unknown and original_guitars == 0 and requested_guitars == 2:
+            raise ValueError("Generating two guitars from zero original guitars is not supported")
+    except ValueError as exc:
+        p.error(str(exc))
+    args.gp5_converter = args.gp5_converter.resolve()
+    args.bsroformer_models_dir = args.bsroformer_models_dir.resolve()
+    args.bsroformer_lib_dir = args.bsroformer_lib_dir.resolve()
+    if not args.no_publish:
+        from publish_scores import check_dependencies, publication_ready
+        if not publication_ready(args.output_dir.resolve()):
+            check_dependencies(args.musescore, args.node, args.gp5_converter,
+                               args.pdfinfo, require_gp5=False)
     final = Runner(args).run()
     print(f"complete: {final}")
+    if not args.no_publish:
+        print(f"deliverables: {args.output_dir.resolve() / 'scores' / 'score_outputs.json'}")
     return 0
 
 
