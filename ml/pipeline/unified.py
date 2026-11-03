@@ -31,6 +31,8 @@ HINTS = {
     "piano": "acoustic_piano,electric_piano,organ",
 }
 TARGETS = ("piano", "guitar", "bass", "drums")
+PIANO_STEM_PROGRAM = 0  # one acoustic-grand track for piano/electric-piano/organ labels
+SAME_NOTE_WINDOW = 0.05  # cross-track copies within 50 ms represent one onset
 
 
 def parse_lineup(raw: str | list[str], *, original: bool) -> tuple[set[str], int, bool]:
@@ -99,17 +101,49 @@ def tab_ready(directory: Path, midi_names: tuple[str, ...]) -> bool:
             and any(p.is_file() and p.stat().st_size > 0 for p in directory.glob("*.gp5")))
 
 
+def merge_tracks(tracks: list[pretty_midi.Instrument], program: int, name: str) -> pretty_midi.Instrument:
+    """Join piano-label tracks, deduplicating near-identical cross-track notes.
+
+    A later end and stronger velocity win for duplicate onsets. Separate
+    same-pitch onsets truncate the preceding note to avoid overlapping note
+    pairs in the resulting MIDI.
+    """
+    events = sorted(((index, copy.copy(note)) for index, track in enumerate(tracks)
+                     for note in track.notes),
+                    key=lambda item: (item[1].pitch, item[1].start, -item[1].end))
+    notes: list[pretty_midi.Note] = []
+    sources: list[set[int]] = []
+    for source, note in events:
+        previous = notes[-1] if notes and notes[-1].pitch == note.pitch else None
+        if (previous is not None and note.start - previous.start < SAME_NOTE_WINDOW
+                and (source not in sources[-1] or note.start == previous.start)):
+            previous.end = max(previous.end, note.end)
+            previous.velocity = max(previous.velocity, note.velocity)
+            sources[-1].add(source)
+            continue
+        if previous is not None and previous.end > note.start:
+            previous.end = note.start
+        notes.append(note)
+        sources.append({source})
+    merged = pretty_midi.Instrument(program=program, name=name)
+    merged.notes = sorted(notes, key=lambda note: (note.start, note.pitch))
+    return merged
+
+
 def merge_stem_midis(paths: dict[str, Path], output: Path,
                      selected: tuple[str, ...] = TRANSCRIBE_STEMS) -> pretty_midi.PrettyMIDI:
-    """Keep only selected original instruments, including their correct GM family."""
+    """Keep selected original instruments and combine piano-stem keyboard labels."""
     merged = pretty_midi.PrettyMIDI(initial_tempo=120, resolution=480)
     for stem in selected:
         midi = pretty_midi.PrettyMIDI(str(paths[stem]))
-        for inst in midi.instruments:
-            if inst.notes and family(inst) == stem:
-                track = copy.deepcopy(inst)
-                track.name = f"{stem}: {inst.name or pretty_midi.program_to_instrument_name(inst.program)}"
-                merged.instruments.append(track)
+        tracks = [inst for inst in midi.instruments if inst.notes and family(inst) == stem]
+        if stem == "piano" and tracks:
+            merged.instruments.append(merge_tracks(tracks, PIANO_STEM_PROGRAM, "piano: piano"))
+            continue
+        for inst in tracks:
+            track = copy.deepcopy(inst)
+            track.name = f"{stem}: {inst.name or pretty_midi.program_to_instrument_name(inst.program)}"
+            merged.instruments.append(track)
     if not merged.instruments:
         raise ValueError("Selected original instrument MuScriptor outputs are empty")
     merged.write(str(output))
@@ -240,7 +274,7 @@ class Runner:
         self.model_python = args.model_python.absolute()
         self.tab_python = args.tab_python.absolute()
         self.config = {
-            "pipeline_contract": 8,
+            "pipeline_contract": 9,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,

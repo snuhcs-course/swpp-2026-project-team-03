@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 
 import pretty_midi
 
@@ -25,6 +26,83 @@ import pretty_midi
 # MuseScore 3's stock drumset drops these GM pitches during MIDI import.
 # Map them only in notation inputs; full_score.mid remains untouched.
 DRUM_NOTATION_MAP = {39: 38, 70: 54, 82: 44}  # clap->snare, maracas->tambourine, shaker->pedal hi-hat
+
+
+def score_part_name(track: pretty_midi.Instrument, guitar_number: int = 0) -> tuple[str, str]:
+    part = family(track)
+    if part == "guitar":
+        kind = "Acoustic Guitar" if track.program in (24, 25) else "Electric Guitar"
+        return (f"{kind} {guitar_number}" if guitar_number else kind,
+                "Ac. Guit." if kind == "Acoustic Guitar" else "El. Guit.")
+    if part == "bass":
+        return (("Acoustic Bass", "Ac. B.") if track.program == 32 else
+                ("Synth Bass", "Synth B.") if track.program in (38, 39) else
+                ("Electric Bass", "El. B."))
+    if part == "piano":
+        return (("Organ", "Org.") if track.program in range(16, 24) else
+                ("Electric Piano", "El. Pno.") if track.program in range(2, 8) else
+                ("Piano", "Pno."))
+    return "Drum Set", "Dr."
+
+
+def musescore_score(source: Path, target: Path, musescore: str, *, force: bool = False) -> None:
+    """Import MIDI once, then set MuseScore's printed instrument names explicitly."""
+    source_hash = sha256(source)
+    stamp = target.with_suffix(target.suffix + ".source_sha256")
+    if not force and target.is_file() and stamp.is_file() and stamp.read_text().strip() == source_hash:
+        return
+    subprocess.run([musescore, "-o", str(target), str(source)], check=True)
+    document = ET.parse(target)
+    root = document.getroot()
+    score = root.find("Score")
+    if score is None:
+        raise ValueError(f"MuseScore score has no Score element: {target}")
+    parts = score.findall("Part")
+    tracks = [track for track in pretty_midi.PrettyMIDI(str(source)).instruments if track.notes]
+    if len(parts) != len(tracks):
+        raise ValueError(f"MuseScore imported {len(parts)} parts for {len(tracks)} MIDI tracks: {source}")
+    guitar_count = sum(family(track) == "guitar" for track in tracks)
+    guitar_number = 0
+    for part, track in zip(parts, tracks):
+        if family(track) == "guitar":
+            guitar_number += 1
+        long_name, short_name = score_part_name(track, guitar_number if guitar_count > 1 else 0)
+        instrument = part.find("Instrument")
+        if instrument is None:
+            raise ValueError(f"MuseScore part has no Instrument element: {target}")
+        for parent, tag, value in ((part, "trackName", long_name),
+                                   (instrument, "longName", long_name),
+                                   (instrument, "shortName", short_name),
+                                   (instrument, "trackName", long_name)):
+            elements = parent.findall(tag)
+            if not elements:
+                elements = [ET.SubElement(parent, tag)]
+            for element in elements:
+                element.text = value
+    document.write(target, encoding="utf-8", xml_declaration=True)
+    stamp.write_text(source_hash + "\n", encoding="ascii")
+
+
+def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force: bool = False) -> None:
+    """Change only the publication copy of a TAB's title and playback patch."""
+    source_hash = sha256(source)
+    stamp = target.with_suffix(target.suffix + ".source_sha256")
+    config = json.dumps({"source_sha256": source_hash, "parts": parts}, sort_keys=True)
+    if not force and target.is_file() and stamp.is_file() and stamp.read_text().strip() == config:
+        return
+    try:
+        import guitarpro
+    except ImportError as exc:
+        raise ImportError("pyguitarpro is required to label GP5 score PDFs") from exc
+    song = guitarpro.parse(str(source))
+    if len(song.tracks) != len(parts):
+        raise ValueError(f"GP5 has {len(song.tracks)} tracks for {len(parts)} final-score parts: {source}")
+    song.title = parts[0][0] if len(parts) == 1 else " / ".join(name for name, _ in parts)
+    for track, (name, program) in zip(song.tracks, parts):
+        track.name = name
+        track.channel.instrument = program
+    guitarpro.write(song, str(target))
+    stamp.write_text(config + "\n", encoding="ascii")
 
 
 def sha256(path: Path) -> str:
@@ -89,7 +167,7 @@ def publication_ready(run: Path) -> bool:
     """Validate the full publication contract before --resume skips the stage."""
     try:
         contract = json.loads((run / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-        if contract.get("version") != 3 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
+        if contract.get("version") != 4 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
             return False
         families = {family(track) for track in pretty_midi.PrettyMIDI(str(run / "full_score.mid")).instruments
                     if track.notes}
@@ -113,6 +191,16 @@ def publication_ready(run: Path) -> bool:
             source = run / relative_source
             if not source.is_file() or sha256(source) != item["source_sha256"]:
                 return False
+        for item in pdfs:
+            for track in item.get("tracks", []):
+                if "source_gp5" not in track:
+                    continue
+                relative_gp5 = Path(track["source_gp5"])
+                if relative_gp5.is_absolute() or ".." in relative_gp5.parts:
+                    return False
+                gp5 = run / relative_gp5
+                if not gp5.is_file() or sha256(gp5) != track["source_gp5_sha256"]:
+                    return False
         for item in mp3s:
             check_mp3(run / item["mp3"])
         return True
@@ -155,7 +243,8 @@ def notation_midi(source: pretty_midi.PrettyMIDI, path: Path) -> dict[int, int]:
     return {pitch: count for pitch, count in mapped.items() if count}
 
 
-def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: str, force: bool) -> dict:
+def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: str, force: bool,
+            chrome: Path | None = None) -> dict:
     final = run / "full_score.mid"
     manifest_path = run / "manifest.json"
     if not final.is_file() or not manifest_path.is_file():
@@ -244,7 +333,9 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
 
     full_render = out / "full_band_render.mid"
     drum_mapping_counts = notation_midi(score, full_render)
-    render("full_band", full_render, "musescore-midi", [musescore, "-o", str(out / "full_band.pdf"), str(full_render)],
+    full_notation = out / "full_band_render.mscx"
+    musescore_score(full_render, full_notation, musescore, force=force)
+    render("full_band", full_notation, "musescore-score", [musescore, "-o", str(out / "full_band.pdf"), str(full_notation)],
            [{"name": str(t.name), "program": int(t.program), "notes": len(t.notes)} for t in score.instruments if t.notes])
     for part in ("piano", "drums"):
         if part not in families:
@@ -254,30 +345,51 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         render_midi = out / f"{part}_render.mid" if part == "drums" else part_midi
         if part == "drums":
             notation_midi(pretty_midi.PrettyMIDI(str(part_midi)), render_midi)
-        render(part, render_midi, "musescore-midi",
-               [musescore, "-o", str(out / f"{part}.pdf"), str(render_midi)], tracks)
+        notation = out / f"{part}_render.mscx"
+        musescore_score(render_midi, notation, musescore, force=force)
+        render(part, notation, "musescore-score",
+               [musescore, "-o", str(out / f"{part}.pdf"), str(notation)], tracks)
     for part in ("guitar", "bass"):
         if part not in families:
             continue
         if part == "guitar" and guitar_extra_dir is not None:
-            render("guitar", part_midis["guitar"], "musescore-midi",
-                   [musescore, "-o", str(out / "guitar.pdf"), str(part_midis["guitar"])],
+            notation = out / "guitar_render.mscx"
+            musescore_score(part_midis["guitar"], notation, musescore, force=force)
+            render("guitar", notation, "musescore-score",
+                   [musescore, "-o", str(out / "guitar.pdf"), str(notation)],
                    part_tracks["guitar"])
             for key, directory in (("guitar_1", guitar_dir), ("guitar_2", guitar_extra_dir)):
                 gp5 = choose_gp5(directory, key)
-                render(key, gp5, "gp5-to-pdf",
-                       [node, str(gp5_converter), str(gp5), str(out / f"{key}.pdf"),
-                        "--timeout-ms", "180000"],
-                       [{"name": key, "source_gp5": gp5.relative_to(run).as_posix()}])
+                guitar = pretty_midi.PrettyMIDI(str(part_midis[key])).instruments[0]
+                label, _ = score_part_name(guitar, int(key[-1]))
+                prepared_gp5 = out / f"{key}_render.gp5"
+                gp5_score(gp5, prepared_gp5, [(label, int(guitar.program))], force=force)
+                command = [node, str(gp5_converter), str(prepared_gp5), str(out / f"{key}.pdf"),
+                           "--timeout-ms", "180000"]
+                if chrome is not None:
+                    command.extend(("--chrome", str(chrome)))
+                render(key, prepared_gp5, "gp5-to-pdf", command,
+                       [{"name": key, "source_gp5": gp5.relative_to(run).as_posix(),
+                         "source_gp5_sha256": sha256(gp5)}])
         else:
             directory = guitar_dir if part == "guitar" else run / "bass"
             gp5 = choose_gp5(directory, part)
-            render(part, gp5, "gp5-to-pdf",
-                   [node, str(gp5_converter), str(gp5), str(out / f"{part}.pdf"),
-                    "--timeout-ms", "180000"],
-                   [{"name": part, "source_gp5": gp5.relative_to(run).as_posix()}])
+            instruments = pretty_midi.PrettyMIDI(str(part_midis[part])).instruments
+            labels = [(score_part_name(inst, index if part == "guitar" and len(instruments) > 1 else 0)[0],
+                       int(inst.program)) for index, inst in enumerate(instruments, 1)]
+            prepared_gp5 = out / f"{part}_render.gp5"
+            gp5_score(gp5, prepared_gp5, labels, force=force)
+            command = [node, str(gp5_converter), str(prepared_gp5), str(out / f"{part}.pdf"),
+                       "--timeout-ms", "180000"]
+            if chrome is not None:
+                command.extend(("--chrome", str(chrome)))
+            render(part, prepared_gp5, "gp5-to-pdf", command,
+                   [{"name": part, "source_gp5": gp5.relative_to(run).as_posix(),
+                     "source_gp5_sha256": sha256(gp5)}])
 
-    render_audio("band", final,
+    band_audio = out / "band.mid"
+    score.write(str(band_audio))
+    render_audio("band", band_audio,
                  [{"name": str(track.name), "program": int(track.program), "notes": len(track.notes)}
                   for track in score.instruments if track.notes])
     for part in ("guitar", "bass", "piano", "drums"):
@@ -288,7 +400,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
             render_audio(key, part_midis[key], part_tracks[key])
 
     extra_keys = ("guitar_1", "guitar_2") if guitar_extra_dir is not None else ()
-    contract = {"version": 3, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
+    contract = {"version": 4, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
                 "drum_notation_map": {str(k): v for k, v in DRUM_NOTATION_MAP.items()},
                 "drum_notation_mapped_counts": {str(k): v for k, v in drum_mapping_counts.items()},
                 "full_band": outputs["full_band"],
@@ -312,10 +424,11 @@ def main() -> None:
     parser.add_argument("--gp5-converter", type=Path,
                         default=Path("/data/rocky-unified/ml/gp5_to_pdf/convert.js"))
     parser.add_argument("--pdfinfo", default="pdfinfo")
+    parser.add_argument("--chrome", type=Path, help="optional Chrome executable for GP5-to-PDF")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     result = publish(args.run.resolve(), args.musescore, args.node,
-                     args.gp5_converter.resolve(), args.pdfinfo, args.force)
+                     args.gp5_converter.resolve(), args.pdfinfo, args.force, args.chrome)
     print(json.dumps({"full_band": result["full_band"]["pages"],
                       "instruments": {key: value["pages"] for key, value in result["instruments"].items()},
                       "audio": {"full_band": result["audio"]["full_band"]["mp3"],
