@@ -29,7 +29,8 @@ spec:
           apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils
           exec /data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py \
             "$ROCKY_RUN_DIR" --musescore musescore3 \
-            --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js
+            --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js \
+            --render-workers 2
       env:
         - name: ROCKY_RUN_DIR
           value: /data/output_unified/song

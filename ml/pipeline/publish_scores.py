@@ -11,6 +11,7 @@ not the input recording or Demucs stems.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import hashlib
 import json
@@ -244,7 +245,9 @@ def notation_midi(source: pretty_midi.PrettyMIDI, path: Path) -> dict[int, int]:
 
 
 def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: str, force: bool,
-            chrome: Path | None = None) -> dict:
+            chrome: Path | None = None, render_workers: int = 1) -> dict:
+    if not 1 <= render_workers <= 4:
+        raise ValueError("render_workers must be between 1 and 4")
     final = run / "full_score.mid"
     manifest_path = run / "manifest.json"
     if not final.is_file() or not manifest_path.is_file():
@@ -271,6 +274,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     source_hash = sha256(final)
     outputs = {}
     audio_outputs = {}
+    render_jobs = []
     try:
         previous = json.loads((out / "score_outputs.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -285,6 +289,11 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                 and prior.get("sha256") == sha256(target))
 
     def render(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
+        def task() -> None:
+            render_pdf(key, source, converter, command, tracks)
+        render_jobs.append(task)
+
+    def render_pdf(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
         target = out / f"{key}.pdf"
         prior = previous.get("full_band", {}) if key == "full_band" else previous.get("instruments", {}).get(key, {})
         if force or not unchanged(target, source, prior):
@@ -298,6 +307,11 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                         "sha256": sha256(target)}
 
     def render_audio(key: str, source: Path, tracks: list[dict]) -> None:
+        def task() -> None:
+            export_audio(key, source, tracks)
+        render_jobs.append(task)
+
+    def export_audio(key: str, source: Path, tracks: list[dict]) -> None:
         target = out / f"{key}.mp3"
         prior = (previous.get("audio", {}).get("full_band", {}) if key == "band"
                  else previous.get("audio", {}).get("instruments", {}).get(key, {}))
@@ -399,6 +413,17 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         for key in ("guitar_1", "guitar_2"):
             render_audio(key, part_midis[key], part_tracks[key])
 
+    # All score, GP5 and MIDI inputs are finalized before export. Each worker
+    # writes a distinct target; cap processes to avoid exhausting the CPU Pod.
+    if render_workers == 1:
+        for task in render_jobs:
+            task()
+    else:
+        with ThreadPoolExecutor(max_workers=render_workers) as pool:
+            futures = [pool.submit(task) for task in render_jobs]
+            for future in futures:
+                future.result()
+
     extra_keys = ("guitar_1", "guitar_2") if guitar_extra_dir is not None else ()
     contract = {"version": 4, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
                 "drum_notation_map": {str(k): v for k, v in DRUM_NOTATION_MAP.items()},
@@ -426,9 +451,12 @@ def main() -> None:
     parser.add_argument("--pdfinfo", default="pdfinfo")
     parser.add_argument("--chrome", type=Path, help="optional Chrome executable for GP5-to-PDF")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--render-workers", type=int, default=2,
+                        help="parallel PDF/MP3 exports (1-4; default 2)")
     args = parser.parse_args()
     result = publish(args.run.resolve(), args.musescore, args.node,
-                     args.gp5_converter.resolve(), args.pdfinfo, args.force, args.chrome)
+                     args.gp5_converter.resolve(), args.pdfinfo, args.force, args.chrome,
+                     args.render_workers)
     print(json.dumps({"full_band": result["full_band"]["pages"],
                       "instruments": {key: value["pages"] for key, value in result["instruments"].items()},
                       "audio": {"full_band": result["audio"]["full_band"]["mp3"],
