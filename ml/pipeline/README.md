@@ -21,6 +21,12 @@ filter its audio. `vocals.wav` and `other.wav` are never transcribed or merged.
 Drum sync runs before alignment to Beat This!
 beats. Original instruments omitted from the requested output remain in the
 MIDI-GPT context but are removed from the final score.
+MuScriptor may label notes in the piano stem as acoustic piano, electric piano,
+or organ. During `merge_stems`, these keyboard tracks become one `piano: piano`
+track (GM program 0) before beat alignment and MIDI-GPT. Same-pitch onsets in
+different tracks within 50 ms are kept once with the later end and stronger
+velocity; later same-pitch onsets cut an overlapping earlier note. A non-keyboard
+track mistakenly assigned to the piano stem is still excluded.
 
 The app sends an original lineup (`--original unknown` for the entire song, or
 selected `keyboard,bass,guitar1/guitar2,drums`) and a required output lineup
@@ -90,7 +96,7 @@ can be changed with the two `--bsroformer-*` options. The sample command uses
 `--no-publish` because the GPU image may lack the PDF/MP3 tools;
 omit it once those tools are available to produce all deliverables.
 
-The Beat This! input rule raised the manifest contract to version 8. Start a **new**
+The piano-stem merge raised the manifest contract to version 9. Start a **new**
 output directory; older `manifest.json` files cannot be resumed with this code.
 
 `--requested` is required. The output directory must be new, or contain a
@@ -132,8 +138,8 @@ present instrument. When a second guitar is generated, `guitar.pdf` is the
 combined standard-notation score and `guitar_1.pdf` and `guitar_2.pdf` are
 separate TAB PDFs. Matching MIDI and MP3 files are also provided. When
 skyline splits two original guitars, `guitar.pdf` contains both TAB parts.
-`scores/piano.pdf` contains acoustic piano, electric piano and organ tracks
-from the piano stem together. TAB PDFs for guitar and bass come from their
+`scores/piano.pdf` contains the merged piano-stem track (or an AI-generated
+piano part when the original lacks a keyboard). TAB PDFs for guitar and bass come from their
 processed GP5 files through `gp5_to_pdf/convert.js` (Tabtify). When MIDI-GPT
 adds a second guitar, the combined `guitar.pdf` uses MIDI notation while
 `guitar_1.pdf` and `guitar_2.pdf` carry the separate TABs. Full-band, piano and drums

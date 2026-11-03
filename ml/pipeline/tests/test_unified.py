@@ -9,7 +9,7 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, merge_stem_midis, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
+from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, merge_stem_midis, merge_tracks, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
 from publish_scores import publication_ready  # noqa: E402
 
 
@@ -36,6 +36,44 @@ def test_merge_keeps_only_four_band_stems(tmp_path):
     assert sum(len(i.notes) for i in merged.instruments) == 4
     assert all(not i.name.startswith(("vocals:", "other:")) for i in merged.instruments)
     assert present_parts(merged) == {"piano", "guitar", "bass", "drums"}
+
+
+def test_piano_stem_tracks_become_one_piano_track(tmp_path):
+    paths = {}
+    for stem in STEMS:
+        midi = pretty_midi.PrettyMIDI()
+        if stem == "piano":
+            for program, notes in ((0, [(60, 0.0, 1.0)]),
+                                   (2, [(60, 0.02, 1.5), (64, 2.0, 3.0)]),
+                                   (16, [(67, 4.0, 5.0)])):
+                track = pretty_midi.Instrument(program)
+                track.notes = [pretty_midi.Note(90, pitch, start, end)
+                               for pitch, start, end in notes]
+                midi.instruments.append(track)
+            midi.instruments.append(instrument(26, "wrong guitar in piano stem"))
+        else:
+            midi.instruments.append(instrument({"drums": 0, "bass": 33}.get(stem, 29),
+                                               stem, drum=stem == "drums"))
+        path = tmp_path / f"{stem}.mid"
+        midi.write(str(path))
+        paths[stem] = path
+    merged = merge_stem_midis(paths, tmp_path / "merged.mid")
+    pianos = [track for track in merged.instruments if track.name.startswith("piano:")]
+    assert [(track.name, track.program) for track in pianos] == [("piano: piano", 0)]
+    assert [(note.pitch, note.start, note.end) for note in pianos[0].notes] == [
+        (60, 0.0, 1.5), (64, 2.0, 3.0), (67, 4.0, 5.0)]
+    assert len(merged.instruments) == 4
+    assert present_parts(merged) == {"piano", "guitar", "bass", "drums"}
+
+
+def test_merge_tracks_cuts_overlapping_same_pitch_and_keeps_retriggers():
+    first, second = pretty_midi.Instrument(0), pretty_midi.Instrument(2)
+    first.notes = [pretty_midi.Note(80, 60, 0.0, 2.0),
+                   pretty_midi.Note(75, 60, 0.04, 1.5)]
+    second.notes = [pretty_midi.Note(100, 60, 1.0, 3.0)]
+    out = merge_tracks([first, second], 0, "piano: piano")
+    assert [(note.start, note.end) for note in out.notes] == [
+        (0.0, 0.04), (0.04, 1.0), (1.0, 3.0)]
 
 
 def test_user_lineups_and_four_guitar_cases():
@@ -152,7 +190,7 @@ def test_stage_failure_is_recorded_and_resume_checks_same_input(tmp_path):
                            tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
                            bsroformer_lib_dir=tmp_path / "pylib")
     runner = Runner(args)
-    assert runner.config["pipeline_contract"] == 8
+    assert runner.config["pipeline_contract"] == 9
     assert runner.config["beat_mix_stems"] == ["drums", "bass", "guitar", "piano", "other"]
     assert runner.config["separator"].endswith("BS-RoFormer-SW-6stem")
     output = runner.out / "result.mid"
@@ -169,7 +207,7 @@ def test_stage_failure_is_recorded_and_resume_checks_same_input(tmp_path):
         Runner(args)
     args.seed = 0
     old_manifest = json.loads(runner.manifest_path.read_text(encoding="utf-8"))
-    old_manifest["config"]["pipeline_contract"] = 7
+    old_manifest["config"]["pipeline_contract"] = 8
     runner.manifest_path.write_text(json.dumps(old_manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="configuration differs"):
         Runner(args)
