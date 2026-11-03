@@ -1,8 +1,10 @@
 from pathlib import Path
 import json
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pretty_midi
@@ -17,6 +19,22 @@ def instrument(program, name, *, drum=False):
     inst = pretty_midi.Instrument(program, is_drum=drum, name=name)
     inst.notes.append(pretty_midi.Note(100, 60 if not drum else 36, 0.0, 0.4))
     return inst
+
+
+def fake_score_export(cmd):
+    target = Path(cmd[2] if cmd[0] == "musescore3" else cmd[3])
+    if target.suffix == ".mscx":
+        count = len([track for track in pretty_midi.PrettyMIDI(cmd[3]).instruments if track.notes])
+        parts = "".join("<Part><trackName>old</trackName><Instrument><longName>old</longName>"
+                        "<shortName>old</shortName><trackName>old</trackName></Instrument></Part>"
+                        for _ in range(count))
+        target.write_text(f"<museScore><Score>{parts}</Score></museScore>", encoding="utf-8")
+    else:
+        target.write_bytes((b"ID3" if target.suffix == ".mp3" else b"%PDF-1.7\n") + b"\0" * 1100)
+
+
+def fake_gp5_score(source, target, parts, *, force=False):
+    shutil.copyfile(source, target)
 
 
 def test_merge_keeps_only_four_band_stems(tmp_path):
@@ -246,18 +264,25 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
         calls.append(cmd)
         if cmd[0] == "pdfinfo":
             return subprocess.CompletedProcess(cmd, 0, stdout="Pages: 1\n")
-        target = Path(cmd[2] if cmd[0] == "musescore3" else cmd[3])
-        target.write_bytes((b"ID3" if target.suffix == ".mp3" else b"%PDF-1.7\n") + b"\0" * 1100)
+        fake_score_export(cmd)
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr("publish_scores.subprocess.run", fake_converter)
     monkeypatch.setattr("publish_scores.shutil.which", lambda executable: executable)
+    monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 3
+    assert contract["version"] == 4
     assert contract["audio"]["full_band"]["mp3"] == "scores/band.mp3"
     assert set(contract["audio"]["instruments"]) == {"guitar", "bass", "piano", "drums"}
     assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar.mid"
+    assert contract["audio"]["full_band"]["source"] == "scores/band.mid"
+    assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "guitar.mid")).instruments] == [26]
+    assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "bass.mid")).instruments] == [33]
+    assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "band.mid")).instruments] == [26, 33, 0, 2, 16, 0]
+    names = [part.findtext("Instrument/longName") for part in
+             ET.parse(runner.out / "scores" / "full_band_render.mscx").getroot().findall("Score/Part")]
+    assert names == ["Electric Guitar", "Electric Bass", "Piano", "Electric Piano", "Organ", "Drum Set"]
     assert set(contract["instruments"]) == {"guitar", "bass", "piano", "drums"}
     assert all((runner.out / "scores" / f"{part}.mid").is_file()
                for part in ("guitar", "bass", "piano", "drums"))
@@ -323,19 +348,19 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
         calls.append(cmd)
         if cmd[0] == "pdfinfo":
             return subprocess.CompletedProcess(cmd, 0, stdout="Pages: 1\n")
-        target = Path(cmd[2] if cmd[0] == "musescore3" else cmd[3])
-        target.write_bytes((b"ID3" if target.suffix == ".mp3" else b"%PDF-1.7\n") + b"\0" * 1100)
+        fake_score_export(cmd)
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr("publish_scores.subprocess.run", fake_converter)
     monkeypatch.setattr("publish_scores.shutil.which", lambda executable: executable)
+    monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 3
+    assert contract["version"] == 4
     assert set(contract["instruments"]) == {"guitar", "guitar_1", "guitar_2"}
-    assert contract["instruments"]["guitar"]["converter"] == "musescore-midi"
+    assert contract["instruments"]["guitar"]["converter"] == "musescore-score"
     assert contract["instruments"]["guitar_1"]["converter"] == "gp5-to-pdf"
-    assert contract["instruments"]["guitar_2"]["source"] == "guitar_generated/guitar.gp5"
+    assert contract["instruments"]["guitar_2"]["source"] == "scores/guitar_2_render.gp5"
     assert len(pretty_midi.PrettyMIDI(str(runner.out / "scores" / "guitar_2.mid")).instruments) == 1
     assert {Path(cmd[3]).name for cmd in calls if cmd[0] == "node"} == {"guitar_1.pdf", "guitar_2.pdf"}
     assert publication_ready(runner.out)
