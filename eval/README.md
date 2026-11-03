@@ -19,6 +19,9 @@ change, the original stays here and the revised one is added next to it with the
 | T1 | rwc_band12 | Multi F1, mean over songs | pipeline with the adopted separator > no separation (MuScriptor on the mix) on the same songs |
 | T2 | rwc_band12 | Multi F1, mean over songs | BS-RoFormer SW 6-stem ≥ Demucs htdemucs_6s |
 | T3 | rwc_band12 | keyboard onset F1, mean over songs with keyboard notes | BS-RoFormer SW 6-stem > Demucs htdemucs_6s |
+| T1' | rwc_band12 | Multi F1 on the four instruments, mean over songs | as T1 (added 2026-11-03, see Additions) |
+| T2' | rwc_band12 | Multi F1 on the four instruments, mean over songs | as T2 (added 2026-11-03) |
+| T3' | rwc_band12 | keyboard onset F1 on the four instruments, mean over songs with keyboard notes | as T3 (added 2026-11-03) |
 | T4 | band14 | valid output (aligned MIDI, full-score MIDI, GP5, PDF) | 100% of songs |
 | T5 | band14 | processing time for a 3-minute song (GPU stage) | ≤ 10 minutes |
 | T6 | band14 | after TAB / keyboard processing: onsets one player cannot play, notes outside the instrument range | 0 |
@@ -48,6 +51,8 @@ RWC separation comparison (SGS, second workspace, A100 40GB on ford): `rwc_separ
 bash rwc_separation/setup_env.sh                       # once: /data/envs/{sep,mus}
 /data/envs/mus/bin/python rwc_separation/eval_sep.py rwc_separation/songs12.txt
 # -> /data/rwc/results/summary.csv (one row per song and method: none, demucs, bsrofo)
+/data/envs/mus/bin/python rwc_separation/rescore4.py rwc_separation/songs12.txt
+# -> /data/rwc/results/summary4.csv (T1'-T3': the same outputs scored on the four instruments)
 ```
 
 Whole pipeline (band14): `ml/pipeline/unified.py` on the team SGS volume, as in
@@ -55,4 +60,20 @@ Whole pipeline (band14): `ml/pipeline/unified.py` on the team SGS volume, as in
 
 ## Additions
 
-(none yet)
+**2026-11-03, T1'-T3' (four-instrument scores), added before the results were examined.**
+T1-T3 stay as declared; T1'-T3' are reported next to them.
+
+- Reason: a one-song smoke test (RWC_P035) showed that the RWC reference has every part of the song
+  (vocal melody, strings, brass, synths), while the separated pipeline transcribes only the drums, bass,
+  guitar and piano stems. T1-T3 count the parts it never tries to transcribe as missed notes, while the
+  no-separation baseline can still get credit for them. Listing the 12 references
+  (`rwc_separation/ref_tracks.py`): 4-36% of the notes per song (14% overall) are outside the four families.
+- Reference: tracks kept by GM program family, as in the per-family onset F1, with two corrections from that
+  listing: a track named exactly MELODY / MELO / MELODY 1 / VOCAL is the vocal melody and is dropped whatever
+  its program (RWC_P047 `MELODY` is GM 22, in the keyboard range; `GT MELO 1` etc. stay as guitar), and
+  RWC_P063 `E.PIANO` (GM 99) is kept as a keyboard part. These two corrections also affect T3's keyboard
+  reference; T3 is not changed, T3' uses them.
+- Estimate: separated runs keep every note (all from the four stems); the no-separation baseline keeps
+  notes whose GM program is in the four families.
+- Same metrics as above (`metrics.py`, per-family onset F1), computed by `rwc_separation/rescore4.py` from the
+  MIDIs `eval_sep.py` already wrote; nothing is separated or transcribed again.
