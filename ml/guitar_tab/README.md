@@ -172,6 +172,6 @@ python piano_playable.py "song_aligned.mid" out/song_keys.mid
 python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov=piano_playable --cov-report=term-missing
 ```
 
-2026-11-02 기준: 80 passed, 커버리지 `skyline_tab.py` 74%, `bass_tab.py` 44%, `full_score.py` 73%, `piano_playable.py` 91%.
+2026-11-03 기준: 83 passed, 커버리지 `skyline_tab.py` 78%, `bass_tab.py` 98%, `full_score.py` 73%, `piano_playable.py` 91%. `test_bass_main.py`는 tuttut·guitarpro가 있을 때만 돌고(없으면 건너뜀) `bass_tab.py`를 파일 입출력까지 끝까지 실행합니다.
 tuttut를 부르는 `tab()`과 각 파일의 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
 `bass_tab.py`와 `full_score.py`는 사용자 평가 3곡(Sweet Child O' Mine, 한 페이지가 될 수 있게, 적재 - 우연을 믿어요)에서 이전에 임시 스크립트로 만든 베이스 .gp5와 전체 악보 MIDI와 결과가 같은 것을 확인했습니다.
