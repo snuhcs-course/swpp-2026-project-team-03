@@ -10,7 +10,9 @@ import pretty_midi
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bass_tab import BASS_TUNINGS, bass_line, bass_notes, choose_bass_tuning  # noqa: E402
 from full_score import build, guitar_tracks, part_sound  # noqa: E402
-from skyline_tab import TUNINGS  # noqa: E402
+import json  # noqa: E402
+
+from skyline_tab import TUNINGS, write_tuning  # noqa: E402
 
 
 def N(pitch, start, end):
@@ -66,6 +68,14 @@ def test_bass_tuning_without_guitar_is_standard():
     pm = pretty_midi.PrettyMIDI()
     pm.instruments.append(inst(33, [N(27, 0, 1)]))
     assert choose_bass_tuning(pm) == ("bass_standard", None)
+
+
+def test_tuning_json_lists_strings_low_to_high(tmp_path):
+    info = write_tuning(tmp_path, "half_step_down")
+    assert json.loads((tmp_path / "tuning.json").read_text()) == info
+    assert info["strings"] == ["D#2", "G#2", "C#3", "F#3", "A#3", "D#4"] and info["standard"] is False
+    assert write_tuning(tmp_path, "bass_standard")["strings"] == ["E1", "A1", "D2", "G2"]
+    assert write_tuning(tmp_path, "standard")["standard"] is True
 
 
 def test_empty_bass():

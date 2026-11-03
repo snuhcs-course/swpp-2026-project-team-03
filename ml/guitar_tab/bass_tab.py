@@ -4,7 +4,7 @@
 2. keeps only the lowest note at each onset (a bass line, not chords),
 3. moves notes outside the bass range by octaves (fold_range),
 4. chooses string/fret with tuttut (same weights as the guitar, b=0.1),
-5. writes bass.mid, tab_bass.txt and "<title> - bass.gp5".
+5. writes bass.mid, tuning.json, tab_bass.txt and "<title> - bass.gp5".
 
 Tuning (auto, default): follows the guitar of the same MIDI, because a band tunes together.
 skyline_tab.choose_tuning picks the guitar tuning (standard / half step down / drop D) and the bass
@@ -75,6 +75,7 @@ def main(src, out_dir, tuning="auto"):
         return s
     bass = st.part_midi(pm, notes, "Bass", program=BASS_PROGRAM)
     bass.write(str(out_dir / "bass.mid"))
+    st.write_tuning(out_dir, tuning)
     p, t = st.tab(bass, "tab_bass", tuning, out_dir)
     n, big, med = st.jump_stats(p)
     print(f"  TAB bass: {n} fretted events · jumps >5 frets: {big} ({big / max(n - 1, 1) * 100:.1f}%) · median move {med:.1f} frets")

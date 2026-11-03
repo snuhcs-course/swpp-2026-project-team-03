@@ -78,6 +78,16 @@ python verify_gp5.py "out/song/song - skyline lead+rhythm.gp5" out/song/skyline_
 
 MIDI에는 줄·프렛 정보가 없어서, MuseScore에서 MIDI를 TAB 보표로 바꾸면 MuseScore가 운지를 새로 정합니다. 이 스크립트의 운지를 보려면 `.gp5`를 여세요.
 
+## 조율 정보 (`tuning.json`)
+
+`skyline_tab.py`와 `bass_tab.py`는 출력 폴더에 TAB이 쓰는 조율을 `tuning.json`으로 남깁니다. 전체 악보 PDF의 조율 안내 문구나 앱 표시에 씁니다.
+
+```json
+{"tuning": "half_step_down", "standard": false, "strings": ["D#2", "G#2", "C#3", "F#3", "A#3", "D#4"], "midi": [39, 44, 49, 54, 58, 63]}
+```
+
+`strings`·`midi`는 낮은 줄 → 높은 줄 순서입니다. `tuning`: 기타 `standard` / `half_step_down` / `drop_d`, 베이스 `bass_standard` / `bass_half_step_down` / `bass_drop_d` / `bass5_standard`.
+
 ## 베이스 TAB (`bass_tab.py`)
 
 베이스는 나누지 않고 tuttut만 씁니다. 정렬된 MIDI의 베이스 트랙(MIDI 프로그램 32~39)을 모아서
@@ -172,6 +182,6 @@ python piano_playable.py "song_aligned.mid" out/song_keys.mid
 python -m pytest -q --cov=skyline_tab --cov=bass_tab --cov=full_score --cov=piano_playable --cov-report=term-missing
 ```
 
-2026-11-03 기준: 83 passed, 커버리지 `skyline_tab.py` 78%, `bass_tab.py` 98%, `full_score.py` 73%, `piano_playable.py` 91%. `test_bass_main.py`는 tuttut·guitarpro가 있을 때만 돌고(없으면 건너뜀) `bass_tab.py`를 파일 입출력까지 끝까지 실행합니다.
+2026-11-03 기준: 84 passed, 커버리지 `skyline_tab.py` 78%, `bass_tab.py` 98%, `full_score.py` 73%, `piano_playable.py` 91%. `test_bass_main.py`는 tuttut·guitarpro가 있을 때만 돌고(없으면 건너뜀) `bass_tab.py`를 파일 입출력까지 끝까지 실행합니다.
 tuttut를 부르는 `tab()`과 각 파일의 `main()`은 단위 테스트에서 제외했습니다(TAB 객체는 가짜로 대신함). 10곡 실행과 `verify_gp5.py`로 통합 확인했습니다.
 `bass_tab.py`와 `full_score.py`는 사용자 평가 3곡(Sweet Child O' Mine, 한 페이지가 될 수 있게, 적재 - 우연을 믿어요)에서 이전에 임시 스크립트로 만든 베이스 .gp5와 전체 악보 MIDI와 결과가 같은 것을 확인했습니다.

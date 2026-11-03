@@ -7,7 +7,7 @@ MuScriptor often merges two guitars into one part. This script
 3. makes chords playable (max 6 notes, fretted notes within 4 frets) in the rhythm part and
    the merged part, by default; --no-chord-reduction turns this off,
 4. chooses string/fret with tuttut (Viterbi over fingerings, b=0.1),
-5. writes MIDI, text TAB and Guitar Pro (.gp5) files, and reports fret jumps > 5.
+5. writes MIDI, text TAB, Guitar Pro (.gp5) files and tuning.json (the tuning used), and reports fret jumps > 5.
 
 Comparison baseline only, not the team's guitar-guitar separation module.
 The skyline rule comes from melody-extraction research; the tuning, chord-reduction and
@@ -22,6 +22,7 @@ Written with Claude (AI); reviewed by Soobin Jo.
 import argparse
 import collections
 import itertools
+import json
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,18 @@ TB_WEIGHTS = dict(b=0.1, height=1, length=1, n_changed_strings=1)
 def guitar_notes(pm):
     gs = [i for i in pm.instruments if 24 <= i.program <= 31 and not i.is_drum]
     return sorted((n for i in gs for n in i.notes), key=lambda n: (n.start, n.pitch))
+
+
+def write_tuning(out_dir, tuning):
+    """tuning.json in out_dir: the tuning the TAB uses, for later stages (score PDF text, app display).
+    strings are listed low -> high, as players read a tuning (e.g. "D#2 G#2 C#3 F#3 A#3 D#4")."""
+    low_to_high = TUNINGS[tuning][::-1]
+    info = {"tuning": tuning,
+            "standard": tuning in ("standard", "bass_standard", "bass5_standard"),
+            "strings": [pretty_midi.note_number_to_name(p) for p in low_to_high],
+            "midi": low_to_high}
+    (Path(out_dir) / "tuning.json").write_text(json.dumps(info) + "\n")
+    return info
 
 
 def choose_tuning(pitches):
@@ -329,6 +342,7 @@ def main(src, out_dir, merged_tab=True, chord_reduction=True, split="auto"):
     notes = guitar_notes(pm)
     tuning = choose_tuning([n.pitch for n in notes])
     print(f"guitar notes {len(notes)} · tuning {tuning} {NAMES[tuning]}")
+    write_tuning(out_dir, tuning)
     two, ds = decide_split(notes, tuning)
     do_split = two if split == "auto" else split == "always"
     print(f"split check: unplayable onsets {ds['unplayable'] * 100:.1f}% · wider than 2 octaves {ds['wide'] * 100:.1f}% "

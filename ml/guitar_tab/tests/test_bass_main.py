@@ -46,6 +46,8 @@ def test_main_writes_midi_tab_and_gp5(tmp_path):
     song = gp.parse(str(out / "song - bass.gp5"))                 # "_aligned" is dropped from the title
     assert song.tracks[0].channel.instrument == bass_tab.BASS_PROGRAM
     assert len(song.tracks[0].strings) == 4
+    import json
+    assert json.loads((out / "tuning.json").read_text())["tuning"] == "bass_standard"   # follows the standard guitar
 
 
 def test_main_without_bass_notes_writes_nothing(tmp_path):
