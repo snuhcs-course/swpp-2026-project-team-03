@@ -362,6 +362,18 @@ def test_publication_uses_bounded_parallel_exports(tmp_path, monkeypatch):
     serial = publish(run, "musescore3", "node", tmp_path / "unused.js", "pdfinfo",
                      force=True, render_workers=1)
     assert result == serial
+    real_ready = publication_ready
+    readiness_checks = []
+
+    def delayed_ready(path):
+        readiness_checks.append(path)
+        return len(readiness_checks) > 2 and real_ready(path)
+
+    monkeypatch.setattr("publish_scores.publication_ready", delayed_ready)
+    monkeypatch.setattr("publish_scores.time.sleep", lambda _: None)
+    assert publish(run, "musescore3", "node", tmp_path / "unused.js", "pdfinfo",
+                   force=False, render_workers=2) == result
+    assert len(readiness_checks) == 3
 
 
 def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, monkeypatch):

@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 
 import pretty_midi
@@ -438,6 +439,15 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     manifest["score_outputs"] = contract_path.relative_to(run).as_posix()
     manifest["score_publication"] = "complete"
     write_json(manifest_path, manifest)
+    # The shared PVC can briefly lag immediately after parallel renderers exit.
+    # Confirm the complete contract before reporting publication success.
+    for attempt in range(10):
+        if publication_ready(run):
+            break
+        if attempt < 9:
+            time.sleep(0.5)
+    else:
+        raise RuntimeError(f"Published scores did not pass contract validation: {contract_path}")
     return contract
 
 
