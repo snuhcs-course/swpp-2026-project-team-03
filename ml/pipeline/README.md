@@ -134,12 +134,13 @@ MP3 exports with two workers by default (the CPU Pod passes
 `--render-workers 2` explicitly). Set `--render-workers 1` to compare against
 sequential export, or use up to four after checking CPU and memory headroom.
 It writes the publication contract only after every export succeeds.
-On the Immigrant Song validation CPU Pod, forced exports with one, two, then
+Before the two-stage MP3 patch, on the Immigrant Song validation CPU Pod,
+forced exports with one, two, then
 one worker took 115, 67, and 117 seconds respectively; the second serial run
 checks that the gain was not just a warm-cache effect. Package installation
 time is excluded from these export timings.
 
-The frontend contract is `scores/score_outputs.json` (version 4): a full-band
+The frontend contract is `scores/score_outputs.json` (version 5): a full-band
 PDF and MP3, plus a PDF and MP3 for every present instrument family (guitar,
 bass, piano, drums). The MP3 names follow the iteration 2 demo:
 `scores/band.mp3`, `scores/guitar.mp3`, `scores/bass.mp3`,
@@ -165,8 +166,11 @@ export, the imported MuseScore score receives explicit staff names such as
 MuseScore 3 showing the GM patch subtypes `Jazz Guitar` and `Fingered Bass`
 as if they were different instrument families. GP5 PDF inputs are publication
 copies with matching track names and programs; the processed source GP5s stay
-unchanged. MP3 inputs preserve the final assembled MIDI programs and notes,
-including each song's acoustic or electric guitar choice. The
+unchanged. Each MP3 first imports its MIDI into a MuseScore `.mscx` file and
+then renders that score. MuseScore 3's direct MIDI-to-MP3 command rendered
+one-note guitar and bass tests identically to piano despite their distinct GM
+programs. The two-stage path preserves the final assembled MIDI programs and
+notes, including each song's acoustic or electric guitar choice. The
 JSON records the exact mapping and affected note counts. The JSON also records
 PDF and MP3 source paths, converter, bytes and SHA-256, plus PDF page counts.
 `manifest.json` points to that file through `score_outputs`, and

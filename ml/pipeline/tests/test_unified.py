@@ -276,11 +276,13 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 4
+    assert contract["version"] == 5
     assert contract["audio"]["full_band"]["mp3"] == "scores/band.mp3"
     assert set(contract["audio"]["instruments"]) == {"guitar", "bass", "piano", "drums"}
-    assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar.mid"
-    assert contract["audio"]["full_band"]["source"] == "scores/band.mid"
+    assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar_audio.mscx"
+    assert contract["audio"]["instruments"]["guitar"]["midi_source"] == "scores/guitar.mid"
+    assert contract["audio"]["full_band"]["source"] == "scores/band_audio.mscx"
+    assert contract["audio"]["full_band"]["midi_source"] == "scores/band.mid"
     assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "guitar.mid")).instruments] == [26]
     assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "bass.mid")).instruments] == [33]
     assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "band.mid")).instruments] == [26, 33, 0, 2, 16, 0]
@@ -293,6 +295,8 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     assert len([cmd for cmd in calls if cmd[0] == "node"]) == 2
     assert len([cmd for cmd in calls if cmd[0] == "musescore3" and cmd[2].endswith(".pdf")]) == 3
     assert len([cmd for cmd in calls if cmd[0] == "musescore3" and cmd[2].endswith(".mp3")]) == 5
+    assert all(cmd[3].endswith(".mscx") for cmd in calls
+               if cmd[0] == "musescore3" and cmd[2].endswith(".mp3"))
     assert publication_ready(runner.out)
     assert runner.manifest["status"] == runner.manifest["score_publication"] == "complete"
 
@@ -412,7 +416,7 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 4
+    assert contract["version"] == 5
     assert set(contract["instruments"]) == {"guitar", "guitar_1", "guitar_2"}
     assert contract["instruments"]["guitar"]["converter"] == "musescore-score"
     assert contract["instruments"]["guitar_1"]["converter"] == "gp5-to-pdf"
