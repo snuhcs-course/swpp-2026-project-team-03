@@ -114,9 +114,9 @@ completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
 
 `unified.py` calls `publish_scores.py` after assembling `full_score.mid`.
 This stage needs MuseScore, Poppler `pdfinfo`, Node.js, `pyguitarpro`, the `gp5_to_pdf`
-module with Playwright/Chromium, and access to Tabtify for guitar/bass GP5
-PDF export. That converter uploads the GP5 to Tabtify, so the caller must
-approve that service for the input score. Set `--musescore`, `--pdfinfo`,
+module with Playwright/Chromium for guitar/bass GP5 PDF export. That converter
+renders the GP5 locally with alphaTab (installed by `npm ci` in `gp5_to_pdf`)
+and blocks all other network requests, so scores are not uploaded anywhere. Set `--musescore`, `--pdfinfo`,
 `--node`, and `--gp5-converter`
 if the executable or module paths differ from the defaults. MuseScore and
 `pdfinfo` are checked before model stages; Node and GP5 converter availability
@@ -152,7 +152,7 @@ separate TAB PDFs. Matching MIDI and MP3 files are also provided. When
 skyline splits two original guitars, `guitar.pdf` contains both TAB parts.
 `scores/piano.pdf` contains the merged piano-stem track (or an AI-generated
 piano part when the original lacks a keyboard). TAB PDFs for guitar and bass come from their
-processed GP5 files through `gp5_to_pdf/convert.js` (Tabtify). When MIDI-GPT
+processed GP5 files through `gp5_to_pdf/convert.js` (alphaTab). When MIDI-GPT
 adds a second guitar, the combined `guitar.pdf` uses MIDI notation while
 `guitar_1.pdf` and `guitar_2.pdf` carry the separate TABs. Full-band, piano and drums
 PDFs come from the assembled MIDI through MuseScore. The full-band PDF uses
@@ -357,8 +357,9 @@ The CPU Pod writes `scores/score_outputs.json`, PDF scores, and MP3 playback
 files under the same `/data/output_unified/<song>` directory. Run it only
 after the GPU Pod succeeds. It installs MuseScore 3 and Poppler in its
 ephemeral container; the Playwright image supplies Node/Chromium. The GP5
-converter uses Tabtify for guitar and bass, so provide network access and
-confirm the input score may be uploaded there. Both Pod examples need the
+converter renders guitar and bass with alphaTab inside the Pod and needs no
+network access of its own; run `npm ci` in `gp5_to_pdf` once when staging the
+code. Both Pod examples need the
 model environments, checkpoints, BS-RoFormer SW package, and current source
 code staged at the paths in `/data`. The CUDA base image in `sgs/pod.yaml`
 does not install the Python/PDF tools itself. Check the resulting

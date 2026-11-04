@@ -1,5 +1,5 @@
 # CPU-only publication Pod. Set ROCKY_RUN_DIR to the matching unified run.
-# Requires Tabtify access for guitar/bass GP5 export.
+# Guitar/bass GP5 export renders locally with alphaTab (run `npm ci` in gp5_to_pdf first).
 apiVersion: v1
 kind: Pod
 metadata:
