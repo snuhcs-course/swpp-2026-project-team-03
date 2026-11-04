@@ -1,0 +1,29 @@
+# CPU-only transfer pod for the second workspace (gpu22). It mounts rocky-data, the 40Gi
+# volume Soobin made on ford (the 50Gi quota leaves no room for a second volume).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-files
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ford
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: rocky-data
+  containers:
+    - name: app
+      image: debian:bookworm
+      command: ['/bin/bash', '-c', 'sleep inf']
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data

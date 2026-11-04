@@ -1,0 +1,14 @@
+# NOT USED (11/3): gpu22 already has rocky-data (40Gi, ford) from Soobin; the 50Gi quota
+# has no room for this one. Kept only for a fresh, empty workspace.
+# Second team workspace (account gpu22, ws-xkblzn1w9n5c2): it starts empty.
+# Same claim name as the first workspace so every other manifest works unchanged.
+# 40Gi of the 50Gi quota. Apply once:  kubectl apply -f server/k8s/ws2/volume.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: muscriptor-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 40Gi

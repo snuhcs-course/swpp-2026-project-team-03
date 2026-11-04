@@ -1,0 +1,107 @@
+// AI-generated with Claude Code, 2026-11-01
+package com.team3.rocky.server
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import java.io.File
+
+/**
+ * 서버에서 받은 결과를 폰에 저장해 둔 것. 폴더는 filesDir/scores/<작업 id>/.
+ * 작업 id(Work.id)로 찾기 때문에 보관함·밴드 공유(같은 폰)에서도 그대로 열린다.
+ * 폴더가 없는 작업은 데모 결과(assets/demo)로 보여준다.
+ */
+class LocalScore(val dir: File, val result: JobResult) {
+    /**
+     * 앱의 파트 이름(piano, drums, bass, guitar, guitar2) → 서버 결과의 키.
+     * AI가 두 번째 기타를 만든 곡은 guitar_1 / guitar_2가 따로 오고,
+     * 원곡에 기타 2대가 있으면 guitar 하나(TAB 두 줄)에 둘 다 들어 있다.
+     * null이면 밴드 전체.
+     */
+    fun key(part: String?): String? = when (part) {
+        null -> null
+        "guitar" -> if ("guitar_1" in result.instruments) "guitar_1" else "guitar"
+        "guitar2" -> if ("guitar_2" in result.instruments) "guitar_2" else "guitar"
+        else -> part
+    }
+
+    private fun entry(part: String?) = key(part).let { k -> if (k == null) result.fullBand else result.instruments[k] }
+
+    fun pdf(part: String?): File? = file(entry(part)?.pdf)
+    fun midi(part: String?): File? = file(entry(part)?.midi)
+    fun mp3(part: String?): File? = file(entry(part)?.mp3)
+
+    /** 재생할 파일: MP3가 있으면 MP3, 없으면 MIDI (둘 다 악보로 합성한 소리, 원곡 아님). */
+    fun audio(part: String?): File? = mp3(part) ?: midi(part)
+
+    val generated: Set<String> get() = result.generatedParts.toSet()
+
+    private fun file(rel: String?): File? = rel?.let { File(dir, it) }?.takeIf { it.isFile }
+}
+
+object ScoreStore {
+    private const val RESULT = "result.json"
+
+    fun dir(ctx: Context, workId: Long) = File(ctx.filesDir, "scores/$workId")
+
+    /** 공유용으로 캐시 폴더(FileProvider의 share/)에 [outName]으로 복사한다. */
+    fun toShare(ctx: Context, file: File, outName: String): File {
+        val out = File(File(ctx.cacheDir, "share").apply { mkdirs() }, outName)
+        file.copyTo(out, overwrite = true)
+        return out
+    }
+
+    fun load(ctx: Context, workId: Long): LocalScore? {
+        val d = dir(ctx, workId)
+        val json = File(d, RESULT).takeIf { it.isFile } ?: return null
+        return runCatching { LocalScore(d, ApiJson.result(json.readText())) }.getOrNull()
+    }
+
+    /** 결과 PDF·MIDI를 모두 받아 저장한다. 네트워크를 쓰므로 IO 스레드에서. */
+    fun download(ctx: Context, server: ScoreServer, jobId: String, workId: Long): LocalScore {
+        val result = server.result(jobId)
+        val d = dir(ctx, workId).apply { mkdirs() }
+        val paths = buildSet {
+            for (p in listOf(result.fullBand) + result.instruments.values) {
+                add(p.pdf); p.midi?.let(::add); p.mp3?.let(::add)
+            }
+        }
+        for (path in paths) server.download(jobId, path, File(d, path))
+        // result.json은 마지막에 써서, 이 파일이 있으면 받기가 끝난 것으로 본다.
+        File(d, RESULT).writeText(toJson(result))
+        return LocalScore(d, result)
+    }
+
+    private fun toJson(r: JobResult): String {
+        fun part(p: ScorePart) = org.json.JSONObject().put("pdf", p.pdf).put("midi", p.midi ?: org.json.JSONObject.NULL)
+            .put("pages", p.pages ?: org.json.JSONObject.NULL).put("mp3", p.mp3 ?: org.json.JSONObject.NULL)
+        val inst = org.json.JSONObject()
+        r.instruments.forEach { (k, v) -> inst.put(k, part(v)) }
+        return org.json.JSONObject()
+            .put("id", r.id).put("title", r.title)
+            .put("full_band", part(r.fullBand)).put("instruments", inst)
+            .put("original_parts", org.json.JSONArray(r.originalParts))
+            .put("generated_parts", org.json.JSONArray(r.generatedParts))
+            .toString()
+    }
+}
+
+/** PDF 악보를 화면 너비에 맞춘 그림으로 바꾼다. 페이지가 많으면 오래 걸리니 IO 스레드에서. */
+object PdfPages {
+    fun render(file: File, widthPx: Int, maxPages: Int = 30): List<Bitmap> =
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            PdfRenderer(fd).use { pdf ->
+                (0 until minOf(pdf.pageCount, maxPages)).map { i ->
+                    pdf.openPage(i).use { page ->
+                        val h = (widthPx.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
+                        Bitmap.createBitmap(widthPx, h, Bitmap.Config.ARGB_8888).also { bmp ->
+                            bmp.eraseColor(Color.WHITE)
+                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        }
+                    }
+                }
+            }
+        }
+}

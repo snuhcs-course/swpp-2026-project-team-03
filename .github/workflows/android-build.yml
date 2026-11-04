@@ -1,0 +1,100 @@
+name: Android build and tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests and debug APK
+        # Default server address/key in the APK. Without these secrets the APK
+        # uses http://localhost:8000 (phone on USB + adb reverse) and no key.
+        env:
+          ORG_GRADLE_PROJECT_rocky.serverUrl: ${{ secrets.ROCKY_SERVER_URL }}
+          ORG_GRADLE_PROJECT_rocky.apiKey: ${{ secrets.ROCKY_API_KEY }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest lintDebug assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocky-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+        timeout-minutes: 10
+
+  # The app on an Android 14 emulator against the real server code
+  # (pipeline replaced by server/tests/ci_fake_pipeline.py).
+  android-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Start ROCKY server with the fake pipeline
+        run: |
+          pip install -q -r server/requirements.txt
+          mkdir -p /tmp/rocky
+          cd server
+          ROCKY_RUNNER=subprocess ROCKY_HOME=/tmp/rocky/app ROCKY_RUNS=/tmp/rocky/runs ROCKY_INPUTS=/tmp/rocky/input \
+          ROCKY_MIDI_CMD="python $PWD/tests/ci_fake_pipeline.py midi {audio} {run}" \
+          ROCKY_PDF_CMD="python $PWD/tests/ci_fake_pipeline.py pdf {run}" \
+          nohup uvicorn rocky_server.app:app_from_env --factory --host 0.0.0.0 --port 8000 > /tmp/rocky/server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Instrumented tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # the team's demo Galaxy phones run Android 13
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: chmod +x ./gradlew && ./gradlew connectedDebugAndroidTest
+      - name: Upload reports and server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-e2e-reports
+          path: |
+            app/build/reports/androidTests/
+            /tmp/rocky/server.log

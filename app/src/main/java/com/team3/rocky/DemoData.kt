@@ -237,6 +237,24 @@ fun displayName(ctx: Context, uri: Uri): String {
     return name.substringBeforeLast('.')
 }
 
+/** 파일 이름 그대로 (확장자 포함). 서버가 확장자로 음원 형식을 판단한다. */
+fun fileName(ctx: Context, uri: Uri): String {
+    var name: String? = null
+    ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+        val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (i >= 0 && c.moveToFirst()) name = c.getString(i)
+    }
+    val n = name ?: uri.lastPathSegment?.substringAfterLast('/') ?: "song"
+    if ('.' in n) return n
+    // 이름에 확장자가 없으면 MIME 종류로 붙인다.
+    val ext = when (ctx.contentResolver.getType(uri)) {
+        "audio/mpeg" -> "mp3"; "audio/wav", "audio/x-wav", "audio/wave" -> "wav"
+        "audio/flac", "audio/x-flac" -> "flac"; "audio/mp4", "audio/x-m4a", "audio/aac" -> "m4a"
+        "audio/ogg" -> "ogg"; else -> "mp3"
+    }
+    return "$n.$ext"
+}
+
 /** 파일 이름에 쓸 수 없는 글자를 지운다. */
 fun safeFileName(s: String) = s.replace(Regex("[\\\\/:*?\"<>|\\t\\n]"), " ").trim().take(60).ifEmpty { "ROCKY" }
 

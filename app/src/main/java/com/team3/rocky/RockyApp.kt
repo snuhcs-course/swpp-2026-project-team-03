@@ -91,11 +91,16 @@ import com.team3.rocky.band.BandRepository
 import com.team3.rocky.band.LocalBandRepository
 import com.team3.rocky.band.PickScoreScreen
 import com.team3.rocky.band.ShareToBandScreen
+import com.team3.rocky.progress.AudioFile
 import com.team3.rocky.progress.ScoreJob
 import com.team3.rocky.progress.ScoreJobs
 import com.team3.rocky.progress.Stage
 import com.team3.rocky.progress.formatEta
+import com.team3.rocky.server.RockyApi
+import com.team3.rocky.server.ServerSettings
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 // ---------- 화면 목록 ----------
@@ -106,7 +111,7 @@ sealed class Screen {
     object Main : Screen()                                        // 1. 하단 탭 (새 악보 / 진행상황 / 보관함 / 나의 밴드)
     object Lineup : Screen()                                      // 2. 우리 밴드 구성
     object Upload : Screen()                                      // 3. 음원 업로드
-    class Original(val title: String) : Screen()                  // 3-1. 원곡 밴드 구성
+    class Original(val title: String, val audio: AudioFile?) : Screen() // 3-1. 원곡 밴드 구성 (audio null = 데모 곡)
     // 5. 결과. 밴드에서 열면 myPart(이 밴드에서 내 파트) 악보를 먼저 보여준다.
     class Result(val work: Work, val myPart: String? = null, val jobId: Long? = null) : Screen()
     class Export(val work: Work) : Screen()                       // 6. 내보내기
@@ -190,14 +195,18 @@ fun RockyApp() {
             )
             Screen.Upload -> UploadScreen(
                 onBack = { back() },
-                onNext = { title ->
+                onNext = { title, audio ->
                     // 데모 곡은 원곡 구성을 미리 채워 둔다.
-                    original = if (title == Demo.SONG_TITLE) Demo.DEMO_ORIGINAL.toSet() else emptySet()
+                    original = if (audio == null) Demo.DEMO_ORIGINAL.toSet() else emptySet()
                     originalUnknown = false
-                    go(Screen.Original(title))
+                    go(Screen.Original(title, audio))
                 },
             )
-            is Screen.Original -> LineupScreen(
+            is Screen.Original -> {
+              // 파이프라인 규칙: 원곡에 기타가 없으면 기타는 1대까지만 새로 만들 수 있다.
+              val twoGuitarsFromNone = !originalUnknown && original.isNotEmpty() &&
+                  Demo.guitarCount(original) == 0 && Demo.guitarCount(lineup) == 2
+              LineupScreen(
                 title = "원곡 구성",
                 heading = "원곡 밴드 구성을\n알려주세요",
                 sub = "원곡에서 들리는 악기를 골라주세요.\n우리 밴드에만 있는 악기는 AI가 새로 만들어요.",
@@ -206,12 +215,16 @@ fun RockyApp() {
                 onGuitars = { n -> original = Demo.setGuitarCount(original, n); originalUnknown = false },
                 onBack = { back() },
                 nextLabel = "악보 만들기 시작",
-                canNext = original.isNotEmpty() || originalUnknown,
+                canNext = (original.isNotEmpty() || originalUnknown) && !twoGuitarsFromNone,
                 unknown = originalUnknown,
                 onUnknown = { originalUnknown = !originalUnknown; if (originalUnknown) original = emptySet() },
                 footer = {
                     val ai = Demo.ordered(Demo.aiGenerated(Demo.ordered(lineup), Demo.ordered(original)))
                     when {
+                        twoGuitarsFromNone -> InfoNote(
+                            "원곡에 기타가 없으면 기타는 1대까지만 새로 만들 수 있어요. 우리 밴드 구성에서 기타를 1대로 줄여 주세요.",
+                            strong = true,
+                        )
                         originalUnknown -> InfoNote("ROCKY가 원곡을 듣고 어떤 악기가 있는지 알아서 판단해요. 원곡에 없는 파트는 AI가 새로 만들어요.")
                         original.isNotEmpty() -> InfoNote(
                             if (ai.isEmpty()) "원곡에 있는 파트만 악보로 옮겨요"
@@ -221,10 +234,15 @@ fun RockyApp() {
                     }
                 },
                 onNext = {
-                    ScoreJobs.start(ctx, s.title, Demo.ordered(lineup), if (originalUnknown) emptyList() else Demo.ordered(original))
+                    ScoreJobs.start(
+                        ctx, s.title, Demo.ordered(lineup),
+                        if (originalUnknown) emptyList() else Demo.ordered(original),
+                        audio = s.audio,
+                    )
                     openTab(Tab.PROGRESS)
                 },
-            )
+              )
+            }
             is Screen.Result -> ResultScreen(
                 work = s.work,
                 myPart = s.myPart,
@@ -588,6 +606,7 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
 
 @Composable
 private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
+    val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val p = job.progress
     val shown by animateFloatAsState(
@@ -600,7 +619,14 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(cs.surface)
-            .border(BorderStroke(1.dp, if (job.done && !job.saved) cs.primary else Color.Transparent), RoundedCornerShape(18.dp))
+            .border(
+                BorderStroke(1.dp, when {
+                    job.failed -> cs.error
+                    job.done && !job.saved -> cs.primary
+                    else -> Color.Transparent
+                }),
+                RoundedCornerShape(18.dp),
+            )
             .clickable(enabled = job.done, onClick = onOpen)
             .padding(18.dp),
     ) {
@@ -617,11 +643,27 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             Box(Modifier.fillMaxWidth(shown).height(8.dp).background(cs.primary))
         }
         Spacer(Modifier.height(10.dp))
+        val err = job.error
+        if (err != null) {
+            Text("악보를 만들지 못했어요", fontWeight = FontWeight.Bold, color = cs.error, fontSize = 14.sp)
+            Text(err, fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { ScoreJobs.retry(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp)) {
+                    Text("다시 시도", fontSize = 14.sp)
+                }
+                OutlinedButton(onClick = { ScoreJobs.useDemo(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp)) {
+                    Text("데모 결과 보기", fontSize = 14.sp, maxLines = 1)
+                }
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 when {
+                    err != null -> ""
                     job.done && job.saved -> "보관함에 저장됨"
                     job.done -> "눌러서 악보 보기 →"
+                    job.phase != null -> job.phase!!
                     p == null -> "준비 중"
                     else -> "${p.stage.index}/${Stage.entries.size} ${p.stage.title}"
                 },
@@ -629,26 +671,27 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
                 color = if (job.done && !job.saved) cs.primary else cs.onSurface,
                 modifier = Modifier.weight(1f),
             )
-            if (!job.done) Text(formatEta(p?.etaSec), fontSize = 12.sp, color = cs.onSurfaceVariant)
+            if (!job.done && err == null && job.phase == null) Text(formatEta(p?.etaSec), fontSize = 12.sp, color = cs.onSurfaceVariant)
             TextButton(onClick = { confirm = true }) {
-                Text(if (job.done) "지우기" else "취소", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                Text(if (job.done || job.failed) "지우기" else "취소", fontSize = 13.sp, color = cs.onSurfaceVariant)
             }
         }
     }
     if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
-            title = { Text(if (job.done) "목록에서 지울까요?" else "악보 만들기를 취소할까요?") },
+            title = { Text(if (job.done || job.failed) "목록에서 지울까요?" else "악보 만들기를 취소할까요?") },
             text = {
                 Text(
-                    if (!job.done) "지금까지 진행한 내용은 사라져요."
+                    if (job.failed) "만들지 못한 악보예요. 다시 만들려면 새 악보에서 음원을 다시 올려 주세요."
+                    else if (!job.done) "지금까지 진행한 내용은 사라져요."
                     else if (job.saved) "보관함에 저장한 악보는 그대로 남아요."
                     else "아직 보관함에 저장하지 않은 악보예요. 지우면 다시 볼 수 없어요."
                 )
             },
             confirmButton = {
                 TextButton(onClick = { confirm = false; ScoreJobs.remove(job) }) {
-                    Text(if (job.done) "지우기" else "취소하기", color = MaterialTheme.colorScheme.error)
+                    Text(if (job.done || job.failed) "지우기" else "취소하기", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("닫기") } },
@@ -858,17 +901,25 @@ private fun StepButton(text: String, enabled: Boolean, onClick: () -> Unit) {
 
 // ---------- 3. 음원 업로드 ----------
 @Composable
-fun UploadScreen(onBack: () -> Unit, onNext: (String) -> Unit) {
+fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var picked by remember { mutableStateOf<String?>(null) }
+    // 고른 음원 파일. 데모 곡이면 null.
+    var audio by remember { mutableStateOf<AudioFile?>(null) }
+    var editServer by remember { mutableStateOf(false) }
+    var serverUrl by remember { mutableStateOf(ServerSettings.url(ctx)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) picked = displayName(ctx, uri)
+        if (uri != null) {
+            picked = displayName(ctx, uri)
+            audio = AudioFile(uri, fileName(ctx, uri))
+        }
     }
     val shape = RoundedCornerShape(24.dp)
+    if (editServer) ServerDialog(onDismiss = { editServer = false; serverUrl = ServerSettings.url(ctx) })
     Page("음원 업로드", onBack, bottom = {
         Button(
-            onClick = { picked?.let(onNext) }, enabled = picked != null,
+            onClick = { picked?.let { onNext(it, audio) } }, enabled = picked != null,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text("다음", fontSize = 17.sp) }
     }) {
@@ -910,12 +961,58 @@ fun UploadScreen(onBack: () -> Unit, onNext: (String) -> Unit) {
                 if (picked != null) Text("다시 누르면 다른 파일을 고를 수 있어요", fontSize = 14.sp, color = cs.onSurface)
             }
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = { picked = Demo.SONG_TITLE }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+            OutlinedButton(
+                onClick = { picked = Demo.SONG_TITLE; audio = null },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+            ) {
                 Text("데모 곡으로 체험하기")
             }
             Spacer(Modifier.height(16.dp))
-            InfoNote("시연 버전: 어떤 파일을 올려도 미리 준비한 데모 곡 결과가 나와요.")
+            InfoNote(
+                "올린 음원은 ROCKY 서버에서 악보로 바뀌어요. 곡 길이에 따라 몇 분 걸려요.\n" +
+                    "데모 곡은 서버 없이 미리 준비한 결과를 바로 보여드려요."
+            )
+            TextButton(onClick = { editServer = true }, modifier = Modifier.padding(top = 4.dp)) {
+                Text("서버 설정: " + serverUrl.ifBlank { "없음" }, fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1)
+            }
             Spacer(Modifier.height(16.dp))
         }
     }
+}
+
+/** 서버 주소·키 바꾸기와 연결 확인. 기본값은 빌드 때 넣은 값(보통 http://localhost:8000). */
+@Composable
+fun ServerDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var url by remember { mutableStateOf(ServerSettings.url(ctx)) }
+    var key by remember { mutableStateOf(ServerSettings.key(ctx)) }
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(checking) {
+        if (checking) {
+            val ok = withContext(Dispatchers.IO) { RockyApi(url, key).health() }
+            result = if (ok) "연결됨 ✓" else "연결할 수 없어요"
+            checking = false
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("서버 설정") },
+        text = {
+            Column {
+                OutlinedTextField(url, { url = it; result = null }, label = { Text("주소") }, singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(key, { key = it; result = null }, label = { Text("키 (없으면 비워 두기)") }, singleLine = true)
+                Spacer(Modifier.height(4.dp))
+                Text("노트북에 USB로 연결했다면 http://localhost:8000", fontSize = 12.sp)
+                TextButton(onClick = { checking = true }, enabled = !checking && url.isNotBlank()) {
+                    Text(if (checking) "확인 중…" else result ?: "연결 확인")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { ServerSettings.save(ctx, url, key); onDismiss() }) { Text("저장") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
 }

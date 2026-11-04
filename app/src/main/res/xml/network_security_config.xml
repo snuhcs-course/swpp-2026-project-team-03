@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ROCKY 서버는 SGS 안에 있고 밖으로 공개 주소가 없어서, 시연 때는 노트북을 거쳐 붙는다.
+  - USB + adb reverse: http://localhost:8000
+  - 같은 Wi-Fi/핫스팟에서 노트북 IP로: http://<노트북 IP>:8000
+  제출한 APK는 바꿀 수 없으므로 어느 방법이든 쓸 수 있게 http를 허용한다.
+  공개 서버(HTTPS)가 생기면 cleartextTrafficPermitted를 false로 바꾼다.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

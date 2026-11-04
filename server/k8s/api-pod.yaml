@@ -1,0 +1,63 @@
+# The ROCKY API: a CPU-only pod that stays up (no GPU, so the 30-minute idle-GPU
+# rule does not apply). For each uploaded song it asks the laptop agent to start a
+# GPU Pod (unified.py) and then a CPU Pod (publish_scores.py). Code is read from /data/server.
+#
+#   kubectl apply -f server/k8s/api-pod.yaml
+#   kubectl port-forward pod/rocky-api 8000:8000   # from the laptop the phone is plugged into
+#   python3 server/agent/rocky_agent.py            # on the same laptop, in another terminal
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-api
+  labels:
+    app: rocky-api
+spec:
+  # the muscriptor-data volume is a hostpath on ferrari
+  nodeSelector:
+    kubernetes.io/hostname: ferrari
+  restartPolicy: Always
+  dnsConfig:
+    options:
+      - name: ndots
+        value: "1"
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: muscriptor-data
+  containers:
+    - name: api
+      image: python:3.12-slim
+      command: ["/bin/bash", "-lc"]
+      args:
+        - >-
+          set -euo pipefail;
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null;
+          pip install -q --cache-dir /data/cache/pip-api -r /data/server/requirements.txt;
+          cd /data/server && exec uvicorn rocky_server.app:app_from_env --factory
+          --host 0.0.0.0 --port 8000
+      env:
+        # The team accounts cannot grant this pod permission to create Pods (no Role/RoleBinding),
+        # so a laptop agent (server/agent/rocky_agent.py) starts the GPU and PDF Pods for it.
+        - name: ROCKY_RUNNER
+          value: agent
+        # one GPU per workspace: one song at a time, the rest wait in order
+        - name: ROCKY_PARALLEL
+          value: "1"
+        # whole songs as WAV are large (a 6-minute WAV is about 60 MB)
+        - name: ROCKY_MAX_UPLOAD_MB
+          value: "200"
+        # No API key: the API is reachable only through kubectl port-forward.
+        # If it is ever exposed publicly, set ROCKY_API_KEY from a Secret.
+      ports:
+        - containerPort: 8000
+      resources:
+        # the workspace has no guaranteed CPU or memory, so requests must be 0
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data
