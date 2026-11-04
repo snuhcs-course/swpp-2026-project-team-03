@@ -4,11 +4,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright');
-const { PDFDocument } = require('pdf-lib');
 
-const EDITOR_URL = 'https://tabtify.com/tab';
 const DEFAULT_TIMEOUT_MS = 90_000;
-const NAVIGATION_ATTEMPTS = 3;
+// Pages are served from this made-up origin through Playwright routing.
+// Every other request is blocked, so the score never leaves this machine.
+const ORIGIN = 'http://gp5-to-pdf.local';
+// The package does not export package.json, so find it from its main entry.
+const ALPHATAB_DIR = path.resolve(path.dirname(require.resolve('@coderline/alphatab')), '..');
+const ALPHATAB_VERSION = JSON.parse(fs.readFileSync(path.join(ALPHATAB_DIR, 'package.json'), 'utf8')).version;
+
+// A4 is 794 px wide at 96 dpi. The PDF margins below leave 718 px for the score.
+const PAGE_MARGIN_MM = 10;
+const SCORE_WIDTH_PX = 718;
+const SCORE_SCALE = 0.75;
 
 function usage() {
   return 'Usage: node convert.js INPUT.gp5 OUTPUT.pdf [--chrome PATH] [--timeout-ms N] [--force]';
@@ -53,156 +61,167 @@ function parseArgs(argv) {
   return args;
 }
 
-async function openEditor(page, timeoutMs) {
-  let lastError;
-  for (let attempt = 1; attempt <= NAVIGATION_ATTEMPTS; attempt += 1) {
-    try {
-      const response = await page.goto(EDITOR_URL, {
-        waitUntil: 'domcontentloaded', timeout: timeoutMs,
-      });
-      if (!response?.ok()) throw new Error(`Tabtify returned HTTP ${response?.status() ?? 'unknown'}`);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt === NAVIGATION_ATTEMPTS) break;
-      await page.waitForTimeout(2000);
-    }
-  }
-  throw lastError;
-}
+const PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: ${PAGE_MARGIN_MM}mm; }
+  html, body { margin: 0; background: #fff; }
+  h1 { font: 600 14px/1.3 sans-serif; margin: 0 0 6px; }
+  h1:not(:first-child) { break-before: page; }
+  .track { width: ${SCORE_WIDTH_PX}px; }
+  /* Rows of the score are moved into normal flow so that a page break never cuts a system. */
+  .row { position: relative; break-inside: avoid; }
+  .row > div { position: absolute !important; }
+</style>
+<script src="/alphatab/alphaTab.min.js"></script>
+</head><body></body></html>`;
 
-async function removeOverlappingTempoDuplicate(printView) {
-  return printView.evaluate(() => {
-    let removed = 0;
-    for (const svg of document.querySelectorAll('svg')) {
-      const texts = [...svg.querySelectorAll('text')];
-      for (let index = 1; index + 3 < texts.length; index += 1) {
-        const [firstSymbol, firstBpm, name, secondSymbol, secondBpm] = texts.slice(index - 1, index + 4);
-        const bpm = firstBpm.textContent?.trim();
-        if (!/^=\s*\d+(?:\.\d+)?$/.test(bpm) || bpm !== secondBpm.textContent?.trim()) continue;
-        const symbol = firstSymbol.textContent || '';
-        if (!/\p{L}/u.test(name.textContent || '') || symbol !== secondSymbol.textContent ||
-            [...symbol].length !== 1 || symbol.codePointAt(0) < 0xE000) continue;
-        const first = firstBpm.getBoundingClientRect();
-        const label = name.getBoundingClientRect();
-        const second = secondBpm.getBoundingClientRect();
-        const overlap = Math.min(first.right, label.right) - Math.max(first.left, label.left);
-        if (Math.abs(first.top - label.top) > 2 || Math.abs(first.top - second.top) > 2) continue;
-        if (overlap < first.width / 2 || second.left < label.right || second.left - label.right > 30) continue;
-        firstSymbol.remove();
-        firstBpm.remove();
-        removed += 1;
-        index += 3;
+const MIME = {
+  '.js': 'text/javascript', '.mjs': 'text/javascript', '.woff2': 'font/woff2', '.woff': 'font/woff',
+  '.otf': 'font/otf', '.eot': 'application/vnd.ms-fontobject', '.svg': 'image/svg+xml',
+};
+
+/** Serves the page, alphaTab and its music font from node_modules; blocks everything else. */
+async function routeLocalFiles(context, gp5) {
+  await context.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== ORIGIN) return route.abort('blockedbyclient');
+    if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: PAGE_HTML });
+    if (url.pathname === '/input.gp5') return route.fulfill({ contentType: 'application/octet-stream', body: gp5 });
+    if (url.pathname.startsWith('/alphatab/')) {
+      const file = path.join(ALPHATAB_DIR, 'dist', path.normalize(url.pathname.slice('/alphatab/'.length)));
+      if (file.startsWith(path.join(ALPHATAB_DIR, 'dist')) && fs.existsSync(file)) {
+        return route.fulfill({ contentType: MIME[path.extname(file)] || 'application/octet-stream', body: fs.readFileSync(file) });
       }
     }
-    return removed;
+    return route.fulfill({ status: 404, body: '' });
   });
 }
 
+/** Runs in the page: renders every track one after another and returns the track names. */
+async function renderAllTracks({ scale, width }) {
+  const at = window.alphaTab;
+  const bytes = new Uint8Array(await (await fetch('/input.gp5')).arrayBuffer());
+  const settings = () => {
+    const s = new at.Settings();
+    s.core.fontDirectory = '/alphatab/font/';
+    s.core.useWorkers = false;
+    s.core.enableLazyLoading = false;
+    s.core.includeNoteBounds = false;
+    s.player.enablePlayer = false;
+    s.display.layoutMode = at.LayoutMode.Page;
+    s.display.scale = scale;
+    return s;
+  };
+  const score = at.importer.ScoreLoader.loadScoreFromBytes(bytes, settings());
+  if (!score.tracks.length) throw new Error('No GP5 tracks found.');
+  // alphaTab cuts long track names off beside the staff, so the name is printed as a heading instead.
+  score.stylesheet.singleTrackTrackNamePolicy = at.model.TrackNamePolicy.Hidden;
+  const songTitle = [score.title, score.artist].map((t) => (t || '').trim()).filter(Boolean).join(' - ');
+
+  for (let index = 0; index < score.tracks.length; index += 1) {
+    const holder = document.createElement('div');
+    holder.className = 'track';
+    holder.style.width = `${width}px`;
+    const heading = document.createElement('h1');
+    heading.textContent = [songTitle, score.tracks[index].name].filter(Boolean).join(' · ');
+    document.body.appendChild(heading);
+    document.body.appendChild(holder);
+    const api = new at.AlphaTabApi(holder, settings());
+    await new Promise((resolve, reject) => {
+      api.postRenderFinished.on(resolve);
+      api.error.on((e) => reject(new Error(e?.message || String(e))));
+      api.renderScore(score, [index]);
+    });
+
+    // alphaTab places each rendered chunk absolutely. Group chunks that share
+    // a top edge into rows, then stack the rows in normal flow.
+    const surface = holder.querySelector('.at-surface');
+    const chunks = [...surface.children].filter((el) => el.tagName === 'DIV');
+    const rows = new Map();
+    for (const chunk of chunks) {
+      const top = Math.round(parseFloat(chunk.style.top) || 0);
+      if (!rows.has(top)) rows.set(top, []);
+      rows.get(top).push(chunk);
+    }
+    // Rows stay inside the surface: alphaTab's music-font CSS only applies there.
+    const flow = surface;
+    for (const top of [...rows.keys()].sort((a, b) => a - b)) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      let height = 0;
+      for (const chunk of rows.get(top)) {
+        height = Math.max(height, parseFloat(chunk.style.height) || chunk.getBoundingClientRect().height);
+        chunk.style.top = '0px';
+        row.appendChild(chunk);
+      }
+      row.style.height = `${Math.ceil(height)}px`;
+      flow.appendChild(row);
+    }
+    surface.style.height = 'auto';
+    surface.style.position = 'static';
+    holder.style.height = 'auto';
+  }
+  await document.fonts.ready;
+  return score.tracks.map((t) => t.name);
+}
+
+/** Runs in the page: removes a numeric tempo mark that is drawn on top of a tempo name. */
+function removeOverlappingTempoDuplicate() {
+  let removed = 0;
+  for (const svg of document.querySelectorAll('svg')) {
+    const texts = [...svg.querySelectorAll('text')];
+    for (let index = 1; index + 3 < texts.length; index += 1) {
+      const [firstSymbol, firstBpm, name, secondSymbol, secondBpm] = texts.slice(index - 1, index + 4);
+      const bpm = firstBpm.textContent?.trim();
+      if (!/^=\s*\d+(?:\.\d+)?$/.test(bpm) || bpm !== secondBpm.textContent?.trim()) continue;
+      const symbol = firstSymbol.textContent || '';
+      if (!/\p{L}/u.test(name.textContent || '') || symbol !== secondSymbol.textContent ||
+          [...symbol].length !== 1 || symbol.codePointAt(0) < 0xE000) continue;
+      const first = firstBpm.getBoundingClientRect();
+      const label = name.getBoundingClientRect();
+      const second = secondBpm.getBoundingClientRect();
+      const overlap = Math.min(first.right, label.right) - Math.max(first.left, label.left);
+      if (Math.abs(first.top - label.top) > 2 || Math.abs(first.top - second.top) > 2) continue;
+      if (overlap < first.width / 2 || second.left < label.right || second.left - label.right > 30) continue;
+      firstSymbol.remove();
+      firstBpm.remove();
+      removed += 1;
+      index += 3;
+    }
+  }
+  return removed;
+}
+
 async function convert(args) {
+  const gp5 = fs.readFileSync(args.input);
   const browser = await chromium.launch({
     headless: true,
     ...(args.chrome ? { executablePath: path.resolve(args.chrome) } : {}),
   });
   const temporaryPdf = `${args.output}.${process.pid}.tmp`;
   try {
-    // The editor gives roughly 300px to its tools. A 1000px viewport leaves
-    // a score close to the printable width of an A4 page.
-    const context = await browser.newContext({
-      viewport: { width: 1000, height: 1200 },
-      locale: 'en-US',
-    });
-    // alphaTab's print view calls window.print(). Chromium's headless print
-    // dialog cannot be completed; page.pdf() saves the same view below.
-    await context.addInitScript(() => { window.print = () => {}; });
+    const context = await browser.newContext({ viewport: { width: 794, height: 1123 }, locale: 'en-US' });
+    await routeLocalFiles(context, gp5);
     const page = await context.newPage();
     page.setDefaultTimeout(args.timeoutMs);
-    await openEditor(page, args.timeoutMs);
-    await page.locator('#alphatab-container').waitFor({ state: 'visible' });
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`${ORIGIN}/`, { waitUntil: 'load' });
+    if (!(await page.evaluate(() => Boolean(window.alphaTab)))) {
+      throw new Error(`alphaTab did not load. ${pageErrors.join(' ')}`.trim());
+    }
+    const tracks = await page.evaluate(renderAllTracks, { scale: SCORE_SCALE, width: SCORE_WIDTH_PX });
+    const duplicates = await page.evaluate(removeOverlappingTempoDuplicate);
+    if (duplicates) console.log(`Removed ${duplicates} overlapping duplicate tempo mark(s).`);
+    console.log(`Rendered ${tracks.length} track(s) with alphaTab ${ALPHATAB_VERSION}: ${tracks.join(', ')}`);
 
-    const score = page.locator('#alphatab-container');
-    const originalScore = await score.textContent();
-    const fileChooserPromise = page.waitForEvent('filechooser');
-    await page.getByText('Open', { exact: true }).first().click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(args.input);
-
-    await page.waitForFunction(
-      (previous) => {
-        const current = document.querySelector('#alphatab-container')?.textContent;
-        const score = document.querySelector('#alphatab-container');
-        return current && current !== previous && current.trim().length > 0 &&
-          score.querySelectorAll('svg').length > 0;
-      },
-      originalScore,
-      { timeout: args.timeoutMs },
-    );
-    await page.evaluate(() => new Promise((resolve) => {
-      const score = document.querySelector('#alphatab-container');
-      let quietTimer;
-      const done = () => { observer.disconnect(); resolve(); };
-      const observer = new MutationObserver(() => {
-        clearTimeout(quietTimer);
-        quietTimer = setTimeout(done, 1500);
-      });
-      observer.observe(score, { childList: true, subtree: true, characterData: true });
-      quietTimer = setTimeout(done, 1500);
-    }));
-    const trackButton = page.locator('button').filter({ hasText: /\d+ strings/ }).last();
-    await trackButton.click();
-    const tracks = page.locator('[role="button"][tabindex="0"]:has(button[aria-label="Edit track"])');
-    const trackCount = await tracks.count();
-    if (trackCount < 1) throw new Error('No GP5 tracks found in Tabtify.');
-    await tracks.first().click();
-
-    const merged = await PDFDocument.create();
-    for (let index = 0; index < trackCount; index += 1) {
-      if (index > 0) {
-        const previousScore = await score.textContent();
-        await trackButton.click();
-        await tracks.nth(index).click();
-        await page.waitForFunction(
-          (previous) => {
-            const current = document.querySelector('#alphatab-container')?.textContent;
-            return current && current !== previous && document.querySelectorAll('#alphatab-container svg').length > 0;
-          },
-          previousScore,
-          { timeout: args.timeoutMs },
-        );
-      }
-
-      await page.getByText('Export', { exact: true }).first().click();
-      const printViewPromise = page.waitForEvent('popup');
-      await page.getByRole('button', { name: /PDF \(\.pdf\)/ }).click();
-      const printView = await printViewPromise;
-      printView.setDefaultTimeout(args.timeoutMs);
-      await printView.setViewportSize({ width: 1000, height: 1200 });
-      await printView.locator('svg').first().waitFor({ state: 'visible' });
-      await printView.waitForFunction(() =>
-        document.querySelectorAll('svg').length > 0 &&
-        (document.body.textContent || '').trim().length > 50,
-      );
-      await printView.evaluate(() => document.fonts.ready);
-      const duplicates = await removeOverlappingTempoDuplicate(printView);
-      if (duplicates) console.log(`Removed ${duplicates} overlapping duplicate tempo mark(s) from print view.`);
-      const trackPdf = await PDFDocument.load(await printView.pdf({
-        format: 'A4',
-        printBackground: true,
-        preferCSSPageSize: true,
-      }));
-      if (trackPdf.getPageCount() === 0) throw new Error(`Track ${index + 1} produced no PDF pages.`);
-      const pages = await merged.copyPages(trackPdf, trackPdf.getPageIndices());
-      pages.forEach((pdfPage) => merged.addPage(pdfPage));
-      await printView.close();
-      const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
-      if (await cancel.isVisible()) await cancel.click();
+    const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
+    if (pdf.length < 1000 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
+      throw new Error('alphaTab did not produce a valid PDF.');
     }
     fs.mkdirSync(path.dirname(args.output), { recursive: true });
-    fs.writeFileSync(temporaryPdf, await merged.save());
-    const pdf = fs.readFileSync(temporaryPdf);
-    if (pdf.length < 1000 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
-      throw new Error('Tabtify did not produce a valid PDF.');
-    }
+    fs.writeFileSync(temporaryPdf, pdf);
     fs.renameSync(temporaryPdf, args.output);
     return args.output;
   } finally {

@@ -19,5 +19,5 @@ in this README. The explicitly published GP5-to-PDF reference files under
 ## GP5 to PDF
 
 The standalone [GP5 to PDF module](gp5_to_pdf/README.md) renders completed GP5
-tabs through Tabtify. It is separate from the bundled Android demo and from
+tabs locally with alphaTab. It is separate from the bundled Android demo and from
 the MIDI-to-GP5 stage.
