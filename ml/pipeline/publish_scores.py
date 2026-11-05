@@ -11,6 +11,7 @@ not the input recording or Demucs stems.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import hashlib
 import json
@@ -18,6 +19,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 
 import pretty_midi
@@ -167,7 +169,7 @@ def publication_ready(run: Path) -> bool:
     """Validate the full publication contract before --resume skips the stage."""
     try:
         contract = json.loads((run / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-        if contract.get("version") != 4 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
+        if contract.get("version") != 5 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
             return False
         families = {family(track) for track in pretty_midi.PrettyMIDI(str(run / "full_score.mid")).instruments
                     if track.notes}
@@ -202,6 +204,13 @@ def publication_ready(run: Path) -> bool:
                 if not gp5.is_file() or sha256(gp5) != track["source_gp5_sha256"]:
                     return False
         for item in mp3s:
+            midi_source = Path(item["midi_source"])
+            if midi_source.is_absolute() or ".." in midi_source.parts:
+                return False
+            if (item.get("converter") != "musescore-score" or
+                    Path(item["source"]).suffix != ".mscx" or
+                    sha256(run / midi_source) != item["midi_source_sha256"]):
+                return False
             check_mp3(run / item["mp3"])
         return True
     except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
@@ -244,7 +253,9 @@ def notation_midi(source: pretty_midi.PrettyMIDI, path: Path) -> dict[int, int]:
 
 
 def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: str, force: bool,
-            chrome: Path | None = None) -> dict:
+            chrome: Path | None = None, render_workers: int = 1) -> dict:
+    if not 1 <= render_workers <= 4:
+        raise ValueError("render_workers must be between 1 and 4")
     final = run / "full_score.mid"
     manifest_path = run / "manifest.json"
     if not final.is_file() or not manifest_path.is_file():
@@ -271,6 +282,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     source_hash = sha256(final)
     outputs = {}
     audio_outputs = {}
+    render_jobs = []
     try:
         previous = json.loads((out / "score_outputs.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -285,6 +297,11 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                 and prior.get("sha256") == sha256(target))
 
     def render(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
+        def task() -> None:
+            render_pdf(key, source, converter, command, tracks)
+        render_jobs.append(task)
+
+    def render_pdf(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
         target = out / f"{key}.pdf"
         prior = previous.get("full_band", {}) if key == "full_band" else previous.get("instruments", {}).get(key, {})
         if force or not unchanged(target, source, prior):
@@ -298,16 +315,28 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                         "sha256": sha256(target)}
 
     def render_audio(key: str, source: Path, tracks: list[dict]) -> None:
+        def task() -> None:
+            export_audio(key, source, tracks)
+        render_jobs.append(task)
+
+    def export_audio(key: str, source: Path, tracks: list[dict]) -> None:
+        # MuseScore 3's direct MIDI-to-MP3 export can silently render GM guitar
+        # and bass programs as piano. Importing to MSCX first preserves patches.
+        notation = out / f"{key}_audio.mscx"
+        musescore_score(source, notation, musescore, force=force)
         target = out / f"{key}.mp3"
         prior = (previous.get("audio", {}).get("full_band", {}) if key == "band"
                  else previous.get("audio", {}).get("instruments", {}).get(key, {}))
-        if force or not unchanged(target, source, prior):
+        if force or not unchanged(target, notation, prior):
             target.unlink(missing_ok=True)
-            subprocess.run([musescore, "-o", str(target), str(source)], check=True)
+            subprocess.run([musescore, "-o", str(target), str(notation)], check=True)
         check_mp3(target)
         audio_outputs[key] = {"mp3": target.relative_to(run).as_posix(),
-                              "source": source.relative_to(run).as_posix(),
-                              "source_sha256": sha256(source), "converter": "musescore-midi",
+                              "source": notation.relative_to(run).as_posix(),
+                              "source_sha256": sha256(notation),
+                              "midi_source": source.relative_to(run).as_posix(),
+                              "midi_source_sha256": sha256(source),
+                              "converter": "musescore-score",
                               "tracks": tracks, "bytes": target.stat().st_size,
                               "sha256": sha256(target)}
 
@@ -399,8 +428,19 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         for key in ("guitar_1", "guitar_2"):
             render_audio(key, part_midis[key], part_tracks[key])
 
+    # All score, GP5 and MIDI inputs are finalized before export. Each worker
+    # writes a distinct target; cap processes to avoid exhausting the CPU Pod.
+    if render_workers == 1:
+        for task in render_jobs:
+            task()
+    else:
+        with ThreadPoolExecutor(max_workers=render_workers) as pool:
+            futures = [pool.submit(task) for task in render_jobs]
+            for future in futures:
+                future.result()
+
     extra_keys = ("guitar_1", "guitar_2") if guitar_extra_dir is not None else ()
-    contract = {"version": 4, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
+    contract = {"version": 5, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
                 "drum_notation_map": {str(k): v for k, v in DRUM_NOTATION_MAP.items()},
                 "drum_notation_mapped_counts": {str(k): v for k, v in drum_mapping_counts.items()},
                 "full_band": outputs["full_band"],
@@ -413,6 +453,15 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     manifest["score_outputs"] = contract_path.relative_to(run).as_posix()
     manifest["score_publication"] = "complete"
     write_json(manifest_path, manifest)
+    # The shared PVC can briefly lag immediately after parallel renderers exit.
+    # Confirm the complete contract before reporting publication success.
+    for attempt in range(10):
+        if publication_ready(run):
+            break
+        if attempt < 9:
+            time.sleep(0.5)
+    else:
+        raise RuntimeError(f"Published scores did not pass contract validation: {contract_path}")
     return contract
 
 
@@ -426,9 +475,12 @@ def main() -> None:
     parser.add_argument("--pdfinfo", default="pdfinfo")
     parser.add_argument("--chrome", type=Path, help="optional Chrome executable for GP5-to-PDF")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--render-workers", type=int, default=2,
+                        help="parallel PDF/MP3 exports (1-4; default 2)")
     args = parser.parse_args()
     result = publish(args.run.resolve(), args.musescore, args.node,
-                     args.gp5_converter.resolve(), args.pdfinfo, args.force, args.chrome)
+                     args.gp5_converter.resolve(), args.pdfinfo, args.force, args.chrome,
+                     args.render_workers)
     print(json.dumps({"full_band": result["full_band"]["pages"],
                       "instruments": {key: value["pages"] for key, value in result["instruments"].items()},
                       "audio": {"full_band": result["audio"]["full_band"]["mp3"],

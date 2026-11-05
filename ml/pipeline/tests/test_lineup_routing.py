@@ -24,15 +24,15 @@ def one_track(part, start=0.0):
     return score
 
 
-@pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated", [
-    ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True),
-    ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False),
-    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False),
-    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True),
-    ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True),
+@pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers", [
+    ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1),
+    ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1),
+    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1),
+    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2),
+    ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1),
 ])
 def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, auto_split,
-                                    expected_stems, expected_guitars, generated):
+                                    expected_stems, expected_guitars, generated, workers):
     audio = tmp_path / "song.wav"
     sf.write(str(audio), np.zeros((16000, 2), dtype="float32"), 8000, subtype="FLOAT")
     args = SimpleNamespace(audio=audio, output_dir=tmp_path / "run", original=original,
@@ -41,7 +41,8 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
                            modules_root=tmp_path / "modules", model_python=Path(sys.executable),
                            tab_python=Path(sys.executable), no_publish=True,
                            bsroformer_models_dir=tmp_path / "models",
-                           bsroformer_lib_dir=tmp_path / "pylib")
+                           bsroformer_lib_dir=tmp_path / "pylib",
+                           transcription_workers=workers)
 
     def save_beats(path, beats, downbeats):
         Path(path).write_text(json.dumps({"beats": beats, "downbeats": downbeats}), encoding="utf-8")
@@ -86,6 +87,10 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
             for stem in (*STEMS, "no_vocals"):
                 sf.write(str(directory / f"{stem}.wav"), np.zeros((128, 2), dtype="float32"),
                          8000, subtype="FLOAT")
+        elif stage == "muscriptor_batch":
+            jobs = json.loads(Path(command[command.index("--jobs-file") + 1]).read_text(encoding="utf-8"))
+            for job in jobs:
+                one_track(job["stem"]).write(job["output"])
         elif stage.startswith("muscriptor_"):
             one_track(stage.removeprefix("muscriptor_")).write(command[3])
         elif stage in {"guitar_tab", "guitar_compressed", "generated_guitar_tab"}:
@@ -115,8 +120,16 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     monkeypatch.setattr(runner, "command", fake_command)
     result = pretty_midi.PrettyMIDI(str(runner.run()))
     assert sum(24 <= track.program <= 31 for track in result.instruments) == expected_guitars
-    assert {stage.removeprefix("muscriptor_") for stage, _ in commands
-            if stage.startswith("muscriptor_")} == expected_stems
+    batch = [command for stage, command in commands if stage == "muscriptor_batch"]
+    assert len(batch) == (1 if workers == 1 else 0)
+    if workers > 1:
+        assert {stage.removeprefix("muscriptor_") for stage, _ in commands
+                if stage.startswith("muscriptor_")} == expected_stems
+    jobs_path = runner.out / "stem_midi" / "transcription_jobs.json"
+    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+    assert {job["stem"] for job in jobs} == expected_stems
+    if batch:
+        assert "--model" in batch[0] and batch[0][batch[0].index("--model") + 1] == "large"
     assert ("midigpt" in [stage for stage, _ in commands]) == generated
     separator_command = next(command for stage, command in commands if stage == "bs_roformer")
     assert "--mix-stems" not in separator_command

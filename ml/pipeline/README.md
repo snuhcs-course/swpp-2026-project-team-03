@@ -129,8 +129,18 @@ automatically inside that Pod.
 For a standalone local publication with system Chrome, pass
 `--chrome /path/to/chrome` to `publish_scores.py`; the SGS Playwright Pod uses
 its packaged browser and needs no such option.
+After preparing score and GP5 inputs, the publisher runs independent PDF and
+MP3 exports with two workers by default (the CPU Pod passes
+`--render-workers 2` explicitly). Set `--render-workers 1` to compare against
+sequential export, or use up to four after checking CPU and memory headroom.
+It writes the publication contract only after every export succeeds.
+Before the two-stage MP3 patch, on the Immigrant Song validation CPU Pod,
+forced exports with one, two, then
+one worker took 115, 67, and 117 seconds respectively; the second serial run
+checks that the gain was not just a warm-cache effect. Package installation
+time is excluded from these export timings.
 
-The frontend contract is `scores/score_outputs.json` (version 4): a full-band
+The frontend contract is `scores/score_outputs.json` (version 5): a full-band
 PDF and MP3, plus a PDF and MP3 for every present instrument family (guitar,
 bass, piano, drums). The MP3 names follow the iteration 2 demo:
 `scores/band.mp3`, `scores/guitar.mp3`, `scores/bass.mp3`,
@@ -156,8 +166,11 @@ export, the imported MuseScore score receives explicit staff names such as
 MuseScore 3 showing the GM patch subtypes `Jazz Guitar` and `Fingered Bass`
 as if they were different instrument families. GP5 PDF inputs are publication
 copies with matching track names and programs; the processed source GP5s stay
-unchanged. MP3 inputs preserve the final assembled MIDI programs and notes,
-including each song's acoustic or electric guitar choice. The
+unchanged. Each MP3 first imports its MIDI into a MuseScore `.mscx` file and
+then renders that score. MuseScore 3's direct MIDI-to-MP3 command rendered
+one-note guitar and bass tests identically to piano despite their distinct GM
+programs. The two-stage path preserves the final assembled MIDI programs and
+notes, including each song's acoustic or electric guitar choice. The
 JSON records the exact mapping and affected note counts. The JSON also records
 PDF and MP3 source paths, converter, bytes and SHA-256, plus PDF page counts.
 `manifest.json` points to that file through `score_outputs`, and
@@ -256,6 +269,49 @@ uvx --python 3.13 --from muscriptor==0.4.0 python ml/pipeline/transcribe_with_pr
 (`small`, Mac CPU) its MIDI was byte-identical to the command's, and the
 estimate after the first chunk (38.5 s left) was within 2 s of the actual
 time. `audio_to_midi.sh` still uses the command.
+
+The unified runner defaults to two concurrent MuScriptor stem processes on
+the SGS A100, starting with guitar and bass to reduce time waiting for the
+longest stem. `--transcription-workers 1` uses one process and loads the model
+once for all stems; `--transcription-workers 4` is available for comparison.
+On the Immigrant Song validation, the one-process stage took 200.54 seconds,
+two workers took 160.82 seconds with the long-stem-first order (166.03 seconds
+in the old order), and four took 159.23 seconds. Peak GPU memory
+for two/four workers was 22,343/44,684 MiB. All four MIDI files were
+byte-identical across modes. The two-worker default saves most of the time
+with half the GPU memory of four workers; smaller GPUs should use one worker.
+An end-to-end two-worker GPU run of that song recorded 303.55 seconds across
+stages, versus 360.74 seconds in the one-worker run. Separation also varied
+between those runs (73.80 versus 92.04 seconds), so the MuScriptor stage
+measurements above are the cleaner concurrency comparison.
+Each stem keeps its own progress JSONL and MIDI output; valid MIDI files are
+reused on resume. The run manifest records wall-clock `stage_seconds` for
+every stage, including the MuScriptor batch.
+This changed the pipeline contract to 10: start a new output directory when
+switching from an older run.
+
+To repeat the MuScriptor comparison after a completed run, use a fresh
+benchmark output directory:
+
+```bash
+/data/rocky-unified/.venv/bin/python ml/pipeline/bench_transcription.py \
+  /data/output_unified/song/stem_midi/transcription_jobs.json \
+  /data/output_unified/song-transcription-bench \
+  --model /data/model/model.safetensors --device cuda --workers 2 4
+```
+
+The script records wall time, peak GPU memory, and per-stem SHA-256 equality
+against the source run's MIDI in `summary.json`. For PDF/MP3 comparison,
+rerun `publish_scores.py` on the same completed score with `--force` and
+`--render-workers 1` or `2`, keeping the CPU Pod's limits unchanged.
+
+The 12-song November 3 validation gave a baseline median of 807.5 seconds
+per song (GPU stage 629.5 seconds, CPU publication 178 seconds). Stem
+separation was only 14.1 seconds median; the sum of MuScriptor chunk times
+was 302.9 seconds median. These chunk times omit model loading and setup.
+MIDI-GPT can also take several minutes for a requested second guitar. The
+new `stage_seconds` values measure full stage wall time so the next GPU run
+can establish the actual gain; local tests do not measure A100 throughput.
 
 ## Running on the team GPU server (SGS)
 

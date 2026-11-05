@@ -9,6 +9,7 @@ stage has a checked output and is recorded in manifest.json for --resume.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import hashlib
 import json
@@ -16,6 +17,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Callable
 
 import pretty_midi
@@ -71,10 +73,20 @@ def digest(path: Path) -> str:
     return sha.hexdigest()
 
 
-def atomic_json(path: Path, value: dict) -> None:
+def atomic_json(path: Path, value: dict | list) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def valid_midi(path: Path) -> bool:
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    try:
+        pretty_midi.PrettyMIDI(str(path))
+    except (OSError, ValueError, EOFError):
+        return False
+    return True
 
 
 def family(inst: pretty_midi.Instrument) -> str | None:
@@ -274,12 +286,13 @@ class Runner:
         self.model_python = args.model_python.absolute()
         self.tab_python = args.tab_python.absolute()
         self.config = {
-            "pipeline_contract": 9,
+            "pipeline_contract": 10,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,
             "requested": sorted(self.requested_parts), "requested_guitars": self.requested_guitars,
             "model": args.model,
+            "transcription_workers": getattr(args, "transcription_workers", 2),
             "midigpt_model": args.midigpt_model, "device": args.device,
             "beat_checkpoint": args.beat_checkpoint, "seed": args.seed,
             "separator": PACKAGE_VERSION + "/BS-RoFormer-SW-6stem",
@@ -322,17 +335,20 @@ class Runner:
             print(f"skip {name}: validated saved output", flush=True)
             return
         print(f"run {name}", flush=True)
+        started = time.perf_counter()
         try:
             action()
             if not ready():
                 raise RuntimeError(f"{name}: outputs are missing, empty, or invalid: {outputs}")
         except Exception as exc:
+            self.manifest.setdefault("stage_seconds", {})[name] = round(time.perf_counter() - started, 2)
             self.manifest["status"] = "failed"
             self.manifest["error"] = f"{type(exc).__name__}: {exc}"
             atomic_json(self.manifest_path, self.manifest)
             raise
         if name not in self.manifest["completed"]:
             self.manifest["completed"].append(name)
+        self.manifest.setdefault("stage_seconds", {})[name] = round(time.perf_counter() - started, 2)
         self.manifest["status"] = "running"
         self.manifest.pop("error", None)
         atomic_json(self.manifest_path, self.manifest)
@@ -342,7 +358,8 @@ class Runner:
 
         def action() -> None:
             publish(self.out, self.args.musescore, self.args.node,
-                    self.args.gp5_converter, self.args.pdfinfo, force=False)
+                    self.args.gp5_converter, self.args.pdfinfo, force=False,
+                    render_workers=getattr(self.args, "render_workers", 1))
 
         self.stage("publish_outputs", [self.out / "scores" / "score_outputs.json"],
                    action, validate=lambda: publication_ready(self.out))
@@ -368,16 +385,34 @@ class Runner:
         midi_dir = self.out / "stem_midi"
         midi_dir.mkdir(exist_ok=True)
         stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
-        for stem in transcribe_stems:
-            def transcribe(stem=stem):
-                cmd = [str(self.model_python), str(self.pipeline / "transcribe_with_progress.py"),
-                       str(stems_dir / f"{stem}.wav"), str(stem_midis[stem]),
-                       "--model", self.args.model, "--device", self.args.device,
-                       "--progress", str(midi_dir / f"{stem}.progress.jsonl")]
-                if stem in HINTS:
-                    cmd += ["--instruments", HINTS[stem]]
-                self.command(f"muscriptor_{stem}", cmd)
-            self.stage(f"muscriptor_{stem}", [stem_midis[stem]], transcribe)
+        jobs_file = midi_dir / "transcription_jobs.json"
+        def transcribe():
+            atomic_json(jobs_file, [{"stem": stem, "audio": str(stems_dir / f"{stem}.wav"),
+                                     "output": str(stem_midis[stem]),
+                                     "instruments": HINTS.get(stem),
+                                     "progress": str(midi_dir / f"{stem}.progress.jsonl")}
+                                    for stem in transcribe_stems])
+            base = [str(self.model_python), str(self.pipeline / "transcribe_with_progress.py")]
+            if getattr(self.args, "transcription_workers", 2) == 1:
+                self.command("muscriptor_batch", base + [
+                    "--jobs-file", str(jobs_file), "--model", self.args.model,
+                    "--device", self.args.device, "--resume-existing",
+                ])
+            else:
+                with ThreadPoolExecutor(max_workers=self.args.transcription_workers) as pool:
+                    futures = []
+                    # Longest stems first reduces tail idle time with two workers.
+                    for stem in (s for s in ("guitar", "bass", "piano", "drums") if s in transcribe_stems):
+                        cmd = base + [str(stems_dir / f"{stem}.wav"), str(stem_midis[stem]),
+                                      "--model", self.args.model, "--device", self.args.device,
+                                      "--instruments", HINTS[stem], "--progress",
+                                      str(midi_dir / f"{stem}.progress.jsonl"), "--resume-existing"]
+                        futures.append(pool.submit(self.command, f"muscriptor_{stem}", cmd))
+                    for future in futures:
+                        future.result()
+        if transcribe_stems:
+            self.stage("muscriptor_batch", list(stem_midis.values()), transcribe,
+                       validate=lambda: all(valid_midi(path) for path in stem_midis.values()))
 
         raw = self.out / "stems_merged.mid"
         self.stage("merge_stems", [raw], lambda: merge_stem_midis(stem_midis, raw, transcribe_stems))
@@ -562,6 +597,8 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--bsroformer-models-dir", type=Path, default=Path("/data/bsrofo/models"))
     p.add_argument("--bsroformer-lib-dir", type=Path, default=Path("/data/bsrofo/pylib"))
     p.add_argument("--device", default="cuda", choices=("cpu", "cuda"))
+    p.add_argument("--transcription-workers", type=int, default=2, choices=(1, 2, 4),
+                   help="MuScriptor stem processes on one GPU (default 2; use 1 on smaller GPUs)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--musescore", default="musescore3", help="MuseScore executable for PDF and MP3 export")
     p.add_argument("--node", default="node", help="Node.js executable for guitar/bass GP5 PDF export")
@@ -569,6 +606,8 @@ def cli(argv: list[str] | None = None) -> int:
                    default=Path("/data/rocky-unified/ml/gp5_to_pdf/convert.js"))
     p.add_argument("--pdfinfo", default="pdfinfo", help="Poppler pdfinfo executable")
     p.add_argument("--no-publish", action="store_true", help="stop after MIDI/GP5 for diagnostics")
+    p.add_argument("--render-workers", type=int, default=2,
+                   help="parallel PDF/MP3 exports when publishing inline (1-4; default 2)")
     args = p.parse_args(argv)
     try:
         original_parts, original_guitars, original_unknown = parse_lineup(args.original, original=True)
