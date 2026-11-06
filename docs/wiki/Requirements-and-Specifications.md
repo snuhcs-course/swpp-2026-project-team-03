@@ -8,7 +8,7 @@ Team 03 · 영양실조 \| Version 0.3 \| November 6, 2026
 |---|---|---|
 | 0.1 | 2026-10-09 | Initial requirements reflecting the confirmed band-arrangement scope, full-song 4/4 support, account-based arrangement library, and planned musician evaluations. |
 | 0.2 | 2026-10-23 | Narrowed the scope from re-arranging any song for any lineup to band songs only: parts in the original are transcribed as recorded, and only selected instruments absent from the original are generated. Rewrote US-03 and NFR-02 accordingly; added US-11 (sign-up and sign-out), US-12 (form a team), US-13 (share a song with my team), labeling of AI-generated parts, and NFR-10 (per-user results, except songs shared with the owner's team); reordered US-01/US-02 so the lineup is chosen before upload, as in the app; added a survey-findings section (48 respondents) mapped to requirements; added Iteration 2 implementation status and planned improvements (multi-song upload, per-song progress, browsing while processing, background processing, key change); updated the wireframe, scope boundaries, and validation plan. Removed the 4/4-only input restriction, which came from the dropped arrangement model. |
-| 0.3 | 2026-11-06 | Connected the requirements to the working app, server, and final pipeline. Added US-14 (enter the original lineup) and US-15 (track progress while using the app, from PL-02 and PL-03). Added one or two guitars to US-01 and two-guitar handling to US-03. Rewrote US-07, US-08, and US-10 for server-side accounts and results; rewrote US-09 to cover sharing and saving PDF and MIDI files; replaced team member lookup with invite codes in US-12 and made one shared library per band the target of US-13. Fixed the input to MP3 and WAV, set the latency target, redefined lineup fidelity for guitar counts, and revised the access-control and device requirements. Added PL-06 (non-band song warning) and PL-07 (cancel removes queued GPU work). Redrew the wireframe with transition arrows and failure handling, and updated the evaluation set, musician evaluation, and scope. Selected seven user stories for UAT and linked them to the requirements. |
+| 0.3 | 2026-11-06 | Connected the requirements to the working app, server, and final pipeline. Added US-14 (enter the original lineup) and US-15 (track progress while using the app, from PL-02 and PL-03). Added one or two guitars to US-01 and two-guitar handling to US-03. Rewrote US-07 and US-10 for server-side accounts and results; removed US-08 (recovering a song after the app is fully closed); rewrote US-09 to cover sharing and saving PDF and MIDI files; replaced team member lookup with invite codes in US-12 and made one shared library per band the target of US-13. Fixed the input to MP3 and WAV, replaced the band-song restriction with a notice on the upload screen, set the latency target, redefined lineup fidelity for guitar counts, and revised the access-control and device requirements. Added PL-07 (cancel removes queued GPU work) and removed PL-01 (multi-song upload) and PL-05 (key change). Added live versions to the scope, and moved key change, lyric alignment, and score editing out of scope. Redrew the wireframe with transition arrows and failure handling, and updated the evaluation set, musician evaluation, and scope. Selected seven user stories for UAT and linked them to the requirements. |
 
 ## 2. Project Abstract
 
@@ -32,15 +32,15 @@ In October 2026 the team surveyed 48 band-club members (guitar 22, drums 11, key
 
 | Finding | Respondents | Reflected in |
 |---|---|---|
-| Play rock or band music | 48 / 48 | Band songs only (NFR-01, Section 9) |
-| At least 60% of songs played in the past year were originally performed by band instruments | 38 / 48 | Band songs only (NFR-01) |
+| Play rock or band music | 48 / 48 | Band-song focus (NFR-01, Section 9) |
+| At least 60% of songs played in the past year were originally performed by band instruments | 38 / 48 | Band-song focus (NFR-01) |
 | When the original lacks an instrument the team has, that member sits the song out or the team gives up the song | 37 / 48 | Generated parts for missing instruments (US-03) |
 | Gave up a song because a score existed but not for our lineup (e.g., no piano score) | 16 / 48 | US-03 |
 | Would use an app that gives each part of a band song exactly as recorded (4–5 / 5) | 42 / 48 | As-recorded transcription (US-03) |
 | Would use an app that keeps the original parts and adds only our missing instruments (4–5 / 5) | 28 / 48 | US-03 |
 | Riffs, solos, and drum fills must stay as in the original (mean, 1–5) | 3.88 | Transcribe existing parts instead of re-arranging (US-03, Section 9) |
 | Expect an AI score to be "almost perfect" before using it (others: 80% correct and fix a little 14, only chords and rhythm 4) | 30 / 48 | Accuracy evaluation (NFR-05, Section 8) |
-| After getting a score, still have to fix wrong parts by hand | 24 / 48 | NFR-05; score editing is pending (Section 9) |
+| After getting a score, still have to fix wrong parts by hand | 24 / 48 | NFR-05; score editing is out of scope (Section 9) |
 | Spend more than one hour preparing one song's part | 24 / 48 | Customer need (Section 3) |
 | Prepare parts from paid score sites 35, YouTube covers 32, by ear 26 (multiple choice) | — | Competitive landscape (Section 4) |
 | Guitarists who prefer TAB or TAB with standard notation | 20 / 22 | TAB for guitar (US-05) |
@@ -49,10 +49,10 @@ In October 2026 the team surveyed 48 band-club members (guitar 22, drums 11, key
 | Drummers who need fills in the score (exact fills 7, basic pattern with main fills 4) | 11 / 11 | NFR-05, Section 8 |
 | Guitarists who say a score split into rhythm and lead parts is necessary when there are two guitars (4–5 / 5) | 16 / 22 | Two-guitar handling (US-01, US-03, US-14) |
 | Would wait 10 minutes or more for a result (5 minutes or less: 5) | 31 / 48 | Latency target (NFR-04) |
-| Single feature respondents would pick (Q17): live/cover version 18, as recorded 13, re-arrange non-band songs 12, as recorded plus missing parts 5 | — | Core scope stays as recorded plus missing parts (US-03); live and cover versions considered only if time remains (Section 9) |
+| Single feature respondents would pick (Q17): live/cover version 18, as recorded 13, re-arrange non-band songs 12, as recorded plus missing parts 5 | — | Core scope stays as recorded plus missing parts (US-03); live versions are in scope, and cover versions are considered only if time remains (Section 9) |
 | Original part missing from our team happens often (4–5 / 5); usually another instrument covers it (37) or the part is dropped (22) | 26 / 48 | Out of scope: re-arranging for a smaller lineup (Section 9) |
-| Gave up a song because the original was not a band song | 20 / 48 | Out of scope: songs not played by band instruments (Section 9) |
-| Most wanted extra features: backing track without my instrument 30, key change 27, score editing 24, playback while reading the score 22, sharing with members 16, difficulty adjustment 12 | — | Sharing with members: US-12, US-13. Playback while reading the score: US-06. Key change: planned (PL-05). Backing tracks and difficulty adjustment out of scope; score editing pending (Section 9) |
+| Gave up a song because the original was not a band song | 20 / 48 | Not blocked; the upload screen warns about poor results (US-02, NFR-01) |
+| Most wanted extra features: backing track without my instrument 30, key change 27, score editing 24, playback while reading the score 22, sharing with members 16, difficulty adjustment 12 | — | Sharing with members: US-12, US-13. Playback while reading the score: US-06. Key change, score editing, backing tracks, and difficulty adjustment are out of scope (Section 9) |
 
 ## 4. Competitive Landscape
 
@@ -72,7 +72,7 @@ Unlike transcription-only tools, ROCKY also writes new parts for instruments the
 
 ## 5. Functional Requirements
 
-The following user stories describe the mandatory release scope. Every story has a testable Given–When–Then acceptance scenario. Acceptance criteria check that the right parts are delivered in the right form; transcription accuracy and the musical quality of generated parts are assessed separately (Section 8). Section 5.1 reports what the Iteration 3 app implements.
+The following user stories describe the mandatory release scope. Every story has a testable Given–When–Then acceptance scenario. Acceptance criteria check that the right parts are delivered in the right form; transcription accuracy and the musical quality of generated parts are assessed separately (Section 8). Section 5.1 reports what the Iteration 3 app implements. US-08 was removed in this version.
 
 ### US-01 Choose the Band Lineup
 
@@ -88,7 +88,9 @@ As a band member, I want to upload an MP3 or WAV recording of a band song, so th
 
 > **AC-02-1:** Given I am signed in, have chosen a lineup, and have selected a decodable MP3 or WAV recording, when I confirm the song and complete the original-lineup step, then the app uploads the recording, creates a score request for that lineup, and shows its status.
 >
-> **AC-02-2:** Given I select a corrupted, oversized, or unsupported file, when I attempt to upload it, then the app explains the failure and permits another selection.
+> **AC-02-2:** Given I select a corrupted or unsupported file, when I attempt to upload it, then the app explains the failure and permits another selection.
+>
+> **AC-02-3:** Given I am on the upload screen, when I choose a song, then the app shows a notice that songs not played by band instruments may give poor results.
 
 ### US-03 Get Transcribed and Generated Parts
 
@@ -145,12 +147,6 @@ As a registered user, I want to access previous results in my Library, so that I
 > **AC-07-2:** Given a saved result exists, when I reopen it, then its previously generated outputs are displayed without automatically rerunning the pipeline.
 >
 > **AC-07-3:** Given I saved a result, when I sign out and sign back in with the same account, including on another device, then the same result opens from my Library.
-
-### US-08 Retain an In-Progress Request
-
-As a registered user, I want to leave and reopen the app while my request is processing, so that my request and eventual result are not lost.
-
-> **AC-08-1:** Given the server has accepted a job, when I fully close the Android app and later reopen it and sign back in, then I can see the job status and receive the result if the server has completed the job.
 
 ### US-09 Export and Save Scores
 
@@ -231,42 +227,27 @@ The Iteration 3 Android app ([`iteration-3-demo`](https://github.com/snuhcs-cour
 | Story | Status in Iteration 3 |
 |---|---|
 | US-01 | Implemented, including one or two guitars. |
-| US-02 | Partial. Upload, status, and the server's 200 MB limit are implemented. The file picker accepts any audio file and the server also accepts FLAC, M4A, and OGG, so both must be restricted to MP3 and WAV. |
+| US-02 | Partial. Upload, status, and the band-instrument notice are implemented. The file picker accepts any audio file and the server also accepts FLAC, M4A, and OGG, so both must be restricted to MP3 and WAV. |
 | US-03 | Implemented for live server jobs, including failure reason and retry. After a failure the app can also open the bundled demo result, which is a demonstration fallback and not part of the requirement. |
 | US-04 | Implemented for full-band and per-instrument PDF scores. |
 | US-05 | Implemented in guitar and bass PDF scores. There is no separate TAB screen. |
 | US-06 | Implemented for full-band and per-instrument synthesized MP3, including position-preserving part changes and score following. |
 | US-07 | Partial. Saving, renaming, deleting, and reopening work on the same device. AC-07-3 on another device needs the server-side account and Library database. |
-| US-08 | **Not implemented.** The server job continues, but the app's job list is lost when the app is fully closed. The app must reconnect to server jobs after it reopens. |
 | US-09 | Partial. PDF, MIDI, and MP3 sharing is implemented. Saving directly to phone storage (AC-09-2) is not implemented. |
 | US-10 | Partial. Sign-in is implemented with a device-local account database. A server-side account database is planned. |
 | US-11 | Partial. The sign-up form, validation, part preselection, and sign-out are implemented on the device. The verification code is shown on screen instead of being sent by email. |
 | US-12 | Partial. Creating, joining, and leaving bands by invite code are implemented between accounts on the same device. Joining from another device needs the server-side database. |
 | US-13 | Partial. Sharing works between accounts on the same device. One shared library per band across devices needs the server-side database. |
 | US-14 | Implemented, including "I don't know" and the two-guitar block. |
-| US-15 | Implemented for the current app session. Because the job list is kept only in memory, it depends on US-08 after the app is fully closed. |
+| US-15 | Implemented while the app stays open. |
 
 ### 5.2 Planned Improvements (Not Mandatory)
 
-The team plans the following improvements. They are not part of the mandatory release scope above and may change. PL-02 (per-song progress) and PL-03 (browsing while processing) moved to US-15 in this version.
-
-**PL-01 Upload Several Songs at Once.** As a band member, I want to upload several songs in one request, so that I can prepare a whole setlist at once. *Status: not implemented as one request. Songs can be added one at a time and are processed in order.*
-
-> **AC-PL-01-1:** Given I choose the lineup for the first song and check "Apply the same instruments to the next songs", when I add more songs, then every song in the request uses that lineup.
->
-> **AC-PL-01-2:** Given I leave the checkbox unchecked, when I add the next song, then the app asks me to choose a lineup for that song.
+The team plans the following improvements. They are not part of the mandatory release scope above and may change. PL-02 (per-song progress) and PL-03 (browsing while processing) moved to US-15 in this version. PL-01 (multi-song upload), PL-05 (key change), and PL-06 (non-band song warning after processing) were removed.
 
 **PL-04 Process in the Background.** As a band member, I want processing to continue while the app is in the background, so that I can use other apps while I wait. *Status: the server continues processing. The app has no background service to guarantee progress updates or result download while it is in the background.*
 
 > **AC-PL-04-1:** Given songs are processing, when I move the app to the background and later return to it, then processing has continued and the progress screen shows the current progress.
-
-**PL-05 Choose the Key.** As a band member, I want to enter the key I want before processing, so that the scores match the key our vocalist sings in. *Status: not implemented.*
-
-> **AC-PL-05-1:** Given I enter a target key together with the lineup and song, when the job completes, then every delivered part is written in that key.
-
-**PL-06 Warn About Non-Band Songs.** As a band member, I want ROCKY to warn me when a song may not be a band song, so that I do not rely on a poor result. *Status: not implemented. The upload screen currently asks users to upload band songs.*
-
-> **AC-PL-06-1:** Given a processed song does not appear to be a band song, when I open its result, then the app displays a warning.
 
 **PL-07 Cancel Server Processing.** As a band member, I want cancelling a song to stop its server work, so that the GPU becomes available for other songs. *Status: partial. Cancelling removes the song from the app, but the server job continues.*
 
@@ -278,9 +259,9 @@ Requirements below are testable where possible.
 
 | ID | Category | Requirement / verification |
 |---|---|---|
-| NFR-01 | Input scope | Accept decodable MP3 and WAV audio of full-length band songs, i.e., songs whose instrumental parts are played by keyboard, guitar, bass, and/or drums. Uploads over 200 MB are rejected with a message. |
+| NFR-01 | Input scope | Accept decodable MP3 and WAV audio of full-length songs, including live versions. ROCKY is designed for band songs, i.e., songs whose instrumental parts are played by keyboard, guitar, bass, and/or drums. Other songs are not blocked, and the upload screen warns that they may give poor results. |
 | NFR-02 | Lineup fidelity | Functional tests shall verify all 23 possible non-empty requested lineups (keyboard, bass, and drums each on or off, with zero to two guitars). Delivered parts must match the requested lineup, selected instruments present in the original must be transcribed, and selected instruments absent from the original must be generated and labeled AI-generated. The guitar cases 2→2, 2→1, 1→1, 1→2, 0→1, and blocked 0→2 shall each be verified. |
-| NFR-03 | Processing robustness | Accepted jobs persist server-side if the Android app closes, and successful outputs can be recovered after the app reopens. |
+| NFR-03 | Processing robustness | While the app stays open, a lost connection does not lose an accepted job, and retry reconnects to it. If the app is fully closed during processing, the song is not recovered and must be uploaded again. |
 | NFR-04 | Performance | A 3-minute song shall complete within 10 minutes, measured from the start of processing with a GPU available. Time spent waiting for a free GPU is reported separately. Record median, 90th-percentile, and failure rates for complete song processing. In the survey, 31 of 48 respondents would wait 10 minutes or more, and 5 would wait 5 minutes or less. |
 | NFR-05 | Musical usability | Transcription is evaluated against reference MIDI. After TAB and keyboard processing, delivered parts shall contain no onsets one player cannot play and no notes outside the instrument range. Scores must be evaluated for physical playability, rhythmic legibility, musical fit, and rehearsal readiness using a consistent musician evaluation protocol. |
 | NFR-06 | Output integrity | Generated PDF documents must open and contain parts for the intended instrument(s); audio must correspond to the saved result. |
@@ -293,9 +274,9 @@ Requirements below are testable where possible.
 
 | ID | Change from v0.2 | Reason and current gap |
 |---|---|---|
-| NFR-01 | Set the upload limit to 200 MB and kept MP3 and WAV. | 200 MB allows full-song WAV files. The server must reject the other formats it currently accepts. |
+| NFR-01 | Kept MP3 and WAV, added live versions, and removed the plan to reject non-band songs. | The team decided to warn users instead of detecting non-band songs. The server must reject the other formats it currently accepts. |
 | NFR-02 | Replaced 15 combinations with 23 lineups and six guitar cases. | Guitar can now be one or two parts, and generation depends on the original lineup. |
-| NFR-03 | Changed recovery from "through the user account" to "after the app reopens." | Recovery does not need to depend on server-side accounts. It is not implemented yet (US-08). |
+| NFR-03 | Removed recovery after the app is fully closed. | The team decided not to implement it. Retry remains available while the app is open. |
 | NFR-04 | Replaced the pending target with a 10-minute target. | The survey and evaluation threshold T5 now give a target. T5 measures the GPU stage, while this requirement measures completion and must be measured on the current pipeline. |
 | NFR-05 | Added the playability limit. | Evaluation threshold T6 and keyboard playability processing now cover it. |
 | NFR-07 | Stated the retention behavior and the deletion requirement. | The server has no user accounts yet. It returns a result to anyone who has the job ID and can reach the server, so owner-only access is not met until the server-side account database is added. Deleting a Library entry does not yet remove server results. |
@@ -319,9 +300,9 @@ The Android UI must make the path from lineup selection to scores clear. Screens
 |---|---|---|
 | Sign-in / sign-up / profile | Sign in; sign up with email verification; edit nickname, part, and photo; sign out. | Sign-in errors; sign-up field errors and duplicate email/nickname. |
 | Lineup selection | Toggle keyboard, drums, bass, and guitar; set one or two guitars (own part preselected); continue to upload. | Block empty selection; clearly display chosen configuration. |
-| Upload | Select MP3/WAV or the demo song; check the server connection. | Invalid, oversized, or undecodable file; retry. |
+| Upload | Select MP3/WAV or the demo song; check the server connection. | Invalid or undecodable file; choose another file. A notice warns that songs not played by band instruments may give poor results. |
 | Original lineup | Select the original instruments or "I don't know"; review parts to be generated; start processing. | Block when nothing is selected; block two guitars when the original has none. |
-| Progress | View queued, waiting, running, completed, and failed songs with stage, percentage, and time left; open a result; retry; cancel or remove. | Failure reason and retry; restore jobs after relaunch (US-08). |
+| Progress | View queued, waiting, running, completed, and failed songs with stage, percentage, and time left; open a result; retry; cancel or remove. | Failure reason and retry while the app stays open. |
 | Score viewer | Choose full band or part; read all PDF pages with TAB where available; play audio; follow the score; save; share with a band; export. Generated parts carry an AI-generated label. | Indicate unavailable audio or files. |
 | Export | Select band and part files; share them; save them to the phone. | Indicate unavailable files; failed export feedback. |
 | Library | List saved results; reopen; rename; delete. | Empty Library state. |
@@ -360,7 +341,7 @@ Findings will be grouped by instrument and failure type, used to prioritize pipe
 
 | Confirmed for initial release | Still to decide / refine |
 |---|---|
-| Band songs only; full-length MP3/WAV inputs; lineups of keyboard, bass, drums, and one or two guitars; original lineup input with "I don't know"; as-recorded transcription for selected instruments in the original; generated parts, labeled AI-generated, for selected instruments the original lacks; two-guitar separation, compression, and second-guitar generation; individual and ensemble scores; TAB for guitar/bass; synthesized audio playback; progress tracking while using the app; recovery of server jobs after reopening the app; sign-up, sign-in, and sign-out; Library; PDF and MIDI sharing and saving; bands with invite codes and one shared library per band; per-user results. Planned, not mandatory: multi-song upload, background processing, key change, non-band song warning, server-side cancellation. | How to detect non-band songs (candidates: check the transcription for missing guitar/bass/drums or a high share of other instruments; check the energy share of the separated "other" stem); server access from a phone without a connected laptop; handling several users with one GPU per workspace; design of the server-side account and band database; whether the owner can stop sharing a song; whether to add survey-requested score editing. |
-| Out of scope: re-arranging a song for a smaller lineup, except compressing two original guitars for a one-guitar band (other instruments of the original that the band lacks are not redistributed to other parts); songs not played by band instruments; difficulty adjustment; source-separation backing tracks; generating two guitars when the original has no guitar. Live and concert versions will be considered only if time remains. Lyric alignment in the score is on hold. | Known limitations: when the original lineup is unknown, automatic guitar-count detection can be wrong (3 of 14 songs in testing), and the user's input is more reliable; if detection finds no guitar and the band requests two, the job fails; parts can still switch between instruments mid-song; some notes are classified as "other" instruments; the timing stage assumes a single tempo for the whole song; Library, account, and band data remain on one device until the server-side database is added. |
+| Full-length MP3/WAV inputs, including live versions; a notice that songs not played by band instruments may give poor results; lineups of keyboard, bass, drums, and one or two guitars; original lineup input with "I don't know"; as-recorded transcription for selected instruments in the original; generated parts, labeled AI-generated, for selected instruments the original lacks; two-guitar separation, compression, and second-guitar generation; individual and ensemble scores; TAB for guitar/bass; synthesized audio playback; progress tracking while the app stays open; sign-up, sign-in, and sign-out; Library; PDF and MIDI sharing and saving; bands with invite codes and one shared library per band; per-user results. Planned, not mandatory: background processing and server-side cancellation. | Server access from a phone without a connected laptop; handling several users with one GPU per workspace; design of the server-side account and band database; whether the owner can stop sharing a song. |
+| Out of scope: re-arranging a song for a smaller lineup, except compressing two original guitars for a one-guitar band (other instruments of the original that the band lacks are not redistributed to other parts); detecting or blocking songs not played by band instruments; recovering a song after the app is fully closed during processing; uploading several songs in one request; key change; lyric alignment in the score; score editing; difficulty adjustment; source-separation backing tracks; generating two guitars when the original has no guitar. Cover versions will be considered only if time remains. | Known limitations: songs not played by band instruments can give poor results; when the original lineup is unknown, automatic guitar-count detection can be wrong (3 of 14 songs in testing), and the user's input is more reliable; if detection finds no guitar and the band requests two, the job fails; parts can still switch between instruments mid-song; some notes are classified as "other" instruments; the timing stage assumes a single tempo for the whole song; Library, account, and band data remain on one device until the server-side database is added. |
 
 Development context (not a user-facing requirement): the app sends the requested and original lineups to a server. The server separates the recording into instrument tracks, transcribes the selected tracks, aligns notes to beats and bars, prepares playable guitar, bass, and keyboard parts, generates parts the original lacks, and publishes PDF, MIDI, and MP3 files. The earlier M2M arrangement approach was dropped because it altered the original riffs and fills. Technical details are in the [Design Documentation](Design-Documentation), and evaluation details are in the [Testing Documentation](Testing-Documentation).
