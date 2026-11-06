@@ -104,7 +104,7 @@ AI 파이프라인 코드는 이 브랜치가 아니라 [`perf/pipeline-latency`
 
 ## 3. Demo video
 
-- Iteration 3 working demo — (영상 링크 추가 예정)
+- [Iteration 3 working demo](https://drive.google.com/file/d/1mpPb0rXEK5a93LJj82WM1YPhiAR9aUGR/view?usp=sharing)
 - [Iteration 2 working demo — 로그인과 Immigrant Song 시연](https://drive.google.com/file/d/1wVii7g0WqUVoUHAEtb1jWcls4gWSXsjV/view?usp=sharing)
 - [Iteration 1 demo — 이전 버전 참고 영상](https://drive.google.com/file/d/16sLdD9x2Bg739iO0UaESiY7LWRzARTw-/view?usp=drive_link)
 
@@ -184,7 +184,7 @@ app/src/main/assets/demo/   미리 넣어 둔 결과 파일
 ### 테스트
 ```bash
 ./gradlew :app:testDebugUnitTest            # 입력 검사·비밀번호 해시·이메일 인증·악기 구성·밴드 규칙·진행률·서버 API 응답 처리 (58개)
-./gradlew :app:connectedDebugAndroidTest    # 에뮬레이터 필요: 회원 DB·밴드 DB·화면 흐름·서버 연결 e2e (15개)
+./gradlew :app:connectedDebugAndroidTest    # 에뮬레이터 필요: 회원 DB·밴드 DB·저장 목록·데모 파일·PDF 내보내기·화면 흐름·서버 연결 e2e (21개)
 cd server && pip install -r requirements-dev.txt && pytest -q   # 서버 API (42개)
 ```
 세 가지 모두 push할 때마다 GitHub Actions(`.github/workflows/android-build.yml`)에서 자동으로 돌아갑니다. 에뮬레이터 테스트는 실제 서버 코드에 가짜 파이프라인(`server/tests/ci_fake_pipeline.py`)을 붙여 업로드부터 결과 화면까지 확인합니다.
