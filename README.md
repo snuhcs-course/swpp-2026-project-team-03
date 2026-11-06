@@ -11,18 +11,18 @@ Team 3 (영양실조) · 김채연, 박재욱, 조수빈, 홍순형
 ## 1. How to run
 
 ### 개발·실행 환경
-앱은 Android Studio로 작업했습니다. Android Studio의 정확한 빌드 번호는 기록되지 않았습니다. 프로젝트에 고정된 도구·플랫폼 버전은 다음과 같습니다.
+앱은 Android Studio 2026.1.3으로 작업하고 에뮬레이터에서 확인했습니다. 프로젝트에 고정된 도구·플랫폼 버전과 확인한 개발 환경은 다음과 같습니다.
 
 | 항목 | 버전·요구사항 |
 |---|---|
-| IDE | Android Studio |
+| IDE | Android Studio 2026.1.3 (build AI-261.26222.65.2613.15948027), 내장 JDK(JBR) 25.0.2 |
 | 빌드 | Gradle Wrapper 9.5.0, Android Gradle Plugin 9.3.3 |
 | 언어 / UI | Kotlin 2.2.10, Jetpack Compose (Material 3), Java 11 소스 호환성 |
 | Android SDK | compile/target SDK 37, min SDK 26 (Android 8) |
-| 실행 기기 | API 26 이상 Android Emulator 또는 Android 기기 (팀 시연 기기: 갤럭시, Android 13) |
+| 실행 기기 | API 26 이상 Android Emulator 또는 Android 기기 (팀 시연 기기: 갤럭시, Android 13). 확인한 에뮬레이터: Medium Phone, Android 16 (API 36, Google Play, arm64-v8a), Android Emulator 37.1.11 |
 | 서버 | Python 3.12, FastAPI (`server/`), SGS 팀 워크스페이스의 CPU Pod `rocky-api` |
 | AI 파이프라인 | SGS GPU Pod (NVIDIA A100), `ml/pipeline/unified.py` (서버가 요청하면 노트북 agent가 Pod를 띄움) |
-| 서버 연결용 노트북 | macOS, kubectl, kubelogin, adb, Python 3.8 이상 |
+| 서버 연결용 노트북 | macOS, kubectl, kubelogin, adb, Python 3.8 이상. 확인한 환경: macOS 27.2 (Apple Silicon), kubectl 1.32.2, kubelogin 1.34.0, adb (platform-tools 37.0.1), Python 3.14.3 |
 
 ### 실행 방법
 
