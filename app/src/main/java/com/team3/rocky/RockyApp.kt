@@ -677,8 +677,8 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
                 Text(tr("새 악보 만들기", "Make a new score"))
             }
         } else {
-            InfoNote(tr("다른 화면을 봐도 계속 만들어요. 앱만 완전히 끄지 마세요.",
-                "Keeps going while you use other screens. Just don't close the app."))
+            InfoNote(tr("다른 화면을 봐도 계속 만들어요. 앱만 끄지 마세요.",
+                "Keeps going on other screens. Just don't close the app."))
             Spacer(Modifier.height(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }) }
