@@ -1,6 +1,8 @@
 // AI-generated with Claude Code, 2026-10-15
 package com.team3.rocky.auth
 
+import com.team3.rocky.tr
+
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,10 +30,10 @@ class AuthRepository(
         val email = SignUpValidator.normalizeEmail(form.email)
         val nickname = form.nickname.trim()
         if (SignUpValidator.Field.EMAIL !in errors && db.emailExists(email)) {
-            errors[SignUpValidator.Field.EMAIL] = "이미 가입된 이메일이에요"
+            errors[SignUpValidator.Field.EMAIL] = tr("이미 가입된 이메일이에요", "This email is already registered")
         }
         if (SignUpValidator.Field.NICKNAME !in errors && db.nicknameExists(nickname)) {
-            errors[SignUpValidator.Field.NICKNAME] = "이미 사용 중인 닉네임이에요"
+            errors[SignUpValidator.Field.NICKNAME] = tr("이미 사용 중인 닉네임이에요", "This nickname is taken")
         }
         if (errors.isNotEmpty()) return@withContext AuthResult.Invalid(errors)
 
@@ -47,7 +49,7 @@ class AuthRepository(
             )
         } catch (e: UserDatabase.DuplicateException) {
             val field = if (e.column == UserDatabase.C_NICKNAME) SignUpValidator.Field.NICKNAME else SignUpValidator.Field.EMAIL
-            val message = if (field == SignUpValidator.Field.NICKNAME) "이미 사용 중인 닉네임이에요" else "이미 가입된 이메일이에요"
+            val message = if (field == SignUpValidator.Field.NICKNAME) tr("이미 사용 중인 닉네임이에요", "This nickname is taken") else tr("이미 가입된 이메일이에요", "This email is already registered")
             return@withContext AuthResult.Invalid(mapOf(field to message))
         }
         // 가입하면 바로 로그인된 상태로 시작한다.
@@ -59,7 +61,7 @@ class AuthRepository(
     suspend fun login(email: String, password: String): AuthResult = withContext(Dispatchers.IO) {
         val normalized = SignUpValidator.normalizeEmail(email)
         if (normalized.isEmpty() || password.isEmpty()) {
-            return@withContext AuthResult.Failure("이메일과 비밀번호를 입력해 주세요")
+            return@withContext AuthResult.Failure(tr("이메일과 비밀번호를 입력해 주세요", "Please enter your email and password"))
         }
         val found = db.findCredentials(normalized)
         // 없는 이메일인지 틀린 비밀번호인지 알려주지 않는다 (가입 여부를 알아내는 것을 막기 위해).
@@ -87,12 +89,12 @@ class AuthRepository(
             val n = nickname.trim()
             SignUpValidator.nicknameError(n)?.let { return@withContext Result.failure(IllegalArgumentException(it)) }
             if (db.nicknameTakenByOther(n, user.id)) {
-                return@withContext Result.failure(IllegalArgumentException("이미 사용 중인 닉네임이에요"))
+                return@withContext Result.failure(IllegalArgumentException(tr("이미 사용 중인 닉네임이에요", "This nickname is taken")))
             }
             try {
                 db.updateProfile(user.id, n, INSTRUMENT_ORDER.filter { it in instruments })
             } catch (e: UserDatabase.DuplicateException) {
-                return@withContext Result.failure(IllegalArgumentException("이미 사용 중인 닉네임이에요"))
+                return@withContext Result.failure(IllegalArgumentException(tr("이미 사용 중인 닉네임이에요", "This nickname is taken")))
             }
             Result.success(db.findById(user.id)!!)
         }
@@ -113,7 +115,7 @@ class AuthRepository(
     }
 
     companion object {
-        const val WRONG_CREDENTIALS = "이메일 또는 비밀번호가 맞지 않아요"
+        val WRONG_CREDENTIALS get() = tr("이메일 또는 비밀번호가 맞지 않아요", "Wrong email or password")
         private const val PREF = "rocky_session"
         private const val KEY_USER_ID = "user_id"
         private const val NO_USER = -1L

@@ -169,7 +169,7 @@ fun Avatar(image: ImageBitmap?, nickname: String, size: Dp, modifier: Modifier =
         contentAlignment = Alignment.Center,
     ) {
         if (image != null) {
-            Image(image, contentDescription = "프로필 사진", contentScale = ContentScale.Crop, modifier = Modifier.size(size))
+            Image(image, contentDescription = tr("프로필 사진", "Profile photo"), contentScale = ContentScale.Crop, modifier = Modifier.size(size))
         } else {
             Text(
                 nickname.trim().take(1).ifEmpty { "?" },

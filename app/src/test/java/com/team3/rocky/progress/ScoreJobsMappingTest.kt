@@ -20,6 +20,22 @@ class ScoreJobsMappingTest {
             ScoreJobs.originalFromServer(listOf("piano", "drums", "guitar", "guitar2"), listOf("guitar", "drums")))
     }
 
+    @Test fun aiMadeSecondGuitarIsMarkedAsGenerated() {
+        // 원곡 기타 1대 + 우리 밴드 기타 2대: AI가 기타 2를 만들면 결과에 guitar_1/guitar_2가 따로 온다 → 기타 2는 ✨
+        val original = ScoreJobs.originalFromServer(
+            listOf("drums", "guitar", "guitar2"), listOf("drums", "guitar"),
+            generated = emptyList(), resultParts = listOf("drums", "guitar_1", "guitar_2"),
+        )
+        assertEquals(listOf("drums", "guitar"), original)
+        assertEquals(listOf("drums", "guitar"),
+            ScoreJobs.originalFromServer(listOf("drums", "guitar", "guitar2"), listOf("drums", "guitar"), generated = listOf("guitar_2")))
+    }
+
+    @Test fun generatedPartsAreNotOriginal() {
+        assertEquals(listOf("drums"),
+            ScoreJobs.originalFromServer(listOf("piano", "drums"), listOf("drums", "piano"), generated = listOf("piano")))
+    }
+
     @Test fun serverOriginalWithoutGuitar() {
         assertEquals(listOf("drums"), ScoreJobs.originalFromServer(listOf("guitar", "guitar2"), listOf("drums")))
     }

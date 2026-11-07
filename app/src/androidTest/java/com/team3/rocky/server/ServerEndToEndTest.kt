@@ -103,7 +103,8 @@ class ServerEndToEndTest {
         compose.setContent { RockyTheme { ExportScreen(work, onBack = {}) } }
         assertTrue(compose.onAllNodesWithText("MIDI").fetchSemanticsNodes().isNotEmpty())
         assertTrue(compose.onAllNodesWithText("음원").fetchSemanticsNodes().isNotEmpty())
-        compose.onNodeWithText("1개 파일 보내기").assertIsDisplayed()
+        compose.onNodeWithText("휴대폰에 저장").assertIsDisplayed()
+        compose.onNodeWithText("다른 앱으로 보내기").assertIsDisplayed()
     }
 
     @Test fun unreachableServerFailsWithMessage() {
@@ -114,6 +115,6 @@ class ServerEndToEndTest {
         }
         waitFor(job, 30)
         assertTrue(job.failed)
-        assertTrue(job.error!!.contains("서버에 연결할 수 없어요"))
+        assertTrue(job.error!!.contains("인터넷에 연결할 수 없어요"))
     }
 }

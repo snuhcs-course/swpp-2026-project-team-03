@@ -26,7 +26,7 @@ object Demo {
 
     // 결과 화면 파일 이름: band.png(또는 band-1.png, band-2.png …), band.mp3, band.pdf, band.mid
     const val BAND = "band"
-    const val SONG_TITLE = "데모 곡 (Immigrant Song - Led Zeppelin)"
+    val SONG_TITLE get() = tr("데모 곡 (Immigrant Song - Led Zeppelin)", "Demo song (Immigrant Song - Led Zeppelin)")
 
     const val GUITAR2 = "guitar2"
     const val VOCAL = "vocal"
@@ -46,14 +46,15 @@ object Demo {
     // 원곡 구성을 모르는 예전 작업에서 'AI 생성'으로 표시할 악기
     private val LEGACY_AI_GENERATED = setOf("piano")
 
+    /** 악기 이름 (고른 언어로). 예전 이름 kor는 그대로 둔다. */
     fun kor(i: String) = when (i) {
-        "piano" -> "피아노"; "drums" -> "드럼"; "bass" -> "베이스"; "guitar" -> "기타"
-        GUITAR2 -> "기타 2"; VOCAL -> "보컬"; else -> i
+        "piano" -> tr("피아노", "Piano"); "drums" -> tr("드럼", "Drums"); "bass" -> tr("베이스", "Bass")
+        "guitar" -> tr("기타", "Guitar"); GUITAR2 -> tr("기타 2", "Guitar 2"); VOCAL -> tr("보컬", "Vocals"); else -> i
     }
 
     /** 기타가 두 대인 곡에서는 첫 번째 기타를 '기타 1'로 부른다. */
     fun label(i: String, all: Collection<String>) =
-        if (i == "guitar" && GUITAR2 in all) "기타 1" else kor(i)
+        if (i == "guitar" && GUITAR2 in all) tr("기타 1", "Guitar 1") else kor(i)
 
     /** 악기 목록을 '피아노 · 드럼 · 기타 1 · 기타 2'처럼 이어 쓴다. */
     fun labels(all: List<String>) = all.joinToString(" · ") { label(it, all) }
@@ -97,21 +98,33 @@ object Demo {
 val AUDIO_EXT = listOf("mp3", "wav", "flac", "ogg", "m4a")
 val IMG_EXT = listOf("png", "jpg", "jpeg", "webp")
 
-// ---------- 화면 모드 (다크 / 라이트) ----------
+// ---------- 화면 모드 (다크 / 라이트) · 언어 ----------
 object AppSettings {
     private const val PREF = "rocky_settings"
     private const val KEY_DARK = "dark_mode"
+    private const val KEY_LANG = "language"
 
     var dark by mutableStateOf(true)
         private set
 
+    /** 앱 문구 언어. 기본은 한국어. */
+    var lang by mutableStateOf(Lang.KO)
+        private set
+
     fun load(ctx: Context) {
-        dark = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY_DARK, true)
+        val p = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        dark = p.getBoolean(KEY_DARK, true)
+        lang = Lang.entries.firstOrNull { it.code == p.getString(KEY_LANG, null) } ?: Lang.KO
     }
 
     fun setDark(ctx: Context, value: Boolean) {
         dark = value
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY_DARK, value).apply()
+    }
+
+    fun setLang(ctx: Context, value: Lang) {
+        lang = value
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(KEY_LANG, value.code).apply()
     }
 }
 
@@ -229,7 +242,7 @@ object Assets {
 }
 
 fun displayName(ctx: Context, uri: Uri): String {
-    var name = "업로드한 곡"
+    var name = tr("내 곡", "My song")
     ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
         val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
         if (i >= 0 && c.moveToFirst()) name = c.getString(i) ?: name
@@ -282,5 +295,5 @@ fun shareFiles(ctx: Context, files: List<File>) {
         }
     }
     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    ctx.startActivity(Intent.createChooser(intent, "ROCKY 악보 내보내기"))
+    ctx.startActivity(Intent.createChooser(intent, tr("악보 보내기", "Send scores")))
 }

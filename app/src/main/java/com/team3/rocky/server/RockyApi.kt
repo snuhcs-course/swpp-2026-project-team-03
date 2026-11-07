@@ -29,6 +29,12 @@ interface ScoreServer {
     fun status(jobId: String): JobStatus
     fun result(jobId: String): JobResult
     fun download(jobId: String, path: String, dest: File)
+
+    /**
+     * 서버에서 돌고 있는 작업을 멈춘다. 서버에 아직 이 기능이 없으면(404·405) 그냥 넘어간다.
+     * 기본은 아무것도 하지 않아서, 테스트용 가짜 서버는 따로 만들지 않아도 된다.
+     */
+    fun cancel(jobId: String) {}
 }
 
 /**
@@ -81,7 +87,7 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
             field("lineup", lineup.joinToString(","))
             field("title", title)
             // 한글 파일 이름도 깨지지 않게 filename*(RFC 5987)도 같이 보낸다.
-            val ascii = fileName.filter { it.code in 32..126 && it != '"' }.ifBlank { "song" + extension(fileName) }
+            val ascii = asciiFileName(fileName)
             text("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$ascii\"; " +
                 "filename*=UTF-8''${URLEncoder.encode(fileName, "UTF-8").replace("+", "%20")}\r\n" +
                 "Content-Type: application/octet-stream\r\n\r\n")
@@ -94,6 +100,17 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
     override fun status(jobId: String): JobStatus = ApiJson.status(open("/jobs/$jobId").body())
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
+
+    /** DELETE /jobs/{id}. 서버 쪽 취소 기능과 주소를 맞춰야 한다. */
+    override fun cancel(jobId: String) {
+        val c = open("/jobs/$jobId", "DELETE", readTimeoutMs = 10_000)
+        try {
+            val code = c.responseCode
+            if (code !in 200..299 && code != 404 && code != 405) throw ApiException(code, "HTTP $code")
+        } finally {
+            c.disconnect()
+        }
+    }
 
     override fun download(jobId: String, path: String, dest: File) {
         val c = open("/jobs/$jobId/files/$path", readTimeoutMs = 60_000)
@@ -109,6 +126,17 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
         fun from(ctx: Context) = RockyApi(ServerSettings.url(ctx), ServerSettings.key(ctx))
 
         private fun extension(name: String) = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+
+        /**
+         * filename에 넣을 영문 이름. "노래.mp3"처럼 이름이 한글뿐이면 글자를 빼면 ".mp3"만 남는데,
+         * 서버는 이것을 확장자 없는 파일로 보고 거절한다. 그래서 이름 부분이 비면 song.mp3로 보낸다.
+         */
+        fun asciiFileName(fileName: String): String {
+            val ext = extension(fileName).filter { it.code in 33..126 && it != '"' }
+            val stem = fileName.removeSuffix(extension(fileName))
+                .filter { it.code in 32..126 && it != '"' && it != '\\' && it != '/' }.trim().trim('.')
+            return stem.ifBlank { "song" } + ext
+        }
     }
 }
 

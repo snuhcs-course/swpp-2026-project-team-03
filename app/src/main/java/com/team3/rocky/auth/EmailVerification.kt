@@ -1,5 +1,7 @@
 package com.team3.rocky.auth
 
+import com.team3.rocky.tr
+
 import kotlin.random.Random
 
 /**
@@ -23,9 +25,9 @@ class EmailVerification(private val random: Random = Random.Default, private val
 
     /** 맞으면 null, 틀리면 화면에 보여줄 메시지. */
     fun check(email: String, input: String): String? = when {
-        code == null || this.email != SignUpValidator.normalizeEmail(email) -> "인증번호를 먼저 받아 주세요"
-        clock() - sentAt > VALID_MS -> "인증번호 유효 시간이 지났어요. 다시 받아 주세요"
-        input.trim() != code -> "인증번호가 맞지 않아요"
+        code == null || this.email != SignUpValidator.normalizeEmail(email) -> tr("인증번호를 먼저 받아 주세요", "Please get a code first")
+        clock() - sentAt > VALID_MS -> tr("인증번호 유효 시간이 지났어요. 다시 받아 주세요", "The code expired. Please get a new one")
+        input.trim() != code -> tr("인증번호가 맞지 않아요", "That code isn't right")
         else -> null
     }
 

@@ -25,6 +25,8 @@ class ServerProgress(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     /** 상태를 받을 때마다 불린다 (대기 안내 표시용) */
     private val onStatus: (JobStatus) -> Unit = {},
+    /** 응답을 못 받을 때마다 연속으로 놓친 횟수와 함께 불린다 (다시 연결하는 중 안내용) */
+    private val onMissed: (Int) -> Unit = {},
 ) : ProgressSource {
 
     override fun track(jobId: String): Flow<JobProgress> = flow {
@@ -36,11 +38,12 @@ class ServerProgress(
                 throw e  // 서버가 답은 했지만 거절함(키 틀림, 작업 없음): 기다려도 안 바뀐다
             } catch (e: IOException) {
                 if (++missed > maxMissed) throw e
+                onMissed(missed)
                 null
             }
             if (status != null) {
                 onStatus(status)
-                if (status.isFailed) throw JobFailedException(status.error ?: "알 수 없는 오류")
+                if (status.isFailed) throw JobFailedException(status.error ?: "unknown error")
                 emit(status.toProgress())
                 if (status.isDone) return@flow
             }

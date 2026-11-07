@@ -4,6 +4,10 @@
 
     <!-- ROCKY 서버에 음원을 올리고 악보를 받기 위해 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 안드로이드 8~9에서 악보를 '다운로드/ROCKY'에 저장하기 위해. 10 이상은 권한 없이 저장한다. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:allowBackup="true"

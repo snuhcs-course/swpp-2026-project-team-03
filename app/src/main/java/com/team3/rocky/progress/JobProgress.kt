@@ -1,6 +1,7 @@
 // AI-generated with Claude Code, 2026-10-31
 package com.team3.rocky.progress
 
+import com.team3.rocky.tr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -12,11 +13,21 @@ import kotlin.math.roundToInt
  * A100에서 MuScriptor large로 Immigrant Song(2분 27초)을 돌린 기록을 기준으로 잡았다.
  * 채보가 거의 대부분(156초)을 차지한다.
  */
-enum class Stage(val title: String, val desc: String, val weight: Float) {
-    SEPARATE("음원 분리 중", "보컬을 빼고 악기 소리만 남기고 있어요", 0.10f),
-    TRANSCRIBE("채보 중", "음원에서 악기별 음을 찾고 있어요", 0.75f),
-    BEATS("박자 맞추는 중", "박과 마디 위치를 찾고 있어요", 0.05f),
-    ARRANGE("밴드 편곡 중", "고른 악기로 악보를 만들고 있어요", 0.10f);
+enum class Stage(
+    private val ko: String,
+    private val en: String,
+    private val koDesc: String,
+    private val enDesc: String,
+    val weight: Float,
+) {
+    // 사용자가 보는 이름이라 '음원 분리·채보' 같은 우리 쪽 용어 대신 하는 일을 그대로 적는다.
+    SEPARATE("악기 소리 나누는 중", "Separating instruments", "곡에서 악기별 소리를 따로 꺼내고 있어요", "Pulling each instrument out of the song", 0.10f),
+    TRANSCRIBE("악보로 옮기는 중", "Writing the notes", "악기마다 연주한 음을 악보에 적고 있어요", "Writing down what each instrument plays", 0.75f),
+    BEATS("박자 맞추는 중", "Lining up the beat", "마디와 박자를 맞추고 있어요", "Matching bars and beats", 0.05f),
+    ARRANGE("우리 밴드 악보 완성 중", "Finishing your band's scores", "우리 밴드에 없는 파트까지 채우고 있어요", "Filling in the parts your band needs", 0.10f);
+
+    val title get() = tr(ko, en)
+    val desc get() = tr(koDesc, enDesc)
 
     /** 1부터 세는 단계 번호 */
     val index get() = ordinal + 1
@@ -43,18 +54,23 @@ data class JobProgress(
         get() = if (done) 1f else Stage.entries
             .takeWhile { it != stage }
             .fold(0f) { acc, s -> acc + s.weight } + stage.weight * stageFraction
+
+    /** 지금 단계가 끝나는 지점(0~1). 서버가 다음 단계를 알려주기 전에는 진행 막대가 이 앞에서 멈춘다. */
+    val stageEnd: Float
+        get() = Stage.entries.takeWhile { it != stage }.fold(0f) { acc, s -> acc + s.weight } + stage.weight
 }
 
 /** "약 1분 30초 남음"처럼 사람이 읽기 좋게. 짧게 끝나는 숫자 변화에 흔들리지 않도록 반올림한다. */
 fun formatEta(sec: Int?): String = when {
-    sec == null -> "남은 시간 계산 중"
-    sec <= 5 -> "곧 끝나요"
-    sec < 60 -> "약 ${roundTo(sec, 5)}초 남음"
+    sec == null -> tr("남은 시간 계산 중", "Estimating time")
+    sec <= 5 -> tr("곧 끝나요", "Almost done")
+    sec < 60 -> tr("약 ${roundTo(sec, 5)}초 남음", "About ${roundTo(sec, 5)} sec left")
     else -> {
         val rounded = roundTo(sec, 10)
         val m = rounded / 60
         val s = rounded % 60
-        if (s == 0) "약 ${m}분 남음" else "약 ${m}분 ${s}초 남음"
+        if (s == 0) tr("약 ${m}분 남음", "About $m min left")
+        else tr("약 ${m}분 ${s}초 남음", "About $m min $s sec left")
     }
 }
 
