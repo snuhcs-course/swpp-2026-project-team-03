@@ -74,6 +74,39 @@ def test_notes_in_a_resting_stem_are_dropped(tmp_path):
     assert report["faint"] is False
 
 
+def test_note_held_into_a_rest_is_cut_where_the_stem_goes_quiet(tmp_path):
+    # like 한 페이지가 될 수 있게: the last note before a rest is held until the next onset
+    wav = tmp_path / "guitar.wav"
+    sf.write(str(wav), np.concatenate([tone(4, 0.3), tone(10, 0.001), tone(4, 0.3)]), RATE, subtype="FLOAT")
+    midi = pretty_midi.PrettyMIDI()
+    track = pretty_midi.Instrument(29, name="guitar")
+    track.notes = [pretty_midi.Note(90, 75, 3.0, 14.0),    # held 11 s, over the rest
+                   pretty_midi.Note(90, 52, 14.5, 15.5)]  # sounding: left alone
+    midi.instruments.append(track)
+    midi.write(str(tmp_path / "guitar.mid"))
+    out = tmp_path / "gated.mid"
+    report = gate_stem(tmp_path / "guitar.mid", wav, "guitar", out, GateConfig(min_notes_per_minute=0), family,
+                       declared=True, original_unknown=False, duration_sec=18)
+    notes = sorted(pretty_midi.PrettyMIDI(str(out)).instruments[0].notes, key=lambda n: n.start)
+    assert 3.9 < notes[0].end < 4.3          # cut where the stem goes quiet (4 s), not 14 s
+    assert abs(notes[1].end - 15.5) < 0.01
+    assert report["trimmed_note_ends"] == 1 and report["trimmed_seconds"] > 9
+
+
+def test_drum_note_lengths_are_not_trimmed(tmp_path):
+    wav = tmp_path / "drums.wav"
+    sf.write(str(wav), np.concatenate([tone(2, 0.3), tone(6, 0.001)]), RATE, subtype="FLOAT")
+    midi = pretty_midi.PrettyMIDI()
+    track = pretty_midi.Instrument(0, is_drum=True, name="drums")
+    track.notes = [pretty_midi.Note(90, 36, 1.0, 5.0)]
+    midi.instruments.append(track)
+    midi.write(str(tmp_path / "drums.mid"))
+    out = tmp_path / "gated.mid"
+    gate_stem(tmp_path / "drums.mid", wav, "drums", out, GateConfig(min_notes_per_minute=0), family,
+              declared=True, original_unknown=False, duration_sec=8)
+    assert abs(pretty_midi.PrettyMIDI(str(out)).instruments[0].notes[0].end - 5.0) < 0.01
+
+
 def test_declared_instrument_is_never_emptied(tmp_path):
     wav = tmp_path / "piano.wav"
     sf.write(str(wav), tone(20, 0.0005), RATE, subtype="FLOAT")

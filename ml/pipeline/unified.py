@@ -292,7 +292,7 @@ class Runner:
             note_floor_db=getattr(args, "note_floor_db", GateConfig.note_floor_db),
             min_notes_per_minute=getattr(args, "min_notes_per_minute", GateConfig.min_notes_per_minute))
         self.config = {
-            "pipeline_contract": 11,
+            "pipeline_contract": 12,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,

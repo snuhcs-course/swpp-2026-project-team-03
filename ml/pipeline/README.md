@@ -137,7 +137,11 @@ stem's loudest 23 ms frame from just before the onset to 0.2 s after it
 (0.08 s for drum hits) and compares it with the stem's playing level, the
 99th percentile of its frame power. Notes more than 40 dB below
 (`--note-floor-db`), or below -65 dBFS, are removed. This targets notes that
-MuScriptor writes from the residue of a resting stem (e.g. 한페 bars 115-120).
+MuScriptor writes from the residue of a resting stem. Except for drums, the
+gate also cuts a note's end where its stem stays more than 30 dB below its
+playing level for 0.5 s: MuScriptor can hold the last note before a rest until
+the next onset (한 페이지가 될 수 있게 held one E♭5 for 11 s over bars 113-120,
+which the TAB showed as one tied note per bar). Contract 12 adds this trim.
 The gated MIDI goes to `stem_midi_gated/`; the raw MuScriptor output stays in
 `stem_midi/`, and `note_gate.json` records per-stem counts.
 

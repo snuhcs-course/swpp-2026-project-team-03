@@ -11,6 +11,9 @@ Two rules run inside unified.py:
    kept only if its stem is loud enough around the note onset compared with
    the stem's own playing level. This removes notes MuScriptor writes from
    the small sound left in a stem while the instrument is resting.
+   Notes of pitched stems are also cut where their stem stays quiet, since
+   MuScriptor can hold the last note before a rest until the next onset
+   (한 페이지가 될 수 있게: one note held for 11 s over bars 113-120).
    When the original lineup is unknown, a stem left with very few notes is
    then treated as absent. A declared instrument is never removed this way;
    it is reported as "faint" instead, so the app can warn about that part.
@@ -48,6 +51,10 @@ class GateConfig:
     reference_percentile: float = 99.0  # the stem's playing level: this percentile of frame power
     onset_window_sec: float = 0.2       # how long after the onset the level is read
     drum_window_sec: float = 0.08       # drum hits are short
+    # note-end trim (pitched stems): a note ends where its stem stays quiet
+    release_db: float = -30.0           # quiet = below this, relative to the stem's playing level
+    release_hold_sec: float = 0.5       # ... for at least this long
+    min_note_sec: float = 0.05          # a trimmed note keeps at least this length
     # sparse-stem rule, original lineup unknown only
     min_notes_per_minute: float = 20.0
     hop: int = 1024
@@ -136,6 +143,39 @@ def note_levels(notes: list[pretty_midi.Note], power: np.ndarray, rate: int, cfg
     return levels
 
 
+def trim_note_ends(notes: list[pretty_midi.Note], power: np.ndarray, rate: int, ref_db: float,
+                   cfg: GateConfig) -> tuple[int, float]:
+    """End each note where the stem first stays below release_db for release_hold_sec.
+
+    Only the note end moves; a note that is still sounding is left alone.
+    Returns (trimmed notes, seconds removed).
+    """
+    if not len(power) or not notes:
+        return 0, 0.0
+    step = cfg.hop / rate
+    quiet = 10.0 * np.log10(np.maximum(power, EPS)) - ref_db < cfg.release_db
+    # run[i] = number of consecutive quiet frames starting at frame i
+    run = np.zeros(len(quiet) + 1, dtype=int)
+    for i in range(len(quiet) - 1, -1, -1):
+        run[i] = run[i + 1] + 1 if quiet[i] else 0
+    hold = max(1, int(math.ceil(cfg.release_hold_sec / step)))
+    trimmed, removed = 0, 0.0
+    for note in notes:
+        first = int(math.ceil((note.start + cfg.min_note_sec) / step))
+        last = min(len(quiet), int(note.end / step))
+        if first >= last:
+            continue
+        hits = np.nonzero(run[first:last] >= hold)[0]
+        if not len(hits):
+            continue
+        new_end = max(note.start + cfg.min_note_sec, (first + int(hits[0])) * step)
+        if new_end < note.end - step:
+            removed += note.end - new_end
+            note.end = new_end
+            trimmed += 1
+    return trimmed, removed
+
+
 def reference_level(power: np.ndarray, cfg: GateConfig) -> float:
     return db(float(np.percentile(power, cfg.reference_percentile))) if len(power) else db(0.0)
 
@@ -176,6 +216,15 @@ def gate_stem(midi_path: Path, stem_wav: Path, stem: str, output: Path, cfg: Gat
             track.notes = original_notes[id(track)]
         after = before
         report["action"] = "kept_ungated_declared"
+    else:
+        trimmed = removed = 0
+        for track in tracks:
+            if not track.is_drum:
+                count, seconds = trim_note_ends(track.notes, power, rate, ref, cfg)
+                trimmed += count
+                removed += seconds
+        report["trimmed_note_ends"] = trimmed
+        report["trimmed_seconds"] = round(removed, 2)
     minutes = max(duration_sec, 1.0) / 60.0
     report["notes_per_minute"] = round(after / minutes, 2)
     # The user said the instrument is there but the stem barely sounds: the part
