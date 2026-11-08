@@ -3,7 +3,8 @@
 1. takes every bass-program note (MIDI programs 32-39) of a beat-aligned MIDI,
 2. keeps only the lowest note at each onset (a bass line, not chords),
 3. moves notes outside the bass range by octaves (fold_range),
-4. chooses string/fret with tuttut (same weights as the guitar, b=0.1),
+4. chooses string/fret with tuttut (same weights as the guitar, b=0.1) and moves open-string / far notes
+   to the hand position (skyline_tab.refine_positions; --no-refine turns it off),
 5. writes bass.mid, tuning.json, tab_bass.txt and "<title> - bass.gp5".
 
 Tuning (auto, default): follows the guitar of the same MIDI, because a band tunes together.
@@ -60,7 +61,7 @@ def bass_line(notes, tuning):
     return out, {"notes_in": len(notes), "chord_notes_dropped": len(notes) - len(out), "octave_folded": folded}
 
 
-def main(src, out_dir, tuning="auto"):
+def main(src, out_dir, tuning="auto", refine=True):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pm = pretty_midi.PrettyMIDI(src)
@@ -76,7 +77,7 @@ def main(src, out_dir, tuning="auto"):
     bass = st.part_midi(pm, notes, "Bass", program=BASS_PROGRAM)
     bass.write(str(out_dir / "bass.mid"))
     st.write_tuning(out_dir, tuning)
-    p, t = st.tab(bass, "tab_bass", tuning, out_dir)
+    p, t = st.tab(bass, "tab_bass", tuning, out_dir, refine=refine)
     n, big, med = st.jump_stats(p)
     print(f"  TAB bass: {n} fretted events · jumps >5 frets: {big} ({big / max(n - 1, 1) * 100:.1f}%) · median move {med:.1f} frets")
 
@@ -99,8 +100,10 @@ def cli(argv=None):
     p.add_argument("out_dir", help="output folder")
     p.add_argument("--tuning", choices=["auto"] + sorted(BASS_TUNINGS), default="auto",
                    help="auto (default): follow the guitar tuning of the same MIDI; or a fixed bass tuning")
+    p.add_argument("--no-refine", action="store_true",
+                   help="keep tuttut's string/fret choice (default: move open-string and far notes to the hand)")
     a = p.parse_args(argv)
-    main(a.midi, a.out_dir, a.tuning)
+    main(a.midi, a.out_dir, a.tuning, refine=not a.no_refine)
 
 
 if __name__ == "__main__":

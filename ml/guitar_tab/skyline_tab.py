@@ -6,8 +6,10 @@ MuScriptor often merges two guitars into one part. This script
    skyline rule: the highest note at each onset -> lead, the rest -> rhythm; otherwise keeps one guitar part,
 3. makes chords playable (max 6 notes, fretted notes within 4 frets) in the rhythm part and
    the merged part, by default; --no-chord-reduction turns this off,
-4. chooses string/fret with tuttut (Viterbi over fingerings, b=0.1),
+4. chooses string/fret with tuttut (Viterbi over fingerings, b=0.1), then moves notes tuttut put on an
+   open string or far from the hand to a fretted spot near the hand (`refine_positions`; --no-refine turns it off),
 5. writes MIDI, text TAB, Guitar Pro (.gp5) files and tuning.json (the tuning used), and reports fret jumps > 5.
+   GP5 durations are cut at beat boundaries (with ties), so every beat starts a new note or rest.
 
 Comparison baseline only, not the team's guitar-guitar separation module.
 The skyline rule comes from melody-extraction research; the tuning, chord-reduction and
@@ -42,6 +44,14 @@ SPLIT_MIN_UNPLAYABLE = 0.02   # auto split: >= 2% of onsets cannot be fingered a
 SPLIT_MIN_WIDE = 0.03         # ... and >= 3% of onsets span more than two octaves (two guitars in two registers)
 WIDE_SPAN = 24                # two octaves: E2 (6th string open) to E4 (1st string open)
 TB_WEIGHTS = dict(b=0.1, height=1, length=1, n_changed_strings=1)
+# refine_positions (2026-11 user interviews: open-string back-and-forth, far position jumps)
+HAND_CONTEXT = 4      # fretted events before/after an event that set the hand position
+HAND_MAX_GAP = 2.0    # ... only within this many seconds (a long rest resets the hand)
+HAND_REACH = 3        # a fretted spot this close to the hand needs no shift
+OPEN_COST = 3.0       # an open string costs like a fret this far from the hand ...
+OPEN_POSITION = 4     # ... but is free while the hand is at or below this fret (first-position playing)
+STRING_COST = 0.5     # per string crossed from the previous single note
+MIN_GAIN = 1.0        # move a note only when its cost drops by at least this much
 
 
 def guitar_notes(pm):
@@ -187,12 +197,96 @@ def part_midi(pm_like, notes, name, program=29):
     return out
 
 
-def tab(midi, name, tuning, out_dir):
+def tab(midi, name, tuning, out_dir, refine=True):
     from tuttut.logic.tab import Tab
     from tuttut.logic.theory import Tuning
     t = Tab(name, Tuning(NAMES[tuning]), midi, output_dir=str(out_dir), weights=TB_WEIGHTS)
+    if refine:
+        st = refine_positions(t.tab, TUNINGS[tuning])
+        print(f"  refine {name}: {st['open_moved']} open-string notes and {st['jump_moved']} far notes "
+              f"moved to the hand position")
     t.to_ascii()
     return (Path(out_dir) / name).with_suffix(".txt"), t
+
+
+def _hand(frets_by_event, times, i):
+    """Median fret of the fretted notes in up to HAND_CONTEXT events before and after event i
+    (within HAND_MAX_GAP seconds). None when there is no fretted neighbour."""
+    near = []
+    for step in (-1, 1):
+        j, seen = i + step, 0
+        while 0 <= j < len(frets_by_event) and seen < HAND_CONTEXT and abs(times[j] - times[i]) <= HAND_MAX_GAP:
+            fretted = [f for f in frets_by_event[j] if f > 0]
+            if fretted:
+                near += fretted
+                seen += 1
+            j += step
+    return float(np.median(near)) if near else None
+
+
+def _cost(string, fret, hand, prev_string):
+    if fret == 0:
+        c = 0.0 if hand <= OPEN_POSITION else OPEN_COST
+    else:
+        c = max(0.0, abs(fret - hand) - HAND_REACH)
+    return c + (STRING_COST * abs(string - prev_string) if prev_string is not None else 0.0)
+
+
+def refine_positions(tab_dict, strings, passes=3):
+    """Move notes to a fretted spot near the hand, in place on tuttut's tab dict.
+
+    tuttut scores an open string as free (it has no height and does not change the hand), so it picks
+    open strings even inside a fretted passage (D open <-> A open back and forth on bass) and sometimes
+    a far spot for one note (E3 on the 12th fret between 5th-position notes). For each note:
+    hand = median fret of the fretted neighbours; cost = OPEN_COST for an open string when the hand is above
+    OPEN_POSITION (in first position open strings are normal and cost 0), otherwise the distance beyond
+    HAND_REACH frets from the hand, + STRING_COST per string crossed from the previous
+    single note. The note moves to the cheapest spot of the same pitch when that saves MIN_GAIN.
+    Chord notes may only move to a free string and only if the chord's fretted notes stay within MAX_SPAN.
+    No fretted neighbour (an open-string riff on its own) -> left as tuttut wrote it.
+    Runs up to `passes` times, because a moved note changes its neighbours' hand position.
+    strings: the tuning, thin -> thick (tuttut string 0 = thinnest).
+    """
+    events = [e for m in tab_dict["measures"] for e in m["events"] if e.get("notes")]
+    times = [e["time"] for e in events]
+    frets = [[n["fret"] for n in e["notes"]] for e in events]
+    stats = collections.Counter(open_moved=0, jump_moved=0)
+    for _ in range(passes):
+        before = sum(stats.values())
+        _refine_pass(events, times, frets, strings, stats)
+        if sum(stats.values()) == before:
+            break
+    return stats
+
+
+def _refine_pass(events, times, frets, strings, stats):
+    prev_string = None
+    for i, e in enumerate(events):
+        hand = _hand(frets, times, i)
+        notes = e["notes"]
+        if hand is not None:
+            for n in notes:
+                pitch = strings[n["string"]] + n["fret"]
+                used = {m["string"] for m in notes if m is not n}
+                ref = prev_string if len(notes) == 1 else None
+                now = _cost(n["string"], n["fret"], hand, ref)
+                best = (now, n["string"], n["fret"])
+                for s, sp in enumerate(strings):
+                    f = pitch - sp
+                    if s in used or not 0 <= f <= NFRETS or (s, f) == (n["string"], n["fret"]):
+                        continue
+                    others = [m["fret"] for m in notes if m is not n and m["fret"] > 0]
+                    if f > 0 and others and max(others + [f]) - min(others + [f]) > MAX_SPAN:
+                        continue
+                    c = _cost(s, f, hand, ref)
+                    if c < best[0]:
+                        best = (c, s, f)
+                if best[0] <= now - MIN_GAIN:
+                    stats["open_moved" if n["fret"] == 0 else "jump_moved"] += 1
+                    n["string"], n["fret"] = best[1], best[2]
+            frets[i] = [n["fret"] for n in notes]
+        prev_string = notes[0]["string"] if len(notes) == 1 else None
+    return stats
 
 
 def jump_stats(tab_path):
@@ -226,6 +320,40 @@ def jump_stats(tab_path):
 # ----------------------------------------------------------------------
 GP_LENGTHS = [(16, 1, False), (12, 2, True), (8, 2, False), (6, 4, True),
               (4, 4, False), (3, 8, True), (2, 8, False), (1, 16, False)]  # (16ths, value, dotted)
+
+
+def beat_pieces(pos, length, beat16, bar16):
+    """Cut a note or rest that starts pos 16ths into the bar into pieces that do not hide a beat.
+
+    The first piece runs only to the next beat. From a beat, whole beats are kept together only as a
+    half bar (from beat 1 or the middle of a 4-beat bar), a whole bar, or a dotted half from beat 1;
+    everything else is tied beat by beat. Within a beat split_len picks the values.
+    Players read the beat from where each note starts (user interview 2026-11: write it beat by beat).
+    Returns [(16ths, value, dotted)] like split_len.
+    """
+    out = []
+    beats_in_bar = bar16 // beat16
+    while length > 0:
+        off = pos % beat16
+        if off:
+            take = min(length, beat16 - off)
+        else:
+            whole, bi = length // beat16, pos // beat16
+            if whole == 0:
+                take = length
+            else:
+                n = 1
+                if bi == 0 and whole >= beats_in_bar and beats_in_bar in (2, 3, 4):
+                    n = beats_in_bar
+                elif bi == 0 and whole >= 3 and beats_in_bar == 4 and beat16 == 4:
+                    n = 3
+                elif bi % 2 == 0 and whole >= 2 and beats_in_bar >= 2 and bi + 2 <= beats_in_bar:
+                    n = 2
+                take = n * beat16
+        out += split_len(take)
+        pos += take
+        length -= take
+    return out
 
 
 def split_len(n):
@@ -267,6 +395,7 @@ def write_gp5(path, title, bpm, beats_per_bar, tuning, tracks, denominator=4):
     (4/4, 3/4, 12/8 ...); bpm is the MIDI tempo (quarter notes)."""
     import guitarpro as gp
     bar16 = beats_per_bar * 16 // denominator
+    beat16 = 6 if denominator == 8 and beats_per_bar % 3 == 0 else 16 // denominator
     last = max((s + L for _, ev in tracks for s, L, _ in ev), default=bar16)
     n_measures = max(1, -(-last // bar16))
     song = gp.Song()
@@ -318,7 +447,7 @@ def write_gp5(path, title, bpm, beats_per_bar, tuning, tracks, denominator=4):
             while L > 0:
                 m, pos = divmod(s, bar16)
                 take = min(L, bar16 - pos)
-                for piece in split_len(take):
+                for piece in beat_pieces(pos, take, beat16, bar16):
                     per_measure[m].append((piece, sf, not first))
                     first = False
                 s += take
@@ -337,7 +466,7 @@ def write_gp5(path, title, bpm, beats_per_bar, tuning, tracks, denominator=4):
     return n_measures
 
 
-def main(src, out_dir, merged_tab=True, chord_reduction=True, split="auto"):
+def main(src, out_dir, merged_tab=True, chord_reduction=True, split="auto", refine=True):
     """split: "auto" (decide_split), "always" (skyline lead/rhythm), "never" (one guitar part)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -381,7 +510,7 @@ def main(src, out_dir, merged_tab=True, chord_reduction=True, split="auto"):
 
     tabs, report = {}, {}
     for name, midi in todo:
-        p, t = tab(midi, f"tab_{name}", tuning, out_dir)
+        p, t = tab(midi, f"tab_{name}", tuning, out_dir, refine=refine)
         tabs[name] = t
         n, big, med = jump_stats(p)
         report[name] = (n, big)
@@ -414,8 +543,11 @@ def cli(argv=None):
     p.add_argument("--no-chord-reduction", action="store_true",
                    help="keep every chord note (default: max 6 notes, fretted notes within 4 frets; "
                         "without it tuttut can take over an hour on large songs)")
+    p.add_argument("--no-refine", action="store_true",
+                   help="keep tuttut's string/fret choice (default: move open-string and far notes to the hand)")
     a = p.parse_args(argv)
-    main(a.midi, a.out_dir, merged_tab=not a.no_merged, chord_reduction=not a.no_chord_reduction, split=a.split)
+    main(a.midi, a.out_dir, merged_tab=not a.no_merged, chord_reduction=not a.no_chord_reduction, split=a.split,
+         refine=not a.no_refine)
 
 
 if __name__ == "__main__":
