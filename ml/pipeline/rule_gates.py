@@ -15,8 +15,9 @@ Two rules run inside unified.py:
    then treated as absent. A declared instrument is never removed this way;
    it is reported as "faint" instead, so the app can warn about that part.
 
-All thresholds below are provisional. Measure them with measure_gates.py on
-band and non-band audio before relying on them.
+The thresholds were chosen from 14 band songs and 45 non-band files on
+2026-11-09; see benchmarks/2026-11-09-rule-gates.md. Re-measure them with
+measure_gates.py when the separator or transcription model changes.
 """
 
 from __future__ import annotations
@@ -37,18 +38,18 @@ EPS = 1e-12
 
 @dataclass(frozen=True)
 class GateConfig:
-    # input check (provisional)
-    min_duration_sec: float = 10.0
+    # input check (benchmarks/2026-11-09-rule-gates.md)
+    min_duration_sec: float = 30.0      # short percussive sound effects separate into drums
     min_level_dbfs: float = -50.0       # mean level of all six stems together
-    min_band_ratio: float = 0.25        # band-stem energy / all-stem energy
-    # note gate (provisional)
-    note_floor_db: float = -30.0        # note level relative to the stem's playing level
+    min_band_ratio: float = 0.15        # band-stem energy / all-stem energy
+    # note gate
+    note_floor_db: float = -40.0        # note level relative to the stem's playing level
     note_abs_floor_dbfs: float = -65.0  # below this a note is dropped whatever the stem level
     reference_percentile: float = 99.0  # the stem's playing level: this percentile of frame power
     onset_window_sec: float = 0.2       # how long after the onset the level is read
     drum_window_sec: float = 0.08       # drum hits are short
-    # sparse-stem rule, original lineup unknown only (provisional)
-    min_notes_per_minute: float = 6.0
+    # sparse-stem rule, original lineup unknown only
+    min_notes_per_minute: float = 20.0
     hop: int = 1024
 
     def as_dict(self) -> dict:

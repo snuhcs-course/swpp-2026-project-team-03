@@ -665,11 +665,11 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--render-workers", type=int, default=2,
                    help="parallel PDF/MP3 exports when publishing inline (1-4; default 2)")
     p.add_argument("--min-band-ratio", type=float, default=GateConfig.min_band_ratio,
-                   help="reject the song below this band-stem energy share (provisional; see measure_gates.py)")
+                   help="reject the song below this band-stem energy share (default 0.15)")
     p.add_argument("--note-floor-db", type=float, default=GateConfig.note_floor_db,
-                   help="drop notes quieter than this, relative to the stem's playing level (provisional)")
+                   help="drop notes quieter than this, relative to the stem's playing level (default -40)")
     p.add_argument("--min-notes-per-minute", type=float, default=GateConfig.min_notes_per_minute,
-                   help="original unknown: treat a stem with fewer notes as absent (provisional)")
+                   help="original unknown: treat a stem with fewer notes as absent (default 20)")
     args = p.parse_args(argv)
     try:
         original_parts, original_guitars, original_unknown = parse_lineup(args.original, original=True)

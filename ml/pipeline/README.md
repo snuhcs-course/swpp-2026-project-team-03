@@ -113,14 +113,17 @@ completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
 
 ## Rule gates: non-band input and notes in resting stems
 
-`rule_gates.py` adds two model-free stages to `unified.py`. Their thresholds
-are **provisional** until measured with `measure_gates.py` (see below).
+`rule_gates.py` adds two model-free stages to `unified.py`. The thresholds
+come from 14 band songs and 45 non-band files measured on 2026-11-09
+(`benchmarks/2026-11-09-rule-gates.md`).
 
 **`input_check`** runs right after `bs_roformer`, on the CPU, before any
-MuScriptor process starts. It rejects the song when it is shorter than 10 s,
+MuScriptor process starts. It rejects the song when it is shorter than 30 s,
 when all six stems together are below -50 dBFS, or when drums + bass + guitar
-+ piano carry less than 25 % (`--min-band-ratio`) of the separated energy
-(speech, podcasts, street or room sound). A rejected song writes
++ piano carry less than 15 % (`--min-band-ratio`) of the separated energy
+(speech, street or room sound, sound effects, a single non-band instrument).
+Music built from our instruments, such as piano or guitar solos, passes on
+purpose. A rejected song writes
 `input_check.json`, sets `manifest.json` `status` to `rejected` with
 `rejection.code` (`too_short`, `silent` or `not_band_audio`), and
 `unified.py` exits with code 3. The GPU Pod therefore ends after separation
@@ -132,7 +135,7 @@ a rejected run repeats the check and gives the same answer.
 transcribed stem (drums, bass, guitar, piano). For each note it reads the
 stem's loudest 23 ms frame from just before the onset to 0.2 s after it
 (0.08 s for drum hits) and compares it with the stem's playing level, the
-99th percentile of its frame power. Notes more than 30 dB below
+99th percentile of its frame power. Notes more than 40 dB below
 (`--note-floor-db`), or below -65 dBFS, are removed. This targets notes that
 MuScriptor writes from the residue of a resting stem (e.g. 한페 bars 115-120).
 The gated MIDI goes to `stem_midi_gated/`; the raw MuScriptor output stays in
@@ -143,7 +146,7 @@ The user's original lineup takes priority:
 | Original lineup | Few notes left after the gate | Every note removed by the gate |
 | --- | --- | --- |
 | declared (instrument selected) | kept | gate skipped for that stem, raw notes kept (`kept_ungated_declared`) |
-| unknown | fewer than 6 notes per minute (`--min-notes-per-minute`): stem treated as absent (`dropped_sparse`) | stem absent |
+| unknown | fewer than 20 notes per minute (`--min-notes-per-minute`): stem treated as absent (`dropped_sparse`) | stem absent |
 
 A declared instrument that the gate would empty or that keeps fewer than
 `--min-notes-per-minute` notes is still made, but is marked `faint` in

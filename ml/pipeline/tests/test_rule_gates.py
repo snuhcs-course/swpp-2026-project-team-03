@@ -22,7 +22,7 @@ def tone(seconds, amplitude, freq=220.0):
     return np.stack([mono, mono], axis=1)
 
 
-def write_stems(directory, levels, seconds=20.0):
+def write_stems(directory, levels, seconds=40.0):
     directory.mkdir(parents=True, exist_ok=True)
     for stem in STEMS:
         sf.write(str(directory / f"{stem}.wav"), tone(seconds, levels.get(stem, 0.0)), RATE, subtype="FLOAT")
@@ -36,10 +36,10 @@ def test_band_song_is_accepted(tmp_path):
 
 
 @pytest.mark.parametrize("levels,seconds,code", [
-    ({"vocals": 0.3, "other": 0.05, "guitar": 0.01}, 20.0, "not_band_audio"),  # speech / podcast
-    ({"other": 0.2, "drums": 0.02}, 20.0, "not_band_audio"),                   # street noise
-    ({"drums": 0.0005, "guitar": 0.0005}, 20.0, "silent"),
-    ({"drums": 0.3, "guitar": 0.3}, 4.0, "too_short"),
+    ({"vocals": 0.3, "other": 0.05, "guitar": 0.01}, 40.0, "not_band_audio"),  # speech / podcast
+    ({"other": 0.2, "drums": 0.02}, 40.0, "not_band_audio"),                   # street noise
+    ({"drums": 0.0005, "guitar": 0.0005}, 40.0, "silent"),
+    ({"drums": 0.3, "guitar": 0.3}, 14.0, "too_short"),  # e.g. a 14 s axe sound effect
 ])
 def test_non_band_input_is_rejected(tmp_path, levels, seconds, code):
     write_stems(tmp_path, levels, seconds)

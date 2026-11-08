@@ -88,7 +88,7 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
             directory = Path(command[3])
             # audible stems longer than the input check's minimum, so the song is accepted
             for stem in (*STEMS, "no_vocals"):
-                sf.write(str(directory / f"{stem}.wav"), np.full((8000 * 12, 2), 0.1, dtype="float32"),
+                sf.write(str(directory / f"{stem}.wav"), np.full((8000 * 40, 2), 0.1, dtype="float32"),
                          8000, subtype="FLOAT")
         elif stage == "muscriptor_batch":
             jobs = json.loads(Path(command[command.index("--jobs-file") + 1]).read_text(encoding="utf-8"))
