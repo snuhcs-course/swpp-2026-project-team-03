@@ -139,6 +139,7 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     assert beat_inputs == [runner.out / "stems" / "no_vocals.wav"]
     assert runner.manifest["beat_mix_stems"] == ["drums", "bass", "guitar", "piano", "other"]
     assert runner.manifest["generated_targets"] == (["guitar"] if generated else [])
+    assert runner.manifest["faint_parts"] == []  # every fixture stem is audible
     if original == "unknown" and requested == "guitar1":
         assert "--split" not in next(command for stage, command in commands if stage == "guitar_tab")
         assert "--split" in next(command for stage, command in commands if stage == "guitar_compressed")

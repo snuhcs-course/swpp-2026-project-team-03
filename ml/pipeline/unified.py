@@ -463,6 +463,12 @@ class Runner:
         if transcribe_stems:
             self.stage("note_gate", [gate_report, *gated_midis.values()], note_gate,
                        validate=lambda: all(valid_midi(path) for path in gated_midis.values()))
+            # Declared and requested parts whose stem barely sounds (app shows a warning).
+            gate_stems = json.loads(gate_report.read_text(encoding="utf-8"))["stems"]
+            self.manifest["faint_parts"] = sorted(
+                stem for stem, report in gate_stems.items()
+                if report.get("faint") and stem in self.requested_parts)
+            atomic_json(self.manifest_path, self.manifest)
 
         raw = self.out / "stems_merged.mid"
         self.stage("merge_stems", [raw], lambda: merge_stem_midis(gated_midis, raw, transcribe_stems))

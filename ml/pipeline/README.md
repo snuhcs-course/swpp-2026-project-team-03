@@ -145,6 +145,12 @@ The user's original lineup takes priority:
 | declared (instrument selected) | kept | gate skipped for that stem, raw notes kept (`kept_ungated_declared`) |
 | unknown | fewer than 6 notes per minute (`--min-notes-per-minute`): stem treated as absent (`dropped_sparse`) | stem absent |
 
+A declared instrument that the gate would empty or that keeps fewer than
+`--min-notes-per-minute` notes is still made, but is marked `faint` in
+`note_gate.json`. Requested parts marked this way are listed in
+`manifest.json` `faint_parts` (`piano`, `guitar`, `bass`, `drums`); the server
+passes them to the app, which can warn that the part may be empty or inaccurate.
+
 A stem treated as absent behaves like an instrument missing from the original:
 if the user's lineup asks for it, MIDI-GPT generates it. When the original is
 unknown and no band stem keeps any notes, the song is rejected as

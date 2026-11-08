@@ -12,7 +12,8 @@ Two rules run inside unified.py:
    the stem's own playing level. This removes notes MuScriptor writes from
    the small sound left in a stem while the instrument is resting.
    When the original lineup is unknown, a stem left with very few notes is
-   then treated as absent. A declared instrument is never removed this way.
+   then treated as absent. A declared instrument is never removed this way;
+   it is reported as "faint" instead, so the app can warn about that part.
 
 All thresholds below are provisional. Measure them with measure_gates.py on
 band and non-band audio before relying on them.
@@ -176,6 +177,10 @@ def gate_stem(midi_path: Path, stem_wav: Path, stem: str, output: Path, cfg: Gat
         report["action"] = "kept_ungated_declared"
     minutes = max(duration_sec, 1.0) / 60.0
     report["notes_per_minute"] = round(after / minutes, 2)
+    # The user said the instrument is there but the stem barely sounds: the part
+    # is still made, and the app warns that it may be empty or inaccurate.
+    report["faint"] = bool(declared and (report["action"] == "kept_ungated_declared"
+                                         or after / minutes < cfg.min_notes_per_minute))
     if original_unknown and after and after / minutes < cfg.min_notes_per_minute:
         for track in tracks:
             track.notes = []

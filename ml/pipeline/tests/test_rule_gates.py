@@ -71,6 +71,7 @@ def test_notes_in_a_resting_stem_are_dropped(tmp_path):
     starts = [round(n.start, 1) for n in pretty_midi.PrettyMIDI(str(out)).instruments[0].notes]
     assert starts == [1.0, 3.0, 5.0]
     assert (report["notes_before"], report["dropped_quiet"], report["action"]) == (6, 3, "gated")
+    assert report["faint"] is False
 
 
 def test_declared_instrument_is_never_emptied(tmp_path):
@@ -85,6 +86,7 @@ def test_declared_instrument_is_never_emptied(tmp_path):
     report = gate_stem(tmp_path / "piano.mid", wav, "piano", out, GateConfig(), family,
                        declared=True, original_unknown=False, duration_sec=20)
     assert report["action"] == "kept_ungated_declared"
+    assert report["faint"] is True
     assert len(pretty_midi.PrettyMIDI(str(out)).instruments[0].notes) == 1
 
 
@@ -97,6 +99,7 @@ def test_sparse_stem_is_absent_only_when_original_unknown(tmp_path):
                       declared=True, original_unknown=False, duration_sec=20)
     assert (unknown["action"], unknown["notes_final"]) == ("dropped_sparse", 0)
     assert (known["action"], known["notes_final"]) == ("gated", 3)
+    assert known["faint"] is True and unknown["faint"] is False
 
 
 def test_rejection_is_recorded_in_manifest(tmp_path):
