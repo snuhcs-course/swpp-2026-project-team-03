@@ -1,6 +1,7 @@
 """A temporary kubectl outage must not turn a running Pod into a failed song."""
 
 import importlib.util
+import io
 from pathlib import Path
 import subprocess
 import unittest
@@ -14,6 +15,19 @@ spec.loader.exec_module(agent)
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_agent_message_survives_cp949_console(self):
+        output = io.BytesIO()
+        console = io.TextIOWrapper(output, encoding="cp949", write_through=True)
+        with patch.object(agent.sys, "stdout", console):
+            agent.say("ROCKY agent 시작 — 대기 중")
+        self.assertIn("ROCKY agent", output.getvalue().decode("cp949"))
+
+    def test_loopback_api_ignores_system_proxy(self):
+        api = agent.Api("http://127.0.0.1:8000", "", "test")
+        handlers = [h for h in api.opener.handlers
+                    if isinstance(h, agent.urllib.request.ProxyHandler)]
+        self.assertTrue(all(not h.proxies for h in handlers))
+
     def test_pod_lookup_retries_temporary_connection_failure(self):
         class Kubectl(agent.Kubectl):
             def __init__(self):
