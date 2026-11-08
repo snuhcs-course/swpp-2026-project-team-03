@@ -29,6 +29,18 @@ import urllib.request
 
 QUOTA_WAIT = "GPU를 다른 작업이 쓰고 있어서 기다리는 중"
 NODE_WAIT = "GPU 차례를 기다리는 중"
+TRANSIENT_KUBECTL_ERRORS = (
+    "unable to connect to the server", "connection reset", "forcibly closed",
+    "i/o timeout", "tls handshake timeout", "eof",
+)
+
+
+def transient_kubectl_error(message: str) -> bool:
+    return any(marker in message.lower() for marker in TRANSIENT_KUBECTL_ERRORS)
+
+
+class PodCancellationRequested(Exception):
+    """The API asked this agent to stop the Pod before the next song starts."""
 
 
 def say(msg: str) -> None:
@@ -58,21 +70,31 @@ class Api:
             self.call("POST", f"/agent/requests/{rid}/heartbeat", {"agent": self.agent, "note": note})
             return True
         except urllib.error.HTTPError as e:
+            if e.code == 410:
+                raise PodCancellationRequested from e
             if e.code == 409:
                 return False
             raise
 
-    def done(self, rid: str, phase: str, log: str) -> None:
+    def job_cancelled(self, job_id: str) -> bool:
+        try:
+            _, body = self.call("GET", f"/jobs/{urllib.parse.quote(job_id)}")
+            return body.get("state") in ("cancelling", "cancelled")
+        except OSError:
+            return False
+
+    def done(self, rid: str, phase: str, log: str) -> bool:
         for _ in range(10):  # the port-forward may drop for a moment
             try:
                 self.call("POST", f"/agent/requests/{rid}/done", {"agent": self.agent, "phase": phase, "log": log})
-                return
+                return True
             except urllib.error.HTTPError as e:
                 if e.code == 409:
-                    return
+                    return False
             except OSError:
                 pass
             time.sleep(3)
+        return False
 
 
 class Kubectl:
@@ -83,12 +105,15 @@ class Kubectl:
         return subprocess.run([*self.cmd, *args], input=stdin, capture_output=True, text=True, timeout=timeout)
 
     def pod(self, name: str) -> dict | None:
-        r = self.run("get", "pod", name, "-o", "json")
-        if r.returncode:
+        for attempt in range(4):
+            r = self.run("get", "pod", name, "-o", "json")
+            if not r.returncode:
+                return json.loads(r.stdout)
             if "NotFound" in r.stderr or "not found" in r.stderr:
                 return None
-            raise RuntimeError(r.stderr.strip())
-        return json.loads(r.stdout)
+            if not transient_kubectl_error(r.stderr) or attempt == 3:
+                raise RuntimeError(r.stderr.strip())
+            time.sleep(2 * (attempt + 1))
 
     def create(self, pod: dict) -> subprocess.CompletedProcess:
         return self.run("create", "-f", "-", stdin=json.dumps(pod))
@@ -98,7 +123,9 @@ class Kubectl:
         return r.stdout + (r.stderr if r.returncode else "")
 
     def delete(self, name: str) -> None:
-        self.run("delete", "pod", name, "--ignore-not-found", "--wait=true", "--timeout=90s", timeout=150)
+        r = self.run("delete", "pod", name, "--ignore-not-found", "--wait=true", "--timeout=90s", timeout=150)
+        if r.returncode:
+            raise RuntimeError(r.stderr.strip())
 
 
 def handle(api: Api, kube: Kubectl, req: dict, beat_sec: float, quota_retry_sec: float) -> None:
@@ -106,7 +133,10 @@ def handle(api: Api, kube: Kubectl, req: dict, beat_sec: float, quota_retry_sec:
     name = pod["metadata"]["name"]
     say(f"[{name}] 시작 ({req['kind']}, 곡 {req['job_id']})")
     note = None
+    safe_to_delete = False
     try:
+        if req.get("cancel"):
+            raise PodCancellationRequested
         # create the Pod (or keep watching it if this request was taken over from another agent)
         while kube.pod(name) is None:
             r = kube.create(pod)
@@ -119,10 +149,16 @@ def handle(api: Api, kube: Kubectl, req: dict, beat_sec: float, quota_retry_sec:
                 note = QUOTA_WAIT
                 if not api.heartbeat(rid, note):
                     say(f"[{name}] 서버가 요청을 취소함")
+                    if api.job_cancelled(req["job_id"]):
+                        kube.delete(name)
                     return
                 time.sleep(quota_retry_sec)
                 continue
             if "AlreadyExists" in r.stderr:
+                continue
+            if transient_kubectl_error(r.stderr):
+                say(f"[{name}] kubectl 연결 재시도")
+                time.sleep(quota_retry_sec)
                 continue
             api.done(rid, "Failed", "kubectl create 실패:\n" + r.stderr)
             say(f"[{name}] 생성 실패: {r.stderr.strip()[:300]}")
@@ -133,7 +169,7 @@ def handle(api: Api, kube: Kubectl, req: dict, beat_sec: float, quota_retry_sec:
             phase = (p or {}).get("status", {}).get("phase", "Unknown") if p else "Gone"
             if phase in ("Succeeded", "Failed", "Gone"):
                 log = kube.logs(name) if p else "(Pod가 사라짐 — SGS가 지웠을 수 있음)"
-                api.done(rid, "Succeeded" if phase == "Succeeded" else "Failed", log)
+                safe_to_delete = api.done(rid, "Succeeded" if phase == "Succeeded" else "Failed", log)
                 say(f"[{name}] 끝: {phase}")
                 return
             conds = (p or {}).get("status", {}).get("conditions") or []
@@ -144,13 +180,27 @@ def handle(api: Api, kube: Kubectl, req: dict, beat_sec: float, quota_retry_sec:
             note = new_note
             if not api.heartbeat(rid, note):
                 say(f"[{name}] 서버가 요청을 취소함")
+                if api.job_cancelled(req["job_id"]):
+                    kube.delete(name)
                 return
             time.sleep(beat_sec)
-    except Exception as e:  # report and release; never leave the GPU Pod running
-        say(f"[{name}] 오류: {e}")
-        api.done(rid, "Failed", f"agent 오류: {e}")
+    except PodCancellationRequested:
+        try:
+            kube.delete(name)
+        except Exception as e:
+            # Do not acknowledge cancellation until Kubernetes confirms deletion.
+            # After the request lease expires, an agent will retry this cleanup.
+            say(f"[{name}] 취소 Pod 삭제 재시도 필요: {e}")
+        else:
+            api.done(rid, "Cancelled", "cancelled by user")
+            say(f"[{name}] 사용자 취소로 Pod 종료")
+    except Exception as e:
+        # Unknown Pod state after a network error is not a failed model run.
+        # Leave the Pod intact; the request lease expires and an agent reclaims it.
+        say(f"[{name}] 연결/관찰 오류, Pod 보존 후 재인계: {e}")
     finally:
-        kube.delete(name)
+        if safe_to_delete:
+            kube.delete(name)
 
 
 def main(argv: list[str] | None = None) -> int:

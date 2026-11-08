@@ -166,7 +166,7 @@ fun RockyApp() {
                         photoVersion++
                         appScope.launch { bands.updateNickname(updated) }
                     },
-                    onLogout = { auth.logout(); ScoreJobs.clear(); user = null; restart(Screen.Login) },
+                    onLogout = { auth.logout(); ScoreJobs.clear(ctx); user = null; restart(Screen.Login) },
                 )
             }
             Screen.Main -> user?.let { u ->
@@ -644,6 +644,11 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
         }
         Spacer(Modifier.height(10.dp))
         val err = job.error
+        val cancelError = job.cancelError
+        if (cancelError != null) {
+            Text(cancelError, fontSize = 13.sp, color = cs.error)
+            Spacer(Modifier.height(8.dp))
+        }
         if (err != null) {
             Text("악보를 만들지 못했어요", fontWeight = FontWeight.Bold, color = cs.error, fontSize = 14.sp)
             Text(err, fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp)
@@ -672,8 +677,9 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             if (!job.done && err == null && job.phase == null) Text(formatEta(p?.etaSec), fontSize = 12.sp, color = cs.onSurfaceVariant)
-            TextButton(onClick = { confirm = true }) {
-                Text(if (job.done || job.failed) "지우기" else "취소", fontSize = 13.sp, color = cs.onSurfaceVariant)
+            TextButton(onClick = { confirm = true }, enabled = !job.cancelling) {
+                Text(if (job.cancelling) "취소 중" else if (job.done || job.failed) "지우기" else "취소",
+                    fontSize = 13.sp, color = cs.onSurfaceVariant)
             }
         }
     }
@@ -690,7 +696,10 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirm = false; ScoreJobs.remove(job) }) {
+                TextButton(onClick = {
+                    confirm = false
+                    if (job.done || job.failed) ScoreJobs.remove(job) else ScoreJobs.cancel(ctx, job)
+                }) {
                     Text(if (job.done || job.failed) "지우기" else "취소하기", color = MaterialTheme.colorScheme.error)
                 }
             },

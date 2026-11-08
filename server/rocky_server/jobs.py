@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .runners import RunnerError, to_wav
 
-STATES = ("uploading", "queued", "running", "publishing", "complete", "failed")
+STATES = ("uploading", "queued", "running", "publishing", "cancelling", "cancelled", "complete", "failed")
 
 
 @dataclass
@@ -85,10 +85,17 @@ class JobStore:
 
     def update(self, job: Job, **changes) -> Job:
         with self.lock:
+            current = self.get(job.id) or job
+            # A worker may hold an older Job object while the cancel endpoint
+            # changes its state. Progress updates must not revive that job.
+            if current.state in ("cancelling", "cancelled") and changes.get("state") != "cancelled":
+                job.__dict__.update(current.__dict__)
+                return current
             for key, value in changes.items():
-                setattr(job, key, value)
-            self.save(job)
-        return job
+                setattr(current, key, value)
+            self.save(current)
+            job.__dict__.update(current.__dict__)
+        return current
 
 
 class Worker:
@@ -111,6 +118,9 @@ class Worker:
         for job in self.store.all():
             if job.state in ("running", "publishing"):
                 self.store.update(job, state="queued")
+            elif job.state == "cancelling":
+                # The request was already persisted. Never restart its pipeline.
+                self.store.update(job, state="cancelled", finished_at=time.time())
             elif job.state == "uploading":  # the upload was cut off by the restart
                 self.store.update(job, state="failed", error="upload interrupted")
         for t in self.threads:
@@ -145,13 +155,62 @@ class Worker:
                 continue
             self.run(job)
 
+    def cancel(self, job_id: str) -> str:
+        """Persist cancellation before signalling the runner or waking the queue."""
+        with self.store.lock:
+            job = self.store.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.state in ("complete", "failed", "cancelled", "cancelling"):
+                return job.state
+            if job.state in ("running", "publishing") and not callable(getattr(self.runner, "cancel", None)):
+                raise NotImplementedError("this runner cannot stop an active job")
+            active = job.state in ("running", "publishing")
+            job.state = "cancelling" if active else "cancelled"
+            job.note = None
+            job.error = None
+            if not active:
+                job.finished_at = time.time()
+            self.store.save(job)
+        if active:
+            self.runner.cancel(job_id)
+        else:
+            self._clear_cancelled_files(job)
+        self.notify()
+        return job.state
+
+    def _clear_cancelled_files(self, job: Job) -> None:
+        shutil.rmtree(self.store.run_dir(job.id), ignore_errors=True)
+        if job.filename:
+            free_space(self.store.run_dir(job.id), self.store.inputs, job.filename)
+
+    def _finish_cancel(self, job: Job) -> None:
+        current = self.store.get(job.id)
+        if current is None or current.state not in ("cancelling", "cancelled"):
+            return
+        self.store.update(current, state="cancelled", finished_at=time.time(), note=None)
+        self._clear_cancelled_files(current)
+        forget = getattr(self.runner, "forget", None)
+        if callable(forget):
+            forget(job.id)
+
+    def _is_cancelling(self, job_id: str) -> bool:
+        current = self.store.get(job_id)
+        return current is not None and current.state in ("cancelling", "cancelled")
+
     def run(self, job: Job) -> None:
         store = self.store
         log = store.log(job.id)
         run = store.run_dir(job.id)
-        store.update(job, state="running", started_at=job.started_at or time.time(), error=None)
+        job = store.update(job, state="running", started_at=job.started_at or time.time(), error=None)
+        if self._is_cancelling(job.id):
+            self._finish_cancel(job)
+            return
         try:
             audio = to_wav(store.inputs / job.filename)
+            if self._is_cancelling(job.id):
+                self._finish_cancel(job)
+                return
             def note(msg: str | None) -> None:
                 if msg != job.note:
                     store.update(job, note=msg)
@@ -159,15 +218,30 @@ class Worker:
             if not (run / "full_score.mid").is_file():
                 self.runner.run_midi(job.id, audio, run, job.pipeline_requested, log, note=note,
                                      original=job.pipeline_original)
+            if self._is_cancelling(job.id):
+                self._finish_cancel(job)
+                return
             store.update(job, state="publishing", note=None)
+            if self._is_cancelling(job.id):
+                self._finish_cancel(job)
+                return
             if not (run / "scores" / "score_outputs.json").is_file():
                 self.runner.run_pdf(job.id, run, log, note=note)
+            if self._is_cancelling(job.id):
+                self._finish_cancel(job)
+                return
             if not (run / "scores" / "score_outputs.json").is_file():
                 raise RunnerError("PDF stage finished without scores/score_outputs.json")
             store.update(job, state="complete", finished_at=time.time(), note=None)
+            if self._is_cancelling(job.id):
+                self._finish_cancel(job)
+                return
             free_space(run, store.inputs, job.filename)
         except Exception as exc:  # any failure ends this job, never the worker
-            store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc))
+            if self._is_cancelling(job.id):
+                self._finish_cancel(job)
+            else:
+                store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc))
 
 
 def failure_reason(run: Path, exc: Exception) -> str:

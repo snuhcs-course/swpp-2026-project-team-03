@@ -151,3 +151,30 @@ def test_requests_go_to_one_agent_and_move_when_it_stops(server):
     again = runner.next_request("b")
     assert again["rid"] == first["rid"] and again["pod"] == first["pod"]
     assert runner.finish(first["rid"], "b", "Succeeded", "")
+
+
+def test_cancel_request_waits_for_agent_pod_deletion(server):
+    url, store, runner, _ = server
+    job_id = upload(url)
+    for _ in range(50):
+        req = runner.next_request("laptop")
+        if req:
+            break
+        time.sleep(0.1)
+    assert req and req["job_id"] == job_id
+    import httpx
+    response = httpx.post(f"{url}/jobs/{job_id}/cancel")
+    assert response.json()["state"] == "cancelling"
+    signal = httpx.post(f"{url}/agent/requests/{req['rid']}/heartbeat",
+                        json={"agent": "laptop", "note": None})
+    assert signal.status_code == 410
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cancel_agent", AGENT)
+    cancel_agent = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cancel_agent)
+    with pytest.raises(cancel_agent.PodCancellationRequested):
+        cancel_agent.Api(url, "", "laptop").heartbeat(req["rid"], None)
+    assert runner.heartbeat(req["rid"], "laptop", None) == "cancel"
+    assert store.get(job_id).state == "cancelling"
+    assert runner.finish(req["rid"], "laptop", "Cancelled", "pod deleted")
+    assert wait_state(store, job_id, {"cancelled", "failed"}).state == "cancelled"

@@ -11,6 +11,7 @@ import com.team3.rocky.Demo
 import com.team3.rocky.Work
 import com.team3.rocky.server.ApiException
 import com.team3.rocky.server.JobFailedException
+import com.team3.rocky.server.JobCancelledException
 import com.team3.rocky.server.RockyApi
 import com.team3.rocky.server.ScoreServer
 import com.team3.rocky.server.ScoreStore
@@ -22,7 +23,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -53,8 +56,13 @@ class ScoreJob(
     /** 업로드 중 같은 진행률이 없는 단계 안내 */
     var phase by mutableStateOf<String?>(null)
         internal set
+    var cancelling by mutableStateOf(false)
+        internal set
+    var cancelError by mutableStateOf<String?>(null)
+        internal set
+    @Volatile internal var cancelRequested = false
     /** 서버 작업 번호. 업로드가 끝나면 생긴다 */
-    internal var serverId: String? = null
+    @Volatile internal var serverId: String? = null
     internal var runner: Job? = null
 
     val done get() = progress?.done == true
@@ -116,6 +124,8 @@ object ScoreJobs {
                 Toast.makeText(app, "'${job.title}' 악보가 완성됐어요. 진행상황 탭에서 볼 수 있어요", Toast.LENGTH_LONG).show()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: JobCancelledException) {
+                jobs.remove(job)
             } catch (e: Exception) {
                 job.phase = null
                 job.error = failureMessage(e)
@@ -135,10 +145,13 @@ object ScoreJobs {
                     // lineup·original은 앱 이름 그대로(guitar2 = 기타 2대) 보내고,
                     // 서버가 unified.py 형식(keyboard,bass,guitar1|guitar2,drums / unknown)으로 바꾼다.
                     server.upload(it, audio.fileName, job.title, requestedParts(job.lineup),
-                        original = job.original, lineup = job.lineup)
+                        original = job.original, lineup = job.lineup).also { id -> job.serverId = id }
                 }
             }
         }
+        // An upload already in progress may finish after the user pressed cancel.
+        // Keep its runner here until cancel() has sent the new server ID upstream.
+        while (job.cancelRequested) delay(100)
         job.phase = null
         val id = job.serverId!!
         val tracker = ServerProgress(server, onStatus = { st ->
@@ -161,15 +174,96 @@ object ScoreJobs {
 
     fun find(id: Long) = jobs.firstOrNull { it.id == id }
 
-    /** 목록에서 지운다. 아직 만드는 중이면 취소한다. */
+    /** Stop the server job first, then remove the card once the Pod is gone. */
+    fun cancel(ctx: Context, job: ScoreJob) {
+        if (job.done || job.failed) {
+            remove(job)
+            return
+        }
+        if (job.cancelling) return
+        job.cancelling = true
+        job.cancelRequested = true
+        job.cancelError = null
+        job.phase = "취소 중"
+        if (!job.isServer) {
+            job.runner?.cancel()
+            jobs.remove(job)
+            return
+        }
+        val app = ctx.applicationContext
+        scope.launch {
+            try {
+                while (job.serverId == null && job.runner?.isActive == true) delay(100)
+                val id = job.serverId
+                if (id == null) {
+                    job.runner?.cancel()
+                    jobs.remove(job)
+                    return@launch
+                }
+                val server = serverFactory(app)
+                val state = withContext(Dispatchers.IO) { server.cancel(id) }
+                if (state == "complete") {
+                    job.cancelRequested = false
+                    job.cancelling = false
+                    job.phase = null
+                    if (job.runner?.isActive != true) launch(app, job)
+                    return@launch
+                }
+                if (state == "failed") {
+                    job.cancelRequested = false
+                    job.cancelling = false
+                    job.phase = null
+                    return@launch
+                }
+                job.runner?.cancel()
+                if (state == "cancelled") {
+                    jobs.remove(job)
+                    return@launch
+                }
+                val stopped = withTimeoutOrNull(120_000) {
+                    while (true) {
+                        val status = withContext(Dispatchers.IO) { server.status(id) }
+                        if (status.isCancelled || status.isDone || status.isFailed)
+                            return@withTimeoutOrNull status.state
+                        delay(500)
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    "running"
+                }
+                when (stopped) {
+                    "cancelled" -> jobs.remove(job)
+                    "complete", "failed" -> {
+                        job.cancelRequested = false
+                        job.cancelling = false
+                        job.phase = null
+                        launch(app, job) // completion or failure won the race
+                    }
+                    else -> {
+                        job.cancelRequested = false
+                        job.cancelling = false
+                        job.cancelError = "서버의 취소 완료를 확인하지 못했어요. 다시 눌러 확인해 주세요."
+                        launch(app, job)
+                    }
+                }
+            } catch (e: Exception) {
+                job.cancelRequested = false
+                job.cancelling = false
+                job.phase = null
+                job.cancelError = "취소 요청이 전달되지 않았어요. 다시 시도해 주세요. (${e.message})"
+                if (job.runner?.isActive != true) launch(app, job)
+            }
+        }
+    }
+
+    /** 완성되거나 실패한 카드만 로컬 목록에서 지운다. 실행 중인 서버 작업은 cancel()을 쓴다. */
     fun remove(job: ScoreJob) {
         job.runner?.cancel()
         jobs.remove(job)
     }
 
     /** 로그아웃하면 다른 회원에게 보이지 않게 비운다. */
-    fun clear() {
-        jobs.forEach { it.runner?.cancel() }
+    fun clear(ctx: Context) {
+        jobs.toList().forEach { if (!it.done && !it.failed) cancel(ctx, it) else it.runner?.cancel() }
         jobs.clear()
     }
 
