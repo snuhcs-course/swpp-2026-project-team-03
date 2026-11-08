@@ -38,8 +38,8 @@ TUNINGS = {  # thin -> thick, MIDI numbers
 NAMES = {k: [pretty_midi.note_number_to_name(p) for p in v] for k, v in TUNINGS.items()}
 NFRETS = 20
 MAX_SPAN = 4          # fretted notes of one chord must fit in 4 frets (open strings free)
-SPLIT_MIN_UNPLAYABLE = 0.05   # auto split: >= 5% of onsets cannot be fingered as one chord ...
-SPLIT_MIN_WIDE = 0.06         # ... and >= 6% of onsets span more than two octaves (two guitars in two registers)
+SPLIT_MIN_UNPLAYABLE = 0.02   # auto split: >= 2% of onsets cannot be fingered as one chord ...
+SPLIT_MIN_WIDE = 0.03         # ... and >= 3% of onsets span more than two octaves (two guitars in two registers)
 WIDE_SPAN = 24                # two octaves: E2 (6th string open) to E4 (1st string open)
 TB_WEIGHTS = dict(b=0.1, height=1, length=1, n_changed_strings=1)
 
@@ -136,7 +136,10 @@ def decide_split(notes, tuning):
     - unplayable = share of onsets whose notes can't be fingered one per string within 4 frets
     - wide = share of onsets whose lowest and highest notes are more than two octaves apart
     Split only when both are high. Unplayable but narrow = one guitar with extra notes (chord reduction
-    fixes it). Calibrated on 11 songs (2026-10-30): two different guitars -> wide >= 8.3%, one guitar -> <= 4.2%.
+    fixes it). Recalibrated for BS-RoFormer stems on 13 songs (2026-11-09): two guitars -> unplayable >= 2.9%
+    and wide >= 4.4%; one guitar -> wide <= 0.6%. (The 2026-10-30 Demucs calibration, 5% and 6%, judged
+    한 페이지가 될 수 있게 (2.9%, 9.8%) as one guitar.) The pipeline also checks the guitar stem's stereo
+    image before this (ml/pipeline/rule_gates.py) and forces a split when two guitars are panned apart.
     """
     groups = collections.OrderedDict()
     for n in notes:
