@@ -487,13 +487,73 @@ def align_midi(midi_path: str | Path, out_path: str | Path, *,
     if bpm:
         beats, downbeats = fix_beats(beats, downbeats, bpm)
     midi = pretty_midi.PrettyMIDI(str(midi_path))
-    sync = _drum_sync(midi) if drum_sync else None
+    sync = _drum_sync(midi, beats=beats) if drum_sync else None
     aligned, result = align_pretty_midi(midi, beats, downbeats, triplets=triplets, compound=compound,
                                         downbeat_shift=downbeat_shift, auto_meter=auto_meter)
     result.drum_sync = sync
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     aligned.write(str(out_path))
     return result
+
+
+# ----------------------------------------------------------------------
+# 2-1. 생성 파트(MIDI-GPT)를 정렬된 MIDI의 칸에 맞추기
+# ----------------------------------------------------------------------
+GENERATED_SUBDIVISION = 4   # 생성 파트는 16분음표 칸에만 맞춘다 (셋잇단 칸은 쓰지 않는다)
+TEMPO_SAME = 0.01           # 두 템포가 1% 안이면 같은 템포로 본다
+
+
+def snap_to_reference(generated: pretty_midi.PrettyMIDI, reference: pretty_midi.PrettyMIDI,
+                      subdivision: int = GENERATED_SUBDIVISION) -> tuple[pretty_midi.PrettyMIDI, dict]:
+    """MIDI-GPT가 만든 파트를 정렬된 MIDI(reference: 템포 하나, 0초 = 첫 마디 첫 박)의 16분음표 칸에 맞춘다.
+
+    생성 파트는 Beat This! 정렬을 거치지 않아 음 시작이 칸에서 벗어나 있다 (2026-11 인터뷰:
+    드럼과 키보드가 엇박처럼 들림, 곡 후반에 키보드가 반 박 당겨짐).
+    1. 시각을 두 가지로 읽어 본다: (a) 파일에 적힌 초 그대로, (b) 틱 → 4분음표 박 → reference 템포의 초.
+       생성 파일의 템포가 reference와 같으면 둘이 같다. 다르면 길이가 reference 곡 길이에 더 가까운 쪽을 쓴다
+       (MIDI-GPT가 박은 맞게 쓰고 템포만 기본값으로 둔 경우 (b)가 맞다).
+    2. 시작·끝을 가장 가까운 16분음표 칸으로 반올림하고, 길이는 최소 16분음표로 둔다.
+    3. 한 트랙에서 같은 음높이가 같은 칸에 두 번 오면 하나만 남긴다 (긴 끝을 쓴다).
+    """
+    ref_tempo = float(reference.get_tempo_changes()[1][0])
+    gen_tempo = float(generated.get_tempo_changes()[1][0]) if len(generated.get_tempo_changes()[1]) else ref_tempo
+    cell = 60.0 / ref_tempo / subdivision
+    seconds = lambda t: t
+    by_beat = lambda t: generated.time_to_tick(t) / generated.resolution * 60.0 / ref_tempo
+    mode, read = "seconds", seconds
+    if abs(gen_tempo / ref_tempo - 1) > TEMPO_SAME or len(generated.get_tempo_changes()[1]) > 1:
+        ends = {name: max((f(n.end) for i in generated.instruments for n in i.notes), default=0.0)
+                for name, f in (("seconds", seconds), ("beats", by_beat))}
+        target = reference.get_end_time()
+        mode = min(ends, key=lambda k: abs(ends[k] - target))
+        read = seconds if mode == "seconds" else by_beat
+
+    out = pretty_midi.PrettyMIDI(initial_tempo=ref_tempo, resolution=reference.resolution)
+    out.time_signature_changes = [pretty_midi.TimeSignature(ts.numerator, ts.denominator, ts.time)
+                                  for ts in reference.time_signature_changes]
+    errors, merged, total = [], 0, 0
+    for inst in generated.instruments:
+        new = pretty_midi.Instrument(program=inst.program, is_drum=inst.is_drum, name=inst.name)
+        cells: dict[tuple[int, int], pretty_midi.Note] = {}
+        for note in sorted(inst.notes, key=lambda n: (n.start, n.pitch)):
+            total += 1
+            start, end = read(note.start), read(note.end)
+            errors.append(abs(start / cell - round(start / cell)))
+            s_cell = max(0, int(round(start / cell)))
+            e_cell = max(s_cell + 1, int(round(end / cell)))
+            key = (note.pitch, s_cell)
+            if key in cells:
+                merged += 1
+                cells[key].end = max(cells[key].end, e_cell * cell)
+                continue
+            cells[key] = pretty_midi.Note(velocity=note.velocity, pitch=note.pitch,
+                                          start=s_cell * cell, end=e_cell * cell)
+        new.notes = sorted(cells.values(), key=lambda n: (n.start, n.pitch))
+        out.instruments.append(new)
+    stats = {"mode": mode, "generated_tempo": round(gen_tempo, 3), "reference_tempo": round(ref_tempo, 3),
+             "notes": total, "same_cell_merged": merged,
+             "mean_offgrid_16ths_before": round(float(np.mean(errors)), 3) if errors else 0.0}
+    return out, stats
 
 
 # ----------------------------------------------------------------------
