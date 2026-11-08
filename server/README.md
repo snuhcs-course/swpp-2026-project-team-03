@@ -16,6 +16,9 @@ laptop logged in with kubectl, creates them, waits out the GPU quota, watches th
 reports the result through `/agent/*` and deletes them. Step-by-step deployment in
 Korean: `DEPLOY_ko.md`.
 
+For Android Emulator verification of alphaTab, cancellation, and key changes,
+see `EMULATOR_TEST_ko.md`.
+
 The API pod has no GPU, so the 30-minute idle-GPU rule does not apply to it.
 A GPU is used only while a song's GPU Pod runs. `ROCKY_PARALLEL` controls how
 many songs can be in flight; the others wait in upload order. The current SGS
