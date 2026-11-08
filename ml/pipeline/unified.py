@@ -176,9 +176,15 @@ def describe_tracks(score: pretty_midi.PrettyMIDI) -> list[dict]:
 
 
 def normalize_generated(source: Path, target: str, aligned: pretty_midi.PrettyMIDI,
-                        duration: float, output: Path) -> dict:
-    """Keep only the requested generated part within the input song's length."""
+                        duration: float, output: Path, snap: Callable | None = None) -> dict:
+    """Keep only the requested generated part within the input song's length.
+
+    snap: beat_align.align.snap_to_reference. When given, the generated notes are first put on the
+    aligned MIDI's 16th grid (MIDI-GPT output skips beat alignment)."""
     original = pretty_midi.PrettyMIDI(str(source))
+    snap_stats = None
+    if snap is not None:
+        original, snap_stats = snap(original, aligned)
     result = pretty_midi.PrettyMIDI(initial_tempo=float(aligned.get_tempo_changes()[1][0]),
                                    resolution=aligned.resolution)
     result.time_signature_changes = copy.deepcopy(aligned.time_signature_changes)
@@ -210,7 +216,8 @@ def normalize_generated(source: Path, target: str, aligned: pretty_midi.PrettyMI
     result.write(str(output))
     return {"raw_notes": sum(len(i.notes) for i in original.instruments),
             "kept_notes": kept, "dropped_after_end": dropped,
-            "clipped_at_end": clipped, "duration_sec": round(duration, 3)}
+            "clipped_at_end": clipped, "duration_sec": round(duration, 3),
+            **({"snap": snap_stats} if snap_stats is not None else {})}
 
 
 def combine_for_tab(aligned: pretty_midi.PrettyMIDI, parts: list[Path], output: Path) -> None:
@@ -248,7 +255,12 @@ def assemble(aligned_path: Path, guitar_dir: Path, bass_dir: Path,
     for target, path in generated.items():
         if target in {"guitar", "bass"}:
             continue  # the processed TAB MIDI replaced this generated part
-        for inst in pretty_midi.PrettyMIDI(str(path)).instruments:
+        part_midi = pretty_midi.PrettyMIDI(str(path))
+        if target == "piano":
+            # generated keyboard skips build(): give it the same two-hand limits as a transcribed one
+            import piano_playable  # ml/guitar_tab, next to full_score
+            part_midi, _ = piano_playable.process(part_midi)
+        for inst in part_midi.instruments:
             if inst.notes:
                 if family(inst) != target:
                     raise ValueError(f"Generated {target} track has unexpected GM program: {path}")
@@ -589,10 +601,13 @@ class Runner:
         normalization_record = self.out / "generation_normalization.json"
         def normalize():
             import soundfile as sf
+            sys.path.insert(0, str(self.modules / "beat_align"))
+            from align import snap_to_reference
             aligned_midi = pretty_midi.PrettyMIDI(str(aligned))
             duration = max(float(sf.info(str(self.audio)).duration), aligned_midi.get_end_time())
             stats = {part: normalize_generated(raw_generated[part], part, aligned_midi,
-                                               duration, generated[part]) for part in missing}
+                                               duration, generated[part], snap=snap_to_reference)
+                     for part in missing}
             atomic_json(normalization_record, {"duration_sec": round(duration, 3), "parts": stats})
         self.stage("normalize_generated", [normalization_record, *generated.values()], normalize)
 

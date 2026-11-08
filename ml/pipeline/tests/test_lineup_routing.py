@@ -68,7 +68,8 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
 
     monkeypatch.setitem(sys.modules, "align", SimpleNamespace(
         detect_beats=detect_beats,
-        save_beats=save_beats, load_beats=load_beats, align_midi=align_midi))
+        save_beats=save_beats, load_beats=load_beats, align_midi=align_midi,
+        snap_to_reference=lambda generated, reference: (generated, {"mode": "stub"})))
 
     def guitar_tracks(directory):
         directory = Path(directory)
