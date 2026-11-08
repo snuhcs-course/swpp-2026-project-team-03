@@ -1,6 +1,7 @@
 """Writes the same files unified.py and publish_scores.py write, without any model."""
 
 import json
+import shutil
 from pathlib import Path
 
 STEMS = ("drums", "bass", "guitar", "piano")
@@ -67,3 +68,11 @@ class FakeRunner:
         if self.fail_stage == "pdf":
             raise RuntimeError("pdf job failed")
         write_outputs(run)
+
+    def run_transpose(self, job_id, source, target, semitones, log, note=lambda _m: None):
+        self.calls.append(("transpose", job_id, semitones))
+        if self.fail_stage == "transpose":
+            raise RuntimeError("transpose pod failed")
+        shutil.copytree(source / "scores", target / "scores", dirs_exist_ok=True)
+        shutil.copy2(source / "full_score.mid", target / "full_score.mid")
+        shutil.copy2(source / "manifest.json", target / "manifest.json")

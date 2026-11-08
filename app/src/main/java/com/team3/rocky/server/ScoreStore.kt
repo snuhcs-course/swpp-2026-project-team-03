@@ -13,7 +13,7 @@ import java.io.File
  * 작업 id(Work.id)로 찾기 때문에 보관함·밴드 공유(같은 폰)에서도 그대로 열린다.
  * 폴더가 없는 작업은 데모 결과(assets/demo)로 보여준다.
  */
-class LocalScore(val dir: File, val result: JobResult) {
+class LocalScore(val dir: File, val result: JobResult, val semitones: Int = 0) {
     /**
      * 앱의 파트 이름(piano, drums, bass, guitar, guitar2) → 서버 결과의 키.
      * AI가 두 번째 기타를 만든 곡은 guitar_1 / guitar_2가 따로 오고,
@@ -43,6 +43,7 @@ class LocalScore(val dir: File, val result: JobResult) {
 
 object ScoreStore {
     private const val RESULT = "result.json"
+    private const val ACTIVE = "active_semitones.txt"
 
     fun dir(ctx: Context, workId: Long) = File(ctx.filesDir, "scores/$workId")
 
@@ -54,9 +55,50 @@ object ScoreStore {
     }
 
     fun load(ctx: Context, workId: Long): LocalScore? {
-        val d = dir(ctx, workId)
-        val json = File(d, RESULT).takeIf { it.isFile } ?: return null
-        return runCatching { LocalScore(d, ApiJson.result(json.readText())) }.getOrNull()
+        val root = dir(ctx, workId)
+        val offset = File(root, ACTIVE).takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()
+            ?.takeIf { it in -12..12 } ?: 0
+        val selected = if (offset == 0) root else variantDir(root, offset)
+        val json = File(selected, RESULT).takeIf { it.isFile } ?: File(root, RESULT).takeIf { it.isFile }
+            ?: return null
+        return runCatching {
+            LocalScore(json.parentFile!!, ApiJson.result(json.readText()),
+                if (json.parentFile == root) 0 else offset)
+        }.getOrNull()
+    }
+
+    private fun variantDir(root: File, semitones: Int) =
+        File(root, "transpositions/${if (semitones > 0) "+" else ""}$semitones")
+
+    fun useOriginal(ctx: Context, workId: Long): LocalScore {
+        val root = dir(ctx, workId)
+        val original = File(root, RESULT)
+        require(original.isFile) { "원본 악보가 없어요" }
+        File(root, ACTIVE).writeText("0")
+        return LocalScore(root, ApiJson.result(original.readText()))
+    }
+
+    /** Download every band/part PDF, MIDI and MP3 before switching the active key. */
+    fun transpose(ctx: Context, server: ScoreServer, workId: Long, semitones: Int): LocalScore {
+        require(semitones in -12..12 && semitones != 0)
+        val root = dir(ctx, workId)
+        val original = File(root, RESULT).takeIf { it.isFile } ?: error("원본 악보가 없어요")
+        val jobId = ApiJson.result(original.readText()).id
+        val target = variantDir(root, semitones).apply { mkdirs() }
+        val result = server.transpose(jobId, semitones)
+        val paths = buildSet {
+            for (p in listOf(result.fullBand) + result.instruments.values) {
+                add(p.pdf); p.midi?.let(::add); p.mp3?.let(::add)
+            }
+        }
+        for (path in paths) {
+            val dest = File(target, path)
+            require(dest.canonicalPath.startsWith(target.canonicalPath + File.separator)) { "잘못된 결과 경로" }
+            if (!dest.isFile) server.downloadTransposed(jobId, semitones, path, dest)
+        }
+        File(target, RESULT).writeText(toJson(result))
+        File(root, ACTIVE).writeText(semitones.toString())
+        return LocalScore(target, result, semitones)
     }
 
     /** 결과 PDF·MIDI를 모두 받아 저장한다. 네트워크를 쓰므로 IO 스레드에서. */

@@ -31,6 +31,11 @@ interface ScoreServer {
     fun cancel(jobId: String): String
     fun result(jobId: String): JobResult
     fun download(jobId: String, path: String, dest: File)
+    /** Re-render a completed score at an absolute offset from its original key. */
+    fun transpose(jobId: String, semitones: Int): JobResult =
+        throw UnsupportedOperationException("key change is unavailable")
+    fun downloadTransposed(jobId: String, semitones: Int, path: String, dest: File): Unit =
+        throw UnsupportedOperationException("key change is unavailable")
 }
 
 /**
@@ -99,8 +104,18 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
 
+    override fun transpose(jobId: String, semitones: Int): JobResult =
+        ApiJson.result(open("/jobs/$jobId/transpositions/$semitones", "POST", readTimeoutMs = 600_000).body())
+
+    override fun downloadTransposed(jobId: String, semitones: Int, path: String, dest: File) =
+        downloadPath("/jobs/$jobId/transpositions/$semitones/files/$path", dest)
+
     override fun download(jobId: String, path: String, dest: File) {
-        val c = open("/jobs/$jobId/files/$path", readTimeoutMs = 60_000)
+        downloadPath("/jobs/$jobId/files/$path", dest)
+    }
+
+    private fun downloadPath(path: String, dest: File) {
+        val c = open(path, readTimeoutMs = 60_000)
         if (c.responseCode !in 200..299) c.body()  // throws ApiException
         dest.parentFile?.mkdirs()
         val tmp = File(dest.path + ".part")
