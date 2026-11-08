@@ -210,7 +210,7 @@ def test_stage_failure_is_recorded_and_resume_checks_same_input(tmp_path):
                            tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
                            bsroformer_lib_dir=tmp_path / "pylib")
     runner = Runner(args)
-    assert runner.config["pipeline_contract"] == 10
+    assert runner.config["pipeline_contract"] == 11
     assert runner.config["beat_mix_stems"] == ["drums", "bass", "guitar", "piano", "other"]
     assert runner.config["separator"].endswith("BS-RoFormer-SW-6stem")
     output = runner.out / "result.mid"

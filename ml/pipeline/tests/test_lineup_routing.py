@@ -42,7 +42,9 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
                            tab_python=Path(sys.executable), no_publish=True,
                            bsroformer_models_dir=tmp_path / "models",
                            bsroformer_lib_dir=tmp_path / "pylib",
-                           transcription_workers=workers)
+                           transcription_workers=workers,
+                           # one fixture note per stem would count as a sparse stem
+                           min_notes_per_minute=0.0)
 
     def save_beats(path, beats, downbeats):
         Path(path).write_text(json.dumps({"beats": beats, "downbeats": downbeats}), encoding="utf-8")
@@ -84,8 +86,9 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
         commands.append((stage, command))
         if stage == "bs_roformer":
             directory = Path(command[3])
+            # audible stems longer than the input check's minimum, so the song is accepted
             for stem in (*STEMS, "no_vocals"):
-                sf.write(str(directory / f"{stem}.wav"), np.zeros((128, 2), dtype="float32"),
+                sf.write(str(directory / f"{stem}.wav"), np.full((8000 * 12, 2), 0.1, dtype="float32"),
                          8000, subtype="FLOAT")
         elif stage == "muscriptor_batch":
             jobs = json.loads(Path(command[command.index("--jobs-file") + 1]).read_text(encoding="utf-8"))

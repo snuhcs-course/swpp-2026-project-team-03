@@ -21,6 +21,7 @@ import time
 from typing import Callable
 
 import pretty_midi
+from rule_gates import GateConfig, InputRejected, check_input, gate_stem
 from separate_bs_roformer import (CHECKPOINT_SHA256, CONFIG_SHA256, NONVOCAL_STEMS,
                                   PACKAGE_VERSION, STEMS, valid_stems)
 
@@ -35,6 +36,7 @@ HINTS = {
 TARGETS = ("piano", "guitar", "bass", "drums")
 PIANO_STEM_PROGRAM = 0  # one acoustic-grand track for piano/electric-piano/organ labels
 SAME_NOTE_WINDOW = 0.05  # cross-track copies within 50 ms represent one onset
+REJECTED_EXIT = 3  # input_check refused the song; manifest.json has `rejection`
 
 
 def parse_lineup(raw: str | list[str], *, original: bool) -> tuple[set[str], int, bool]:
@@ -285,8 +287,12 @@ class Runner:
         # discovers the virtual environment and its installed packages.
         self.model_python = args.model_python.absolute()
         self.tab_python = args.tab_python.absolute()
+        self.gates = GateConfig(
+            min_band_ratio=getattr(args, "min_band_ratio", GateConfig.min_band_ratio),
+            note_floor_db=getattr(args, "note_floor_db", GateConfig.note_floor_db),
+            min_notes_per_minute=getattr(args, "min_notes_per_minute", GateConfig.min_notes_per_minute))
         self.config = {
-            "pipeline_contract": 10,
+            "pipeline_contract": 11,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,
@@ -300,6 +306,7 @@ class Runner:
             "separator_config_sha256": CONFIG_SHA256,
             "separator_models_dir": str(args.bsroformer_models_dir.absolute()),
             "beat_mix_stems": list(NONVOCAL_STEMS),
+            "rule_gates": self.gates.as_dict(),
         }
         self.manifest_path = self.out / "manifest.json"
         if self.manifest_path.exists():
@@ -342,7 +349,13 @@ class Runner:
                 raise RuntimeError(f"{name}: outputs are missing, empty, or invalid: {outputs}")
         except Exception as exc:
             self.manifest.setdefault("stage_seconds", {})[name] = round(time.perf_counter() - started, 2)
-            self.manifest["status"] = "failed"
+            if isinstance(exc, InputRejected):
+                # Not a pipeline failure: the input is refused. The server reads
+                # `rejection.code` and tells the user; a retry gives the same answer.
+                self.manifest["status"] = "rejected"
+                self.manifest["rejection"] = exc.as_dict()
+            else:
+                self.manifest["status"] = "failed"
             self.manifest["error"] = f"{type(exc).__name__}: {exc}"
             atomic_json(self.manifest_path, self.manifest)
             raise
@@ -351,6 +364,7 @@ class Runner:
         self.manifest.setdefault("stage_seconds", {})[name] = round(time.perf_counter() - started, 2)
         self.manifest["status"] = "running"
         self.manifest.pop("error", None)
+        self.manifest.pop("rejection", None)
         atomic_json(self.manifest_path, self.manifest)
 
     def publish_outputs(self) -> None:
@@ -381,6 +395,19 @@ class Runner:
                             "--models-dir", str(self.args.bsroformer_models_dir),
                             "--lib-dir", str(self.args.bsroformer_lib_dir)]),
                    validate=lambda: valid_stems(stems_dir))
+
+        # Rule 1: refuse audio that is not a band song before any GPU-heavy stage.
+        input_report = self.out / "input_check.json"
+        def input_check():
+            report = {}
+            try:
+                report = check_input(stems_dir, self.gates)
+            except InputRejected as exc:
+                report = {"rejected": exc.code, **exc.detail}
+                raise
+            finally:
+                atomic_json(input_report, report)
+        self.stage("input_check", [input_report], input_check)
 
         midi_dir = self.out / "stem_midi"
         midi_dir.mkdir(exist_ok=True)
@@ -414,8 +441,31 @@ class Runner:
             self.stage("muscriptor_batch", list(stem_midis.values()), transcribe,
                        validate=lambda: all(valid_midi(path) for path in stem_midis.values()))
 
+        # Rule 2: drop notes MuScriptor wrote from the residue of a resting stem,
+        # and (original unknown only) treat a stem with very few notes as absent.
+        gated_dir = self.out / "stem_midi_gated"
+        gated_midis = {s: gated_dir / f"{s}.mid" for s in transcribe_stems}
+        gate_report = self.out / "note_gate.json"
+        def note_gate():
+            import soundfile as sf
+            duration = float(sf.info(str(no_vocals)).duration)
+            reports = {stem: gate_stem(stem_midis[stem], stems_dir / f"{stem}.wav", stem,
+                                       gated_midis[stem], self.gates, family,
+                                       declared=not self.original_unknown,
+                                       original_unknown=self.original_unknown,
+                                       duration_sec=duration)
+                       for stem in transcribe_stems}
+            atomic_json(gate_report, {"duration_sec": round(duration, 2), "stems": reports})
+            if self.original_unknown and not any(r["notes_final"] for r in reports.values()):
+                raise InputRejected("not_band_audio",
+                                    "No band instrument has enough notes after the note gate.",
+                                    {"note_gate": "note_gate.json"})
+        if transcribe_stems:
+            self.stage("note_gate", [gate_report, *gated_midis.values()], note_gate,
+                       validate=lambda: all(valid_midi(path) for path in gated_midis.values()))
+
         raw = self.out / "stems_merged.mid"
-        self.stage("merge_stems", [raw], lambda: merge_stem_midis(stem_midis, raw, transcribe_stems))
+        self.stage("merge_stems", [raw], lambda: merge_stem_midis(gated_midis, raw, transcribe_stems))
 
         beats_file = self.out / "beats.json"
         def beat_this():
@@ -608,6 +658,12 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--no-publish", action="store_true", help="stop after MIDI/GP5 for diagnostics")
     p.add_argument("--render-workers", type=int, default=2,
                    help="parallel PDF/MP3 exports when publishing inline (1-4; default 2)")
+    p.add_argument("--min-band-ratio", type=float, default=GateConfig.min_band_ratio,
+                   help="reject the song below this band-stem energy share (provisional; see measure_gates.py)")
+    p.add_argument("--note-floor-db", type=float, default=GateConfig.note_floor_db,
+                   help="drop notes quieter than this, relative to the stem's playing level (provisional)")
+    p.add_argument("--min-notes-per-minute", type=float, default=GateConfig.min_notes_per_minute,
+                   help="original unknown: treat a stem with fewer notes as absent (provisional)")
     args = p.parse_args(argv)
     try:
         original_parts, original_guitars, original_unknown = parse_lineup(args.original, original=True)
@@ -628,7 +684,11 @@ def cli(argv: list[str] | None = None) -> int:
         if not publication_ready(args.output_dir.resolve()):
             check_dependencies(args.musescore, args.node, args.gp5_converter,
                                args.pdfinfo, require_gp5=False)
-    final = Runner(args).run()
+    try:
+        final = Runner(args).run()
+    except InputRejected as exc:
+        print(f"rejected ({exc.code}): {exc.message}", file=sys.stderr)
+        return REJECTED_EXIT
     print(f"complete: {final}")
     if not args.no_publish:
         print(f"deliverables: {args.output_dir.resolve() / 'scores' / 'score_outputs.json'}")

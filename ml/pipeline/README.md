@@ -96,8 +96,9 @@ can be changed with the two `--bsroformer-*` options. The sample command uses
 `--no-publish` because the GPU image may lack the PDF/MP3 tools;
 omit it once those tools are available to produce all deliverables.
 
-The piano-stem merge raised the manifest contract to version 9. Start a **new**
-output directory; older `manifest.json` files cannot be resumed with this code.
+The piano-stem merge raised the manifest contract to version 9, and the rule
+gates below raised it to version 11. Start a **new** output directory; older
+`manifest.json` files cannot be resumed with this code.
 
 `--requested` is required. The output directory must be new, or contain a
 `manifest.json` from the same input and configuration when `--resume` is used.
@@ -109,6 +110,57 @@ are retained under the same output directory for inspection. By default,
 `unified.py` then publishes the PDFs and MP3 playback files before reporting
 completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
 `--resume` and without that flag to publish the same result.
+
+## Rule gates: non-band input and notes in resting stems
+
+`rule_gates.py` adds two model-free stages to `unified.py`. Their thresholds
+are **provisional** until measured with `measure_gates.py` (see below).
+
+**`input_check`** runs right after `bs_roformer`, on the CPU, before any
+MuScriptor process starts. It rejects the song when it is shorter than 10 s,
+when all six stems together are below -50 dBFS, or when drums + bass + guitar
++ piano carry less than 25 % (`--min-band-ratio`) of the separated energy
+(speech, podcasts, street or room sound). A rejected song writes
+`input_check.json`, sets `manifest.json` `status` to `rejected` with
+`rejection.code` (`too_short`, `silent` or `not_band_audio`), and
+`unified.py` exits with code 3. The GPU Pod therefore ends after separation
+and the agent deletes it, freeing the GPU for the next song. BS-RoFormer runs
+in its own process, so no model is left in GPU memory at this point. Resuming
+a rejected run repeats the check and gives the same answer.
+
+**`note_gate`** runs after MuScriptor and before `merge_stems`, for every
+transcribed stem (drums, bass, guitar, piano). For each note it reads the
+stem's loudest 23 ms frame from just before the onset to 0.2 s after it
+(0.08 s for drum hits) and compares it with the stem's playing level, the
+99th percentile of its frame power. Notes more than 30 dB below
+(`--note-floor-db`), or below -65 dBFS, are removed. This targets notes that
+MuScriptor writes from the residue of a resting stem (e.g. 한페 bars 115-120).
+The gated MIDI goes to `stem_midi_gated/`; the raw MuScriptor output stays in
+`stem_midi/`, and `note_gate.json` records per-stem counts.
+
+The user's original lineup takes priority:
+
+| Original lineup | Few notes left after the gate | Every note removed by the gate |
+| --- | --- | --- |
+| declared (instrument selected) | kept | gate skipped for that stem, raw notes kept (`kept_ungated_declared`) |
+| unknown | fewer than 6 notes per minute (`--min-notes-per-minute`): stem treated as absent (`dropped_sparse`) | stem absent |
+
+A stem treated as absent behaves like an instrument missing from the original:
+if the user's lineup asks for it, MIDI-GPT generates it. When the original is
+unknown and no band stem keeps any notes, the song is rejected as
+`not_band_audio` at this point (after transcription).
+
+### Measuring the thresholds
+
+```bash
+python measure_gates.py /data/output_unified/band14-* /data/output_unified/nonband-* --json gates.json
+python measure_gates.py /data/output_unified/hanpe --rest guitar:212.0-224.5
+```
+
+It needs runs that still have `stems/` (run with `--no-publish`; the server
+deletes stems after a song is complete). Choose `--min-band-ratio` below the
+lowest band14 song with a margin and above the non-band audio, and
+`--note-floor-db` between the rest-passage notes and the played notes.
 
 ## Automatic score and playback publication
 
