@@ -53,6 +53,7 @@ MAX_BEAT_INTERVAL = 2.0
 DEFAULT_BEATS_PER_BAR = 4   # 다운비트가 없거나 부족할 때 쓰는 박자 (4/4)
 MIN_BEATS_PER_BAR = 2       # 이 범위 밖의 다운비트 간격은 박자 추정에서 제외
 MAX_BEATS_PER_BAR = 12
+HALF_BAR_MIN_SHARE = 0.5    # 2박 간격이 가장 많아도, 4박 간격이 그 절반 이상이면 4/4로 본다
 SUBDIVISION = 4          # 1박 = 16분음표 4개
 TRIPLET_SUBDIVISION = 3  # 1박 = 셋잇단 8분음표 3개 (--triplets)
 TRIPLET_MARGIN = 0.6     # 셋잇단 칸 오차가 16분음표 칸 오차의 60% 미만일 때만 셋잇단으로 본다
@@ -154,6 +155,9 @@ def estimate_beats_per_bar(beats: np.ndarray, downbeats: np.ndarray) -> int:
     Beat This!가 마디 중간에 다운비트를 하나 더 찍거나(2+2) 하나 놓치는(8) 일이 있어도
     대부분의 마디가 맞으면 결과가 흔들리지 않는다. 진짜로 박자가 바뀌는 곡은 따라가지 못한다.
     다운비트가 2개 미만이거나 쓸 만한 간격이 없으면 4를 돌려준다.
+    2박 간격이 가장 많아도 4박 간격이 그 절반 이상이면 4로 본다: Beat This!가 4/4 마디 중간에
+    다운비트를 하나 더 찍는 일이 곡의 절반쯤에서 일어나면 2가 근소하게 이긴다
+    (21 Guns: 2박 68번, 4박 65번 → 2/4로 잘못 나옴, 2026-11-09).
     """
     beats = np.asarray(beats, dtype=float)
     downbeats = np.asarray(downbeats, dtype=float)
@@ -164,6 +168,9 @@ def estimate_beats_per_bar(beats: np.ndarray, downbeats: np.ndarray) -> int:
     if not gaps:
         return DEFAULT_BEATS_PER_BAR
     counts = Counter(gaps)
+    if (max(counts, key=counts.get) == 2
+            and counts.get(DEFAULT_BEATS_PER_BAR, 0) >= HALF_BAR_MIN_SHARE * counts[2]):
+        return DEFAULT_BEATS_PER_BAR
     top = max(counts.values())
     tied = [g for g, c in counts.items() if c == top]
     # 동률이면 4/4를 우선하고, 아니면 작은 값

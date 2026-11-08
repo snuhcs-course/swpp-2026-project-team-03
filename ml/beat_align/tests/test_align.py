@@ -77,6 +77,21 @@ def test_meter_ignores_occasional_wrong_downbeats():
     assert estimate_beats_per_bar(beats, beats[idx]) == 4
 
 
+def test_meter_half_bars_mixed_with_full_bars_is_four():
+    """21 Guns: 4/4 마디 절반쯤에 중간 다운비트가 찍혀 2박 간격이 근소하게 많아도 4로 본다"""
+    beats = np.arange(0, 400, 0.5)
+    idx, k = [0], 0
+    for bar in range(130):
+        k += 4
+        if bar % 2:              # 마디 하나 걸러 중간에 다운비트가 하나 더 찍힘 (2+2)
+            idx += [k - 2, k]
+        else:
+            idx.append(k)
+    gaps = np.diff(idx)
+    assert (gaps == 2).sum() > (gaps == 4).sum()
+    assert estimate_beats_per_bar(beats, beats[idx]) == 4
+
+
 def test_meter_tie_prefers_four():
     beats = np.arange(0, 30, 0.5)
     idx = [0, 3, 6, 10, 14]                        # 3,3,4,4
