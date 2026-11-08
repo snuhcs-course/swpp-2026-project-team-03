@@ -10,7 +10,7 @@ import pytest
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rule_gates import GateConfig, InputRejected, STEMS, check_input, gate_stem  # noqa: E402
+from rule_gates import GateConfig, InputRejected, STEMS, check_input, gate_stem, guitar_stereo  # noqa: E402
 from unified import Runner, family  # noqa: E402
 
 RATE = 8000
@@ -133,6 +133,22 @@ def test_sparse_stem_is_absent_only_when_original_unknown(tmp_path):
     assert (unknown["action"], unknown["notes_final"]) == ("dropped_sparse", 0)
     assert (known["action"], known["notes_final"]) == ("gated", 3)
     assert known["faint"] is True and unknown["faint"] is False
+
+
+@pytest.mark.parametrize("pan,two", [
+    ("apart", True),       # different guitars on the left and the right (21 Guns, 한 페이지가 될 수 있게)
+    ("one_side", False),   # one guitar panned hard to one side (Immigrant Song)
+    ("centre", False),     # one guitar in the middle
+])
+def test_guitar_stereo_check(tmp_path, pan, two):
+    t = np.arange(20 * RATE) / RATE
+    a = 0.3 * np.sin(2 * np.pi * 196 * t)   # two guitars playing different notes together
+    b = 0.3 * np.sin(2 * np.pi * 247 * t)
+    left, right = {"apart": (a, b), "one_side": (a, 0.02 * a), "centre": (a, a)}[pan]
+    wav = tmp_path / "guitar.wav"
+    sf.write(str(wav), np.stack([left, right], axis=1).astype("float32"), RATE, subtype="FLOAT")
+    result = guitar_stereo(wav, GateConfig())
+    assert result["two_guitars"] is two
 
 
 def test_rejection_is_recorded_in_manifest(tmp_path):

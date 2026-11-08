@@ -21,7 +21,7 @@ import time
 from typing import Callable
 
 import pretty_midi
-from rule_gates import GateConfig, InputRejected, check_input, gate_stem
+from rule_gates import GateConfig, InputRejected, check_input, gate_stem, guitar_stereo
 from separate_bs_roformer import (CHECKPOINT_SHA256, CONFIG_SHA256, NONVOCAL_STEMS,
                                   PACKAGE_VERSION, STEMS, valid_stems)
 
@@ -292,7 +292,7 @@ class Runner:
             note_floor_db=getattr(args, "note_floor_db", GateConfig.note_floor_db),
             min_notes_per_minute=getattr(args, "min_notes_per_minute", GateConfig.min_notes_per_minute))
         self.config = {
-            "pipeline_contract": 12,
+            "pipeline_contract": 13,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,
@@ -511,11 +511,21 @@ class Runner:
         if "guitar" in presence and self.requested_guitars:
             split = "auto" if self.original_unknown else guitar_case(
                 self.original_guitars, self.requested_guitars)[0]
+            if self.original_unknown:
+                # Two guitars panned apart can play the same register and chords
+                # (21 Guns), which the chord rule in skyline_tab cannot see.
+                stereo_file = self.out / "guitar_stereo.json"
+                self.stage("guitar_stereo", [stereo_file], lambda: atomic_json(
+                    stereo_file, guitar_stereo(stems_dir / "guitar.wav", self.gates)))
+                stereo = json.loads(stereo_file.read_text(encoding="utf-8"))
+                self.manifest["guitar_stereo"] = stereo
+                if stereo.get("two_guitars"):
+                    split = "always"
             def guitar():
                 guitar_dir.mkdir(exist_ok=True)
                 command = [str(self.tab_python), str(guitar_code / "skyline_tab.py"),
                            str(aligned), str(guitar_dir), "--no-merged"]
-                if not self.original_unknown:
+                if split != "auto":
                     command += ["--split", split]
                 self.command("guitar_tab", command)
                 atomic_json(self.out / "guitar_done.json", {"done": True})

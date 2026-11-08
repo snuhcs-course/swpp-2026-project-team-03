@@ -158,6 +158,15 @@ A declared instrument that the gate would empty or that keeps fewer than
 `manifest.json` `faint_parts` (`piano`, `guitar`, `bass`, `drums`); the server
 passes them to the app, which can warn that the part may be empty or inaccurate.
 
+**`guitar_stereo`** (contract 13) runs before the guitar TAB when the original
+lineup is unknown. If the guitar stem's left and right channels are nearly
+unrelated (median 1 s correlation below 0.2) and balanced (median energy
+balance below 0.17), two guitars are panned apart and `skyline_tab.py` gets
+`--split always`. Otherwise its chord rule decides (`ml/guitar_tab`, recalibrated
+on 2026-11-09). This catches two guitars that play the same chords in the same
+register, such as 21 Guns. The result is kept in `guitar_stereo.json` and
+`manifest.json` `guitar_stereo`.
+
 A stem treated as absent behaves like an instrument missing from the original:
 if the user's lineup asks for it, MIDI-GPT generates it. When the original is
 unknown and no band stem keeps any notes, the song is rejected as

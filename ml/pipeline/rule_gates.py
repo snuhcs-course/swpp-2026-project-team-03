@@ -57,6 +57,9 @@ class GateConfig:
     min_note_sec: float = 0.05          # a trimmed note keeps at least this length
     # sparse-stem rule, original lineup unknown only
     min_notes_per_minute: float = 20.0
+    # two-guitar stereo check, original lineup unknown only: two guitars panned apart
+    stereo_max_corr: float = 0.2        # median left/right correlation of 1 s windows below this ...
+    stereo_max_balance: float = 0.17    # ... and median |L-R| energy balance below this -> two guitars
     hop: int = 1024
 
     def as_dict(self) -> dict:
@@ -174,6 +177,38 @@ def trim_note_ends(notes: list[pretty_midi.Note], power: np.ndarray, rate: int, 
             note.end = new_end
             trimmed += 1
     return trimmed, removed
+
+
+def guitar_stereo(path: Path, cfg: GateConfig) -> dict:
+    """Is the guitar stem two guitars panned to the two sides?
+
+    Over 1 s windows where the stem plays (within 30 dB of its loudest),
+    take the median left/right correlation and the median energy balance
+    |L - R| / (L + R). Two guitars panned apart give a low correlation with
+    balanced sides; one guitar panned to one side gives a low correlation
+    but a large balance (Immigrant Song), and a centred guitar gives a high
+    correlation. Thresholds: benchmarks/2026-11-09-rule-gates.md.
+    """
+    audio, rate = sf.read(str(path), dtype="float32", always_2d=True)
+    if audio.shape[1] < 2:
+        return {"two_guitars": False, "reason": "mono"}
+    n = len(audio) // rate
+    if n == 0:
+        return {"two_guitars": False, "reason": "too short"}
+    left = audio[:n * rate, 0].astype("float64").reshape(n, rate)
+    right = audio[:n * rate, 1].astype("float64").reshape(n, rate)
+    el, er = (left ** 2).mean(axis=1), (right ** 2).mean(axis=1)
+    energy = el + er
+    active = energy > np.percentile(energy, 99) * 10 ** (-30 / 10)
+    if active.sum() < 5:
+        return {"two_guitars": False, "reason": "guitar barely sounds", "active_sec": int(active.sum())}
+    corr = [float(np.corrcoef(a, b)[0, 1]) for a, b in zip(left[active], right[active])
+            if a.std() > 0 and b.std() > 0]
+    median_corr = float(np.median(corr)) if corr else 1.0
+    balance = float(np.median(np.abs(el - er)[active] / energy[active]))
+    two = median_corr < cfg.stereo_max_corr and balance < cfg.stereo_max_balance
+    return {"two_guitars": bool(two), "corr": round(median_corr, 3), "balance": round(balance, 3),
+            "active_sec": int(active.sum())}
 
 
 def reference_level(power: np.ndarray, cfg: GateConfig) -> float:
