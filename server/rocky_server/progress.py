@@ -181,6 +181,9 @@ def result_files(run: Path) -> dict:
         "instruments": parts,
         "original_parts": manifest.get("original_parts", []),
         "generated_parts": manifest.get("generated_targets", []),
+        # parts the user said are in the song but whose stem barely sounds (contract 11);
+        # the app warns that these scores may be empty or inaccurate
+        "faint_parts": manifest.get("faint_parts", []),
     }
 
 

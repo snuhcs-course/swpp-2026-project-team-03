@@ -72,5 +72,15 @@ class ApiJsonTest {
         assertEquals(setOf("guitar", "piano"), r.instruments.keys)
         assertNull(r.instruments["piano"]!!.midi)
         assertEquals(listOf("piano"), r.generatedParts)
+        assertEquals(emptyList<String>(), r.faintParts)  // older servers send no faint_parts
+    }
+
+    @Test fun resultListsFaintParts() {
+        val r = ApiJson.result(
+            """{"id":"x","title":"t","full_band":{"pdf":"scores/full_band.pdf"},
+               "instruments":{"piano":{"pdf":"scores/piano.pdf"}},
+               "original_parts":["piano"],"generated_parts":[],"faint_parts":["piano"]}"""
+        )
+        assertEquals(listOf("piano"), r.faintParts)
     }
 }

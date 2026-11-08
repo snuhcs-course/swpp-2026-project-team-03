@@ -29,7 +29,7 @@ namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
 | `POST` | `/jobs` | multipart: `file` (wav/mp3/flac/m4a/ogg), `requested` (e.g. `piano,guitar`), `title` → `{"id", "state"}` |
 | `GET` | `/jobs/{id}` | `state` (`uploading`, `queued`, `running`, `publishing`, `cancelling`, `cancelled`, `complete`, `failed`), `queue_position`, `error`, `reason` (set only when the pipeline refused the input: `too_short`, `silent`, `not_band_audio`; `state` is then `failed` and `error` is a Korean message for the user), and progress: `stage` (`SEPARATE`, `TRANSCRIBE`, `BEATS`, `ARRANGE`), `completed`, `total`, `fraction` (0–1), `eta_sec` |
 | `POST` | `/jobs/{id}/cancel` | Idempotently request cancellation; returns `{"id", "state"}`. A queued song becomes `cancelled` immediately. An active song becomes `cancelling` until the agent confirms its Pod has been deleted, then becomes `cancelled`. Completed songs remain complete. |
-| `GET` | `/jobs/{id}/result` | `full_band` and `instruments.<part>` with `pdf`, `midi`, `pages`; `original_parts`, `generated_parts` |
+| `GET` | `/jobs/{id}/result` | `full_band` and `instruments.<part>` with `pdf`, `midi`, `pages`; `original_parts`, `generated_parts`, `faint_parts` (parts the user said are in the song but whose stem barely sounds; the score may be empty or inaccurate) |
 | `GET` | `/jobs/{id}/files/{path}` | one file listed in the result (nothing else on the volume) |
 
 When `ROCKY_API_KEY` is set, every request except `/health` needs the header
