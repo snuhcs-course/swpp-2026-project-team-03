@@ -282,7 +282,9 @@ object ScoreJobs {
 
     /** 실패 이유를 사용자가 알아들을 말로. */
     fun failureMessage(e: Exception): String = when (e) {
-        is JobFailedException -> "서버에서 처리하다 멈췄어요. (${e.message})"
+        // 입력 거부: 다시 시도해도 같은 결과라 서버 안내만 보여준다.
+        is JobFailedException -> if (e.reason != null) e.message ?: "이 파일로는 악보를 만들 수 없어요."
+            else "서버에서 처리하다 멈췄어요. (${e.message})"
         is ApiException -> when (e.code) {
             401 -> "서버 키가 맞지 않아요. 음원 업로드 화면 아래 '서버 설정'에서 확인해 주세요."
             413 -> "음원 파일이 너무 커요. 더 짧은 곡이나 MP3로 올려 주세요."

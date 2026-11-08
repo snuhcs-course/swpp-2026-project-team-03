@@ -39,6 +39,9 @@ class Job:
     # unified.py --original / --requested (keyboard,bass,guitar1|guitar2,drums; original may be "unknown")
     pipeline_original: str = "unknown"
     pipeline_requested: str = ""
+    # set when unified.py refused the input (state is then "failed"):
+    # too_short, silent or not_band_audio. The app shows its own message for it.
+    reason: str | None = None
 
 
 class JobStore:
@@ -143,6 +146,7 @@ class Worker:
                 job.state = "running"
                 job.started_at = job.started_at or time.time()
                 job.error = None
+                job.reason = None
                 self.store.save(job)
             return job
 
@@ -240,8 +244,35 @@ class Worker:
         except Exception as exc:  # any failure ends this job, never the worker
             if self._is_cancelling(job.id):
                 self._finish_cancel(job)
+                return
+            rejection = input_rejection(run)
+            if rejection is not None:
+                # Not a server fault: the song was refused right after separation.
+                # Retrying gives the same answer, so the large stems can go now.
+                code = str(rejection.get("code") or "not_band_audio")
+                store.update(job, state="failed", finished_at=time.time(), note=None, reason=code,
+                             error=REJECTION_MESSAGES.get(code, REJECTION_MESSAGES["not_band_audio"]))
+                free_space(run, store.inputs, job.filename)
             else:
                 store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc))
+
+
+REJECTION_MESSAGES = {
+    "too_short": "곡이 너무 짧아서 악보를 만들 수 없어요.",
+    "silent": "소리가 거의 들리지 않는 파일이에요.",
+    "not_band_audio": "밴드 악기(드럼·베이스·기타·키보드) 소리가 거의 들리지 않아요. 밴드 곡을 올려 주세요.",
+}
+
+
+def input_rejection(run: Path) -> dict | None:
+    """unified.py's input_check verdict, if it refused the song (manifest status "rejected")."""
+    try:
+        manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if manifest.get("status") != "rejected":
+        return None
+    return manifest.get("rejection") or {}
 
 
 def failure_reason(run: Path, exc: Exception) -> str:

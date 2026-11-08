@@ -18,7 +18,14 @@ data class JobStatus(
     val error: String?,
     /** 기다리는 이유 등 서버가 보내는 짧은 안내 (예: "GPU 차례를 기다리는 중") */
     val note: String? = null,
+    /**
+     * 파이프라인이 입력을 거부했을 때만 있다 (state는 failed): too_short, silent, not_band_audio.
+     * 이때 error는 사용자에게 바로 보여줄 수 있는 안내 문장이다.
+     */
+    val reason: String? = null,
 ) {
+    val isRejected get() = isFailed && reason != null
+
     val isDone get() = state == "complete"
     val isFailed get() = state == "failed"
     val isCancelled get() = state == "cancelled"
@@ -54,6 +61,7 @@ object ApiJson {
             queuePosition = o.intOrNull("queue_position"),
             error = o.stringOrNull("error"),
             note = o.stringOrNull("note"),
+            reason = o.stringOrNull("reason"),
         )
     }
 

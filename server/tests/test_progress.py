@@ -106,3 +106,11 @@ def test_contract_10_batch_transcription_stage(tmp_path):
                               "guitar_tab", "bass_tab"])
     p = run_progress(tmp_path, 10)
     assert p["stage"] == "ARRANGE" and p["completed"] == 2   # batch stage is not counted as arrange work
+
+
+def test_rule_gate_stages_are_not_counted_as_arrange_steps():
+    from rocky_server.progress import arrange_steps, current_app_stage
+    completed = ["bs_roformer", "input_check", "muscriptor_batch", "note_gate",
+                 "merge_stems", "beat_this", "align", "guitar_tab"]
+    assert current_app_stage(completed[:2]) == "TRANSCRIBE"
+    assert arrange_steps({"completed": completed}) == (1, 4)

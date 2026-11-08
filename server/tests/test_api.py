@@ -68,6 +68,25 @@ def test_failure_reports_pipeline_error(setup):
     assert "muscriptor_drums" in s["error"]
 
 
+def test_rejected_input_is_a_failed_job_with_a_reason(setup):
+    client, store, runner, worker = setup(FakeRunner(fail_stage="reject"))
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    s = client.get(f"/jobs/{job_id}").json()
+    assert (s["state"], s["reason"]) == ("failed", "not_band_audio")
+    assert "밴드" in s["error"]
+    assert ("pdf", job_id) not in runner.calls
+    assert not (store.run_dir(job_id) / "stems").exists()  # stems freed at once
+    assert not list(store.inputs.glob(f"{job_id}.*"))
+
+
+def test_ordinary_failure_has_no_reason(setup):
+    client, store, _, worker = setup(FakeRunner(fail_stage="midi"))
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    assert client.get(f"/jobs/{job_id}").json()["reason"] is None
+
+
 def test_pdf_failure_is_a_failed_job(setup):
     client, store, _, worker = setup(FakeRunner(fail_stage="pdf"))
     job_id = upload(client).json()["id"]
