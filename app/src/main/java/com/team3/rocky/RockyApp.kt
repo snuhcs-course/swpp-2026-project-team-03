@@ -2,6 +2,8 @@
 
 package com.team3.rocky
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -565,12 +567,16 @@ fun HomeTab(
         Spacer(Modifier.height(32.dp))
         Text(tr("이렇게 만들어요", "How it works"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(10.dp))
-        // 위아래로만 읽게 한 줄에 한 단계. 마지막 '나만의 악보 받기'를 강조한다.
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            HowStep("1", tr("우리 밴드 악기 고르기", "Pick your band's instruments"))
-            HowStep("2", tr("곡 올리기", "Upload a song"))
-            HowStep("3", tr("원곡 악기 선택하기", "Pick the song's instruments"))
-            HowStep("4", tr("나만의 악보 받기", "Get your own scores"), highlight = true)
+        // 네 단계를 위에서 아래로 선으로 이어 순서가 한눈에 보이게 한다.
+        Column(Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs).padding(horizontal = 16.dp, vertical = 18.dp)) {
+            HowStep("1", tr("우리 밴드 악기 고르기", "Pick your band's instruments"),
+                tr("우리 밴드에 있는 악기를 골라요", "Choose the instruments your band plays"))
+            HowStep("2", tr("곡 올리기", "Upload a song"),
+                tr("MP3나 WAV 파일을 올려요", "Upload an MP3 or WAV file"))
+            HowStep("3", tr("원곡 악기 선택하기", "Pick the song's instruments"),
+                tr("곡에서 들리는 악기를 골라요", "Choose what you hear in the song"))
+            HowStep("4", tr("나만의 악보 받기", "Get your own scores"),
+                tr("우리 밴드 파트별 악보가 나와요", "Get a score for each part in your band"), last = true)
         }
 
         // 결과가 잘 나오는 곡을 고르는 요령. 아래로 내리며 읽는다.
@@ -578,46 +584,41 @@ fun HomeTab(
         Text(tr("정확도 팁", "Tips"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TipCard(tr("밴드 곡일수록 정확해요", "Band songs work best"),
-                tr("드럼·베이스·기타·피아노 편성", "Drums, bass, guitar, keys"))
-            TipCard(tr("곡의 악기를 골라 주세요", "Pick the song's instruments"),
-                tr("고르면 더 정확해져요", "It improves accuracy"))
-            TipCard(tr("MP3 · WAV만 가능", "MP3 or WAV only"),
-                tr("음질이 좋을수록 정확해요", "Better audio, better notes"))
-            TipCard(tr("라이브·커버도 돼요", "Live and covers work"),
-                tr("관객 소리가 크면 덜 정확해요", "Loud crowds lower accuracy"))
+            TipCard(tr("밴드 곡", "Band songs"),
+                tr("밴드 악기로 연주한 곡이 가장 정확해요", "Songs played by a band work best"))
+            TipCard(tr("원곡 악기 선택", "The song's instruments"),
+                tr("곡에서 들리는 악기를 고르면 더 정확해요", "Picking what you hear improves accuracy"))
+            TipCard(tr("파일 형식", "File type"),
+                tr("MP3·WAV 파일만 올릴 수 있어요", "Only MP3 or WAV files"))
+            TipCard(tr("음질", "Audio quality"),
+                tr("음질이 좋을수록 더 정확해요", "Better audio gives better notes"))
+            TipCard(tr("라이브·커버 곡", "Live and covers"),
+                tr("관객 소리가 크면 덜 정확할 수 있어요", "Loud crowds can lower accuracy"))
         }
         Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
-private fun HowStep(no: String, text: String, highlight: Boolean = false) {
+private fun HowStep(no: String, title: String, sub: String, last: Boolean = false) {
     val cs = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(14.dp)
-    Row(
-        Modifier.fillMaxWidth()
-            .card(
-                shape, cs,
-                bg = if (highlight) cs.primary.copy(alpha = 0.12f) else cs.surface,
-                line = if (highlight) cs.primary else cs.outlineVariant,
-            )
-            .padding(horizontal = 14.dp, vertical = if (highlight) 16.dp else 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(28.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                .background(if (highlight) cs.primary else cs.primary.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) { Text(no, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = if (highlight) cs.onPrimary else cs.primary) }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text, fontSize = if (highlight) 16.sp else 15.sp,
-            fontWeight = if (highlight) FontWeight.ExtraBold else FontWeight.SemiBold,
-            color = if (highlight) cs.primary else cs.onSurface,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-        )
-        if (highlight) Text("♪", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = cs.primary)
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        // 왼쪽: 번호 원과, 다음 단계로 이어지는 선
+        Column(Modifier.width(30.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(30.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.primary),
+                contentAlignment = Alignment.Center,
+            ) { Text(no, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = cs.onPrimary) }
+            if (!last) {
+                Box(Modifier.padding(vertical = 4.dp).width(2.dp).weight(1f).clip(RoundedCornerShape(1.dp)).background(cs.primary.copy(alpha = 0.35f)))
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f).padding(top = 4.dp, bottom = if (last) 0.dp else 18.dp)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text(sub, fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -671,7 +672,7 @@ private fun TipCard(title: String, body: String) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
-            Text(body, fontSize = 13.sp, lineHeight = 18.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(body, fontSize = 13.sp, lineHeight = 18.sp, color = cs.onSurfaceVariant, maxLines = 2)
         }
     }
 }
