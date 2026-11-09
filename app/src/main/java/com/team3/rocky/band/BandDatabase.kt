@@ -10,9 +10,8 @@ import com.team3.rocky.Demo
 import com.team3.rocky.Work
 
 /**
- * 기기 안의 밴드 DB (SQLite, 파일 이름 rocky_bands.db).
- * 지금은 같은 폰 안에서만 밴드를 공유한다. 서버가 생기면 같은 표 구조를 서버로 옮기고
- * [BandRepository]의 서버 구현으로 바꾼다.
+ * 기기 안의 밴드 DB (SQLite, 파일 이름 rocky_bands.db). 서버 없이 시험할 때만 쓴다.
+ * 앱은 같은 표 구조를 서버로 옮긴 [ServerBandRepository]를 쓴다 (server/rocky_server/accounts.py).
  */
 class BandDatabase(context: Context, name: String? = DB_NAME, private val seedDemo: Boolean = true) :
     SQLiteOpenHelper(context.applicationContext, name, null, VERSION) {
@@ -184,6 +183,11 @@ class BandDatabase(context: Context, name: String? = DB_NAME, private val seedDe
         writableDatabase.update("shared_scores", ContentValues().apply { put("title", title) }, "id = ?", arrayOf(scoreId.toString()))
     }
 
+    /** 어느 밴드에든 공유된 악보인지. 공유된 악보는 밴드원이 같은 파일을 열기 때문에 지우지 않는다. */
+    fun isWorkShared(workId: Long): Boolean =
+        readableDatabase.rawQuery("SELECT 1 FROM shared_scores WHERE work_id = ? LIMIT 1", arrayOf(workId.toString()))
+            .use { it.moveToFirst() }
+
     /** 보관함에서 이름을 바꾸면, 내가 밴드에 공유한 같은 악보의 이름도 바꾼다. */
     fun renameSharedWork(userId: Long, workId: Long, title: String) {
         writableDatabase.update(
@@ -232,7 +236,7 @@ class BandDatabase(context: Context, name: String? = DB_NAME, private val seedDe
     private fun Cursor.int(col: String): Int = getInt(getColumnIndexOrThrow(col))
 
     /**
-     * 시연용 예시 밴드. 서버가 없어서 다른 폰의 친구를 데려올 수 없으니,
+     * 시연용 예시 밴드 (서버에도 같은 밴드가 있다).
      * 초대 코드 [DEMO_CODE]로 들어가면 멤버 셋과 공유된 악보 하나가 있는 밴드를 볼 수 있게 한다.
      * 가짜 멤버는 실제 회원 id와 겹치지 않게 음수 id를 쓴다.
      */

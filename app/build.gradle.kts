@@ -12,6 +12,7 @@ fun rockyProp(name: String, default: String): String =
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    jacoco                                     // test coverage (JaCoCo)
 }
 
 android {
@@ -39,6 +40,11 @@ android {
             optimization {
                 enable = false
             }
+        }
+        // record coverage when the debug build is tested
+        debug {
+            enableUnitTestCoverage = true      // unit tests
+            enableAndroidTestCoverage = true   // instrumented (emulator) tests
         }
     }
     compileOptions {
@@ -74,4 +80,50 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+// ============================================================
+// JaCoCo coverage report (same settings as Iteration 2, feature/android-tests)
+//   ./gradlew testDebugUnitTest jacocoTestReport
+//   -> app/build/reports/jacoco/jacocoTestReport/html/index.html
+//   If connectedDebugAndroidTest ran first in the same build directory, its coverage is merged in.
+// ============================================================
+jacoco { toolVersion = "0.8.14" }
+
+tasks.withType<Test>().configureEach {
+    configure<JacocoTaskExtension> {
+        isIncludeNoLocationClasses = true
+        excludes = listOf("jdk.internal.*")
+    }
+}
+
+// excluded from coverage: generated code, theme (colors only), app entry point, Compose-generated classes
+val coverageExcludes = listOf(
+    "**/R.class", "**/R\$*.class", "**/BuildConfig.*", "**/Manifest*.*",
+    "**/*Test*.*", "**/ThemeKt*.*", "**/ui/theme/**", "**/MainActivity*.*", "**/ComposableSingletons*.*",
+)
+
+tasks.register<JacocoReport>("jacocoTestReport") {
+    group = "verification"
+    description = "Unit test (+ instrumented test, if run) coverage report"
+    dependsOn("testDebugUnitTest")
+
+    val build = layout.buildDirectory.get().asFile
+    reports {
+        html.required.set(true)
+        xml.required.set(true)
+    }
+    classDirectories.setFrom(
+        fileTree("$build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes") { exclude(coverageExcludes) },
+        fileTree("$build/tmp/kotlin-classes/debug") { exclude(coverageExcludes) },
+    )
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+    executionData.setFrom(
+        fileTree(build) {
+            include(
+                "outputs/unit_test_code_coverage/debugUnitTest/*.exec",
+                "outputs/code_coverage/debugAndroidTest/connected/**/*.ec",
+            )
+        }
+    )
 }

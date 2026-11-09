@@ -63,6 +63,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onSizeChanged
+import com.team3.rocky.score.MeasureClock
+import com.team3.rocky.score.MeasureLayout
+import com.team3.rocky.score.ScoreLayout
 import com.team3.rocky.server.LocalScore
 import com.team3.rocky.server.PdfPages
 import com.team3.rocky.server.ScoreStore
@@ -167,24 +174,66 @@ fun ResultScreen(
     // ----- 악보 -----
     val scoreBase = baseOf(selectedPart)
     var pages by remember { mutableStateOf<List<androidx.compose.ui.graphics.ImageBitmap>?>(null) }
+    // 마디 위치: 악보 그림에서 찾은 줄·마디선과, MIDI로 계산한 마디 시작 시간
+    var measures by remember { mutableStateOf<MeasureLayout?>(null) }
+    var clock by remember { mutableStateOf<MeasureClock?>(null) }
     val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
     LaunchedEffect(scoreBase, local?.semitones) {
         pages = null
-        pages = withContext(Dispatchers.IO) {
-            val currentScore = local
+        measures = null
+        // 키를 바꾸면 local이 새 결과로 바뀐다. 이번에 그릴 결과를 하나로 정해 둔다.
+        val currentScore = local
+        val bitmaps = withContext(Dispatchers.IO) {
             if (currentScore != null) {
                 currentScore.pdf(serverPart(scoreBase))
                     ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
-                    .orEmpty().map { it.asImageBitmap() }
+                    .orEmpty()
             } else Assets.pages(ctx, scoreBase).mapNotNull { n ->
-                ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) }?.asImageBitmap()
+                ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) }
             }
+        }
+        pages = bitmaps.map { it.asImageBitmap() }
+        // 악보를 먼저 보여 주고, 마디 위치는 그 뒤에 찾는다 (페이지가 많으면 1–2초 걸린다).
+        val c = withContext(Dispatchers.IO) {
+            // 파트 MIDI가 없으면 밴드 전체 MIDI로 센다 (박자와 템포는 파트마다 같다).
+            val midi = if (currentScore != null) currentScore.midi(serverPart(scoreBase)) ?: currentScore.midi(null)
+            else Assets.find(ctx, Demo.BAND, listOf("mid"))?.let { Assets.toCache(ctx, it) }
+            MeasureClock.fromFile(midi)
+        }
+        clock = c
+        if (c == null) return@LaunchedEffect
+        measures = withContext(Dispatchers.Default) {
+            runCatching {
+                MeasureLayout.build(bitmaps.map { b ->
+                    val px = IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) }
+                    ScoreLayout.systems(px, b.width, b.height)
+                }, c.count)
+            }.getOrNull()?.takeIf { it.count > 0 }
         }
     }
     val scoreScroll = rememberScrollState()
-    // '악보 따라가기': 재생 위치만큼 악보를 내린다. 마디 위치를 아는 게 아니라 비율로 맞추는 근사치다.
-    LaunchedEffect(position, follow, playing, scoreScroll.maxValue) {
-        if (follow && playing && duration > 0 && scoreScroll.maxValue > 0) {
+    var scoreWidthPx by remember { mutableIntStateOf(0) }
+    val currentMeasure = clock?.measureAt(position.toLong())
+    val currentBox = currentMeasure?.let { measures?.box(it) }
+    /** 악보 그림의 픽셀 좌표 → 스크롤 위치. 그림은 화면 너비에 맞춰 늘어난다. */
+    fun scrollY(page: Int, y: Int): Int {
+        val list = pages ?: return 0
+        if (scoreWidthPx == 0) return 0
+        var offset = 0f
+        for (i in 0 until page.coerceAtMost(list.size)) offset += list[i].height * scoreWidthPx.toFloat() / list[i].width
+        return (offset + y * scoreWidthPx.toFloat() / list[page.coerceIn(0, list.size - 1)].width).toInt()
+    }
+    val topMarginPx = with(LocalDensity.current) { 12.dp.roundToPx() }
+    // '악보 따라가기': 지금 마디가 있는 줄이 바뀔 때마다 그 줄을 맨 위로 넘긴다.
+    LaunchedEffect(currentBox?.page, currentBox?.top, follow, playing, scoreWidthPx) {
+        val box = currentBox ?: return@LaunchedEffect
+        if (follow && playing) {
+            scoreScroll.animateScrollTo((scrollY(box.page, box.top) - topMarginPx).coerceAtLeast(0), tween(350))
+        }
+    }
+    // 마디를 못 찾은 악보(MIDI가 없거나 줄을 못 읽음)는 예전처럼 재생 시간 비율로 내린다.
+    LaunchedEffect(position, follow, playing, scoreScroll.maxValue, measures) {
+        if (measures == null && follow && playing && duration > 0 && scoreScroll.maxValue > 0) {
             val target = (scoreScroll.maxValue * position.toFloat() / duration).toInt()
             scoreScroll.animateScrollTo(target, tween(200, easing = LinearEasing))
         }
@@ -291,8 +340,12 @@ fun ResultScreen(
                         "${selectedPart?.let { Demo.label(it, work.instruments) } ?: "밴드 전체"} 듣기",
                         fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
                     )
+                    val bar = clock?.let { c ->
+                        val m = c.measureAt((dragging?.toLong() ?: position.toLong())) + 1
+                        "${m}마디 / ${c.count} · "
+                    }.orEmpty()
                     Text(
-                        "${mmss(dragging?.toInt() ?: position)} / ${if (duration > 0) mmss(duration) else "-:--"}",
+                        "$bar${mmss(dragging?.toInt() ?: position)} / ${if (duration > 0) mmss(duration) else "-:--"}",
                         fontSize = 12.sp, color = cs.onSurfaceVariant,
                     )
                 }
@@ -315,14 +368,18 @@ fun ResultScreen(
         }
         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = follow, onCheckedChange = { follow = it })
-            Text("재생 위치에 맞춰 악보 넘기기", fontSize = 13.sp, modifier = Modifier.clickable { follow = !follow })
+            Text(
+                if (measures != null) "연주 중인 마디에 맞춰 악보 넘기기" else "재생 위치에 맞춰 악보 넘기기",
+                fontSize = 13.sp, modifier = Modifier.clickable { follow = !follow },
+            )
         }
 
         // 선택한 파트 또는 밴드 전체 악보
         Box(
             Modifier.fillMaxWidth().weight(1f)
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.White),
+                .background(Color.White)
+                .onSizeChanged { scoreWidthPx = it.width },
             contentAlignment = Alignment.TopCenter,
         ) {
             val list = pages
@@ -333,10 +390,25 @@ fun ResultScreen(
                     color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(40.dp),
                 )
                 else -> Column(Modifier.verticalScroll(scoreScroll)) {
-                    list.forEach { bmp ->
+                    val highlight = cs.primary.copy(alpha = 0.16f)
+                    val edge = cs.primary.copy(alpha = 0.7f)
+                    list.forEachIndexed { i, bmp ->
+                        // 재생을 시작한 뒤에는 연주 중인 마디에 색을 칠한다.
+                        val box = currentBox?.takeIf { it.page == i && duration > 0 }
                         Image(
                             bitmap = bmp, contentDescription = "악보",
-                            modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth,
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier.fillMaxWidth().drawWithContent {
+                                drawContent()
+                                if (box != null) {
+                                    val k = size.width / bmp.width
+                                    val pad = 6f * k
+                                    val tl = Offset(box.left * k, box.top * k - pad * 2)
+                                    val sz = Size((box.right - box.left) * k, (box.bottom - box.top) * k + pad * 4)
+                                    drawRect(highlight, tl, sz)
+                                    drawRect(edge, Offset(tl.x, tl.y + sz.height - 3.dp.toPx()), Size(sz.width, 3.dp.toPx()))
+                                }
+                            },
                         )
                     }
                 }

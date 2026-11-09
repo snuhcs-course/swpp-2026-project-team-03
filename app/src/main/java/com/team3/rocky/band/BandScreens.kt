@@ -223,7 +223,7 @@ fun BandDetailScreen(
     repo: BandRepository,
     bandId: Long,
     onBack: () -> Unit,
-    onOpenScore: (Work, String?) -> Unit,
+    onOpenScore: (SharedScore, String?) -> Unit,
     onShareScore: () -> Unit,
     onNewScore: (List<String>) -> Unit,
     onLeft: () -> Unit,
@@ -321,7 +321,7 @@ fun BandDetailScreen(
                         .padding(vertical = 6.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(cs.surface)
-                        .clickable { onOpenScore(s.work, myPart) }
+                        .clickable { onOpenScore(s, myPart) }
                         .padding(16.dp)
                         .testTag("band_score_${s.id}"),
                 ) {
@@ -539,12 +539,12 @@ private fun Loading() {
     }
 }
 
-/** 서버가 없어서 친구를 초대할 수 없으니, 미리 넣어둔 예시 밴드로 들어가는 방법을 알려준다. */
+/** 함께할 친구가 아직 없어도 둘러볼 수 있게, 서버에 미리 넣어둔 예시 밴드를 알려준다. */
 @Composable
 private fun DemoHint() {
     InfoNote(
-        "시연 버전: 초대 코드 ${BandDatabase.DEMO_CODE}로 예시 밴드에 참여해 볼 수 있어요. " +
-            "지금은 같은 폰 안에서만 공유돼요.",
+        "멤버에게 받은 초대 코드로 참여하면 다른 폰에서 공유한 악보도 함께 볼 수 있어요. " +
+            "예시 밴드는 초대 코드 ${BandDatabase.DEMO_CODE}로 참여해 볼 수 있어요.",
     )
 }
 

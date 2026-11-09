@@ -37,6 +37,7 @@ namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
 | `POST` | `/jobs/{id}/transpositions/{semitones}` | Render a completed score at an absolute offset from the original key (`-12` through `12`); returns the same band/part result shape. Zero returns the original. |
 | `GET` | `/jobs/{id}/transpositions/{semitones}/result` | Read an already rendered offset. |
 | `GET` | `/jobs/{id}/transpositions/{semitones}/files/{path}` | Download a PDF, MIDI or MP3 from that offset. |
+| `DELETE` | `/jobs/{id}` | Deletes the job record, upload, run folder, result files and key changes → `{"id", "deleted", "pending"}`. A queued song is removed at once. A running song is cancelled the same way as `POST /jobs/{id}/cancel` and removed when its Pod has stopped (`pending: true`). A job shared to a band is not deleted (`409`), because band members open it from the server. |
 
 Key changes run in a CPU Pod. `transpose_scores.py` shifts pitched MIDI notes and
 the guitar/bass GP5 notes; drum hits and timing stay fixed. If an open low string
@@ -48,6 +49,32 @@ Original files stay intact under the completed run; variants are under
 active in its private score folder. Rendering needs the laptop agent, the
 completed run on the shared volume, and the same CPU renderer dependencies as
 normal score publishing.
+
+### Members and bands
+
+Members, bands and shared scores are in one SQLite file, `$ROCKY_HOME/rocky.db`
+(`rocky_server/accounts.py`), on the same volume as the job records, so nothing else has to run.
+Sign-up and login return a `token`; the calls marked 🔒 need `Authorization: Bearer <token>`.
+Errors come as `{"detail": "<message for the app>", "field": "email" | "nickname" | "code" | …}`.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| `POST` | `/auth/signup` | `{email, password, nickname, instruments}` → `{token, user}`; `409` + `field` if the email or nickname is taken |
+| `POST` | `/auth/login` | `{email, password}` → `{token, user}`; `401` for an unknown email or a wrong password (same answer) |
+| `POST` | `/auth/logout` | ends this token's session |
+| `GET` | `/auth/taken?email=…` or `?nickname=…` | `{taken}` (with a token, my own nickname is not taken) |
+| `GET` / `PATCH` | `/me` 🔒 | my profile / change `{nickname, instruments}` |
+| `PATCH` | `/me/works/{work_id}` 🔒 | `{title}`: rename my score in every band I shared it to |
+| `GET` | `/me/works/{work_id}/shared` 🔒 | `{shared}` |
+| `GET` / `POST` | `/bands` 🔒 | my bands with member and score counts / make a band `{name, instrument}` |
+| `POST` | `/bands/join` 🔒 | `{code, instrument}` → the band |
+| `GET` / `PATCH` | `/bands/{id}` 🔒 | members and shared scores (members only) / rename `{name}` (owner only) |
+| `POST` | `/bands/{id}/leave` 🔒 | the earliest member becomes owner; the band is deleted when the last member leaves |
+| `POST` | `/bands/{id}/scores` 🔒 | share `{work_id, job_id, title, instruments, date, original}` → `{created}` |
+| `PATCH` | `/bands/{id}/scores/{sid}` 🔒 | `{title}` (the sharer or the owner) |
+
+The database starts with the demo band `BAND33` (three members who cannot log in, and the app's built-in demo song).
+Passwords are stored as PBKDF2-SHA256 hashes and tokens as SHA-256 hashes.
 
 When `ROCKY_API_KEY` is set, every request except `/health` needs the header
 `X-Rocky-Key`. Interactive docs: `/docs`.
@@ -116,4 +143,6 @@ Jobs. Settings are listed at the top of `rocky_server/app.py` and in `.env.examp
 ## Not done yet
 
 - A public HTTPS address for phones without USB (tunnel), see the project notes.
-- Accounts on the server: jobs are not tied to a user; anyone with the key can read any job id.
+- Jobs are not tied to a user: anyone with the key can read a job id (band members need this to open shared scores).
+- Email verification: the app still shows the code on screen instead of sending a mail.
+- The address is plain HTTP, so passwords travel unencrypted until there is an HTTPS address.

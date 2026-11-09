@@ -25,6 +25,7 @@ class RockyApiTest {
         http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         http.createContext("/") { ex ->
             lastKey = ex.requestHeaders.getFirst("X-Rocky-Key")
+            lastMethod = ex.requestMethod
             lastType = ex.requestHeaders.getFirst("Content-Type")
             lastMethod = ex.requestMethod
             lastBody = ex.requestBody.readBytes().toString(Charsets.UTF_8)
@@ -34,6 +35,7 @@ class RockyApiTest {
                 "/jobs/abc123abc123/files/scores/full_band.pdf" -> 200 to "%PDF-1.4 fake"
                 "/jobs/abc123abc123/transpositions/-1" -> 200 to """{"id":"abc123abc123","title":"Song","full_band":{"pdf":"scores/full_band.pdf"},"instruments":{}}"""
                 "/jobs/abc123abc123/transpositions/-1/files/scores/full_band.pdf" -> 200 to "%PDF-1.4 shifted"
+                "/jobs/locked000000" -> 401 to """{"detail":"missing or wrong X-Rocky-Key"}"""
                 else -> 404 to """{"detail":"no such job"}"""
             }
             val bytes = body.toByteArray()
@@ -78,6 +80,26 @@ class RockyApiTest {
             fail("expected ApiException")
         } catch (e: ApiException) {
             assertEquals(404, e.code)
+        }
+    }
+
+    @Test fun deleteSendsDeleteRequest() {
+        api().delete("abc123abc123")
+        assertEquals("DELETE", lastMethod)
+        assertEquals("secret", lastKey)
+    }
+
+    @Test fun deleteOfMissingJobIsFine() {
+        api().delete("000000000000")  // 404: already gone, no exception
+        assertEquals("DELETE", lastMethod)
+    }
+
+    @Test fun deleteWithWrongKeyThrows() {
+        try {
+            api().delete("locked000000")
+            fail("expected ApiException")
+        } catch (e: ApiException) {
+            assertEquals(401, e.code)
         }
     }
 

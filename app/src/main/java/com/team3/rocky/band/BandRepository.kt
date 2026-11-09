@@ -9,8 +9,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * 나의 밴드 기능이 쓰는 저장소.
- * 화면은 이 인터페이스만 알기 때문에, 서버가 생기면 [LocalBandRepository] 대신
- * 서버 구현을 끼우면 화면 코드는 그대로 둘 수 있다.
+ * 앱은 [ServerBandRepository](ROCKY 서버의 DB)를 쓰고, [LocalBandRepository]는
+ * 서버 없이 화면을 시험할 때와 테스트에서 쓴다. 화면은 이 인터페이스만 안다.
  */
 interface BandRepository {
     suspend fun myBands(user: User): List<BandSummary>
@@ -33,9 +33,12 @@ interface BandRepository {
 
     /** 내 정보에서 닉네임을 바꾸면 밴드 멤버 목록에도 반영한다. */
     suspend fun updateNickname(user: User)
+
+    /** 내가 이 악보를 어느 밴드에든 공유했는지. 공유한 악보는 보관함에서 지워도 파일을 남긴다. */
+    suspend fun isShared(userId: Long, workId: Long): Boolean
 }
 
-/** 이 폰 안에서만 동작하는 구현 (서버 연결 전 시연용). */
+/** 이 폰 안에서만 동작하는 구현 (서버 없이 시험할 때). */
 class LocalBandRepository(
     context: Context,
     private val db: BandDatabase = BandDatabase(context),
@@ -108,6 +111,8 @@ class LocalBandRepository(
     }
 
     override suspend fun updateNickname(user: User) = io { db.updateNickname(user.id, user.nickname) }
+
+    override suspend fun isShared(userId: Long, workId: Long): Boolean = io { db.isWorkShared(workId) }
 
     private suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 

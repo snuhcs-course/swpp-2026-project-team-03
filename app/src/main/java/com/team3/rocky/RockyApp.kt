@@ -2,6 +2,8 @@
 
 package com.team3.rocky
 
+import androidx.compose.runtime.LaunchedEffect
+import com.team3.rocky.server.ServerCleanup
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -88,7 +90,6 @@ import com.team3.rocky.band.BandDetailScreen
 import com.team3.rocky.band.BandJoinScreen
 import com.team3.rocky.band.BandListScreen
 import com.team3.rocky.band.BandRepository
-import com.team3.rocky.band.LocalBandRepository
 import com.team3.rocky.band.PickScoreScreen
 import com.team3.rocky.band.ShareToBandScreen
 import com.team3.rocky.progress.AudioFile
@@ -97,7 +98,10 @@ import com.team3.rocky.progress.ScoreJobs
 import com.team3.rocky.progress.Stage
 import com.team3.rocky.progress.formatEta
 import com.team3.rocky.server.RockyApi
+import com.team3.rocky.server.ScoreStore
+import com.team3.rocky.band.SharedScore
 import com.team3.rocky.server.ServerSettings
+import com.team3.rocky.server.Backend
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -127,7 +131,7 @@ enum class Tab(val label: String) { NEW("새 악보"), PROGRESS("진행상황"),
 fun RockyApp() {
     val ctx = LocalContext.current
     val auth = remember { AuthRepository(ctx) }
-    val bands: BandRepository = remember { LocalBandRepository(ctx) }
+    val bands: BandRepository = remember { Backend.bands(ctx) }
     // 앱을 켤 때 로그인 상태가 남아 있으면 바로 홈, 아니면 로그인 화면에서 시작한다.
     var user by remember { mutableStateOf(auth.currentUser()) }
     val stack = remember { mutableStateListOf(if (user != null) Screen.Main else Screen.Login) }
@@ -151,6 +155,30 @@ fun RockyApp() {
     fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main) }
     fun newScore(preset: Set<String>) { lineup = preset; go(Screen.Lineup) }
     fun openTab(t: Tab) { tab = t; restart(Screen.Main) }
+
+    // 다른 밴드원이 공유한 악보는 이 폰에 파일이 없으므로, 처음 열 때 서버에서 받는다.
+    var fetching by remember { mutableStateOf(false) }
+    fun openShared(score: SharedScore, part: String?) {
+        val job = score.jobId
+        if (job == null || ScoreStore.load(ctx, score.work.id) != null) {
+            go(Screen.Result(score.work, myPart = part)); return
+        }
+        fetching = true
+        appScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { ScoreStore.download(ctx, RockyApi.from(ctx), job, score.work.id) }.isSuccess
+            }
+            fetching = false
+            if (ok) go(Screen.Result(score.work, myPart = part))
+            else Toast.makeText(ctx, "악보를 받지 못했어요. 인터넷이나 서버 설정을 확인해 주세요", Toast.LENGTH_LONG).show()
+        }
+    }
+    if (fetching) AlertDialog(
+        onDismissRequest = {},
+        title = { Text("악보 받는 중") },
+        text = { Text("밴드에 공유된 악보를 서버에서 받고 있어요…") },
+        confirmButton = {},
+    )
 
     // 탭 화면에서 뒤로가기를 누르면 먼저 '새 악보' 탭으로 돌아간다.
     BackHandler(enabled = stack.size > 1 || (stack.last() == Screen.Main && tab != Tab.NEW)) {
@@ -269,7 +297,7 @@ fun RockyApp() {
                 BandDetailScreen(
                     u, bands, s.bandId,
                     onBack = { back() },
-                    onOpenScore = { work, part -> go(Screen.Result(work, myPart = part)) },
+                    onOpenScore = { score, part -> openShared(score, part) },
                     onShareScore = { go(Screen.PickScore(s.bandId)) },
                     // 밴드 멤버들이 맡은 파트를 새 악보의 기본 구성으로 쓴다.
                     onNewScore = { parts -> newScore(Demo.lineupOf(parts)) },
@@ -696,13 +724,15 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
                     if (job.failed) "만들지 못한 악보예요. 다시 만들려면 새 악보에서 음원을 다시 올려 주세요."
                     else if (!job.done) "지금까지 진행한 내용은 사라져요."
                     else if (job.saved) "보관함에 저장한 악보는 그대로 남아요."
+                    else if (job.isServer) "아직 보관함에 저장하지 않은 악보예요. 지우면 서버에 있는 파일도 지워져서 다시 볼 수 없어요."
                     else "아직 보관함에 저장하지 않은 악보예요. 지우면 다시 볼 수 없어요."
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     confirm = false
-                    if (job.done || job.failed) ScoreJobs.remove(job) else ScoreJobs.cancel(ctx, job)
+                    // 완성·실패한 카드는 목록에서 지운다 (저장하지 않은 결과는 서버 파일도). 만드는 중이면 서버 작업을 취소한다.
+                    ScoreJobs.cancel(ctx, job)
                 }) {
                     Text(if (job.done || job.failed) "지우기" else "취소하기", color = MaterialTheme.colorScheme.error)
                 }
@@ -721,8 +751,11 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit) {
     var menuFor by remember { mutableStateOf<Work?>(null) }
     var renaming by remember { mutableStateOf<Work?>(null) }
     var deleting by remember { mutableStateOf<Work?>(null) }
-    val bands = remember { LocalBandRepository(ctx) }
+    val bands = remember { Backend.bands(ctx) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // 지난번에 서버에 연결되지 않아 못 지운 악보가 있으면 다시 지운다.
+    LaunchedEffect(Unit) { ServerCleanup.retryPending(ctx) }
 
     Page("보관함", onBack = null, modifier = modifier) {
         if (works.isEmpty()) {
@@ -778,12 +811,28 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit) {
         )
     }
     deleting?.let { w ->
+        val shared by androidx.compose.runtime.produceState<Boolean?>(null, w.id) {
+            value = AuthRepository.currentUserId(ctx)?.let { uid -> bands.isShared(uid, w.id) } ?: false
+        }
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("보관함에서 삭제할까요?") },
-            text = { Text("밴드에 공유한 악보는 밴드에 그대로 남아요.") },
+            text = {
+                Text(
+                    when (shared) {
+                        true -> "밴드에 공유한 악보라서 밴드에는 그대로 남아요."
+                        else -> "이 폰과 서버에 저장된 악보 파일이 함께 지워지고, 되돌릴 수 없어요."
+                    }
+                )
+            },
             confirmButton = {
-                TextButton(onClick = { WorkStore.remove(ctx, w.id); works = WorkStore.load(ctx); deleting = null }) {
+                TextButton(onClick = {
+                    WorkStore.remove(ctx, w.id)
+                    // 진행상황 목록에 남아 있으면 같이 빼고, 폰과 서버의 결과 파일을 지운다 (공유한 악보는 남긴다).
+                    ScoreJobs.find(w.id)?.let { ScoreJobs.remove(it) }
+                    ServerCleanup.deleteWork(ctx, w.id)
+                    works = WorkStore.load(ctx); deleting = null
+                }) {
                     Text("삭제", color = cs.error)
                 }
             },
