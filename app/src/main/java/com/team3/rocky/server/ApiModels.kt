@@ -8,7 +8,7 @@ import org.json.JSONObject
 /** GET /jobs/{id} 응답 (server/README.md 참고). */
 data class JobStatus(
     val id: String,
-    /** queued, running, publishing, complete, failed */
+    /** queued, running, publishing, cancelling, cancelled, complete, failed */
     val state: String,
     val stage: Stage,
     val completed: Int,
@@ -21,6 +21,7 @@ data class JobStatus(
 ) {
     val isDone get() = state == "complete"
     val isFailed get() = state == "failed"
+    val isCancelled get() = state == "cancelled"
 
     fun toProgress() = JobProgress(stage, completed, total, etaSec, done = isDone)
 }
@@ -70,6 +71,7 @@ object ApiJson {
     }
 
     fun jobId(text: String): String = JSONObject(text).getString("id")
+    fun jobState(text: String): String = JSONObject(text).getString("state")
 
     private fun part(o: JSONObject) =
         ScorePart(o.getString("pdf"), o.stringOrNull("midi"), o.intOrNull("pages"), o.stringOrNull("mp3"))

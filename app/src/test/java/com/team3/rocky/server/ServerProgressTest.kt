@@ -33,6 +33,7 @@ class ServerProgressTest {
             input: InputStream, fileName: String, title: String, requested: List<String>,
             original: List<String>, lineup: List<String>,
         ) = "job"
+        override fun cancel(jobId: String) = "cancelled"
         override fun result(jobId: String) = throw UnsupportedOperationException()
         override fun download(jobId: String, path: String, dest: File) = throw UnsupportedOperationException()
     }

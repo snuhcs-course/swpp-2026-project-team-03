@@ -51,6 +51,9 @@ class FakeRunner:
         self.fail_stage = fail_stage
         self.calls = []
 
+    def cancel(self, job_id):
+        self.calls.append(("cancel", job_id))
+
     def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
         self.calls.append(("midi", job_id, audio.name, requested, original))
         if self.fail_stage == "midi":

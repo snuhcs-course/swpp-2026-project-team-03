@@ -39,6 +39,7 @@ class PodRequest:
     phase: str | None = None       # Succeeded / Failed once done
     log: str = ""
     done: threading.Event = field(default_factory=threading.Event)
+    cancel_requested: bool = False
 
 
 def spec_builder() -> KubernetesRunner:
@@ -62,6 +63,18 @@ class AgentRunner:
         self.timeout_sec = timeout_sec or float(os.environ.get("ROCKY_JOB_TIMEOUT_SEC", "5400"))
         self.lock = threading.Lock()
         self.requests: dict[str, PodRequest] = {}
+        self.cancelled_jobs: set[str] = set()
+
+    def cancel(self, job_id: str) -> None:
+        with self.lock:
+            self.cancelled_jobs.add(job_id)
+            for req in self.requests.values():
+                if req.job_id == job_id and not req.done.is_set():
+                    req.cancel_requested = True
+
+    def forget(self, job_id: str) -> None:
+        with self.lock:
+            self.cancelled_jobs.discard(job_id)
 
     # ---- called by the worker ----
     def _pod_dict(self, pod, suffix: str) -> dict:
@@ -76,6 +89,8 @@ class AgentRunner:
         req = PodRequest(rid=f"{kind}-{job_id}-{suffix}", job_id=job_id, kind=kind,
                          pod=self._pod_dict(pod, suffix))
         with self.lock:
+            if job_id in self.cancelled_jobs:
+                raise RunnerError(f"job {job_id} was cancelled before {kind} Pod creation")
             self.requests[req.rid] = req
         deadline = time.monotonic() + self.timeout_sec
         try:
@@ -114,14 +129,18 @@ class AgentRunner:
                 return None
             req = min(free, key=lambda r: r.created)
             req.agent, req.last_seen, req.note = agent, now, None
-            return {"rid": req.rid, "kind": req.kind, "job_id": req.job_id, "pod": req.pod}
+            return {"rid": req.rid, "kind": req.kind, "job_id": req.job_id,
+                    "pod": req.pod, "cancel": req.cancel_requested}
 
-    def heartbeat(self, rid: str, agent: str, note: str | None) -> bool:
-        """False when the request is gone or belongs to another agent: the agent should stop."""
+    def heartbeat(self, rid: str, agent: str, note: str | None) -> bool | str:
+        """Return 'cancel' until the agent deletes the Pod and acknowledges it."""
         with self.lock:
             req = self.requests.get(rid)
             if req is None or req.agent != agent or req.done.is_set():
                 return False
+            if req.cancel_requested:
+                req.last_seen = time.time()
+                return "cancel"
             req.last_seen, req.note = time.time(), note
             return True
 
@@ -130,6 +149,7 @@ class AgentRunner:
             req = self.requests.get(rid)
             if req is None or req.agent != agent or req.done.is_set():
                 return False
-            req.phase, req.log = phase, log[-20000:]
+            req.phase = "Cancelled" if req.cancel_requested else phase
+            req.log = log[-20000:]
             req.done.set()
             return True

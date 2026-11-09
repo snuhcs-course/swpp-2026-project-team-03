@@ -196,6 +196,68 @@ def test_claim_never_gives_one_job_to_two_workers(setup):
     assert worker.claim() is None
 
 
+def test_cancel_queued_job_skips_it_and_keeps_next_song(setup):
+    client, store, runner, worker = setup()
+    first = upload(client).json()["id"]
+    second = upload(client).json()["id"]
+    assert client.post(f"/jobs/{first}/cancel").json() == {"id": first, "state": "cancelled"}
+    assert client.post(f"/jobs/{first}/cancel").json()["state"] == "cancelled"
+    assert client.get(f"/jobs/{first}").json()["state"] == "cancelled"
+    assert client.get(f"/jobs/{first}/result").status_code == 409
+    assert not (store.inputs / f"{first}.wav").exists()
+    assert worker.claim().id == second
+    assert ("cancel", first) not in runner.calls  # no Pod was created
+
+
+def test_cancel_after_claim_cannot_be_revived_by_stale_worker(setup):
+    client, store, runner, worker = setup()
+    job_id = upload(client).json()["id"]
+    stale = worker.claim()
+    assert stale.id == job_id
+    assert client.post(f"/jobs/{job_id}/cancel").json()["state"] == "cancelling"
+    worker.run(stale)
+    assert store.get(job_id).state == "cancelled"
+    assert not any(call[0] == "midi" for call in runner.calls)
+
+
+def test_cancel_running_job_stops_it_before_next_song(tmp_path, monkeypatch):
+    import threading
+    import time
+    monkeypatch.delenv("ROCKY_API_KEY", raising=False)
+    entered, released = threading.Event(), threading.Event()
+
+    class BlockingRunner(FakeRunner):
+        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+            if not entered.is_set():
+                (run / "stems").mkdir(parents=True)
+                (run / "stems" / "drums.wav").write_bytes(b"partial")
+                entered.set()
+                released.wait(5)
+                raise RuntimeError("stopped after cancellation")
+            super().run_midi(job_id, audio, run, requested, log, note, original)
+
+        def cancel(self, job_id):
+            super().cancel(job_id)
+            released.set()
+
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    runner = BlockingRunner()
+    with TestClient(create_app(store, runner)) as client:
+        first = upload(client).json()["id"]
+        assert entered.wait(5)
+        second = upload(client).json()["id"]
+        assert client.get(f"/jobs/{second}").json()["state"] == "queued"
+        assert client.post(f"/jobs/{first}/cancel").json()["state"] == "cancelling"
+        for _ in range(100):
+            if store.get(first).state == "cancelled" and store.get(second).state == "complete":
+                break
+            time.sleep(0.05)
+        assert (store.get(first).state, store.get(second).state) == ("cancelled", "complete")
+        assert not store.run_dir(first).exists()
+        assert not (store.inputs / f"{first}.wav").exists()
+        assert ("cancel", first) in runner.calls
+
+
 def test_upload_records_original_and_lineup(setup):
     client, store, *_ = setup()
     r = client.post("/jobs", files={"file": ("s.mp3", b"ID3", "audio/mpeg")},

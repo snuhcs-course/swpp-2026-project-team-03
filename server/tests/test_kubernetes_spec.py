@@ -9,6 +9,8 @@ from rocky_server.runners import KubernetesRunner, RunnerError
 
 def runner():
     r = KubernetesRunner.__new__(KubernetesRunner)  # no cluster needed to build specs
+    import threading
+    r.cancel_lock, r.cancelled = threading.Lock(), set()
     r.client, r.claim, r.node, r.namespace = client, "muscriptor-data", "ferrari", "ws-test"
     r.pipeline_image, r.pdf_image, r.timeout_sec = "uv-image", "pw-image", 60
     return r

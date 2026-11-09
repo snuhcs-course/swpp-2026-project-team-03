@@ -27,6 +27,8 @@ interface ScoreServer {
         original: List<String> = emptyList(), lineup: List<String> = requested,
     ): String
     fun status(jobId: String): JobStatus
+    /** Returns the server state: cancelling, cancelled, or already complete. */
+    fun cancel(jobId: String): String
     fun result(jobId: String): JobResult
     fun download(jobId: String, path: String, dest: File)
 }
@@ -92,6 +94,8 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
     }
 
     override fun status(jobId: String): JobStatus = ApiJson.status(open("/jobs/$jobId").body())
+
+    override fun cancel(jobId: String): String = ApiJson.jobState(open("/jobs/$jobId/cancel", "POST").body())
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
 

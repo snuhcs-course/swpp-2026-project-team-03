@@ -45,6 +45,13 @@ class ApiJsonTest {
         assertEquals(Stage.SEPARATE, ApiJson.status("""{"id":"x","state":"running","stage":"NEW"}""").stage)
     }
 
+    @Test fun cancelledStatusAndCancelResponse() {
+        val status = ApiJson.status("""{"id":"x","state":"cancelled","stage":"SEPARATE"}""")
+        assertTrue(status.isCancelled)
+        assertFalse(status.toProgress().done)
+        assertEquals("cancelling", ApiJson.jobState("""{"id":"x","state":"cancelling"}"""))
+    }
+
     @Test fun resultListsFilesPerPart() {
         val r = ApiJson.result(
             """{"id":"x","title":"Immigrant Song",

@@ -15,7 +15,9 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -43,6 +45,9 @@ def to_wav(source: Path) -> Path:
 
 class SubprocessRunner:
     def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.processes: dict[str, subprocess.Popen] = {}
+        self.cancelled: set[str] = set()
         self.midi_cmd = os.environ.get(
             "ROCKY_MIDI_CMD",
             "/data/rocky-unified/.venv/bin/python /data/pipeline/unified.py {audio} {run} "
@@ -53,21 +58,45 @@ class SubprocessRunner:
             "ROCKY_PDF_CMD",
             "/data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py {run}")
 
-    def _run(self, template: str, audio: Path, run: Path, requested: str, log: Path,
+    def cancel(self, job_id: str) -> None:
+        with self.lock:
+            self.cancelled.add(job_id)
+            process = self.processes.get(job_id)
+            if process is not None and process.poll() is None:
+                if os.name == "nt":
+                    process.terminate()
+                else:
+                    os.killpg(process.pid, signal.SIGTERM)
+
+    def forget(self, job_id: str) -> None:
+        with self.lock:
+            self.cancelled.discard(job_id)
+
+    def _run(self, job_id: str, template: str, audio: Path, run: Path, requested: str, log: Path,
              original: str = "unknown") -> None:
         cmd = template.format(audio=shlex.quote(str(audio)), run=shlex.quote(str(run)),
                               requested=shlex.quote(requested), original=shlex.quote(original))
         with log.open("a", encoding="utf-8") as out:
-            code = subprocess.run(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT).returncode
+            with self.lock:
+                if job_id in self.cancelled:
+                    raise RunnerError(f"job {job_id} was cancelled")
+                process = subprocess.Popen(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT,
+                                           start_new_session=os.name != "nt")
+                self.processes[job_id] = process
+            try:
+                code = process.wait()
+            finally:
+                with self.lock:
+                    self.processes.pop(job_id, None)
         if code:
             raise RunnerError(f"command exited {code}; see {log.name}")
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
                  note=lambda _msg: None, original: str = "unknown") -> None:
-        self._run(self.midi_cmd, audio, run, requested, log, original)
+        self._run(job_id, self.midi_cmd, audio, run, requested, log, original)
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
-        self._run(self.pdf_cmd, run, run, "", log)
+        self._run(job_id, self.pdf_cmd, run, run, "", log)
 
 
 class KubernetesRunner:
@@ -99,6 +128,22 @@ class KubernetesRunner:
         self.pipeline_image = os.environ.get("ROCKY_PIPELINE_IMAGE", "ghcr.io/astral-sh/uv:python3.13-bookworm-slim")
         self.pdf_image = os.environ.get("ROCKY_PDF_IMAGE", "mcr.microsoft.com/playwright:v1.62.1-noble")
         self.timeout_sec = int(os.environ.get("ROCKY_JOB_TIMEOUT_SEC", "5400"))
+        self.cancelled: set[str] = set()
+        self.cancel_lock = threading.Lock()
+
+    def _was_cancelled(self, job_id: str) -> bool:
+        with self.cancel_lock:
+            return job_id in self.cancelled
+
+    def cancel(self, job_id: str) -> None:
+        with self.cancel_lock:
+            self.cancelled.add(job_id)
+        for stage in ("midi", "pdf"):
+            self._delete(f"rocky-{stage}-{job_id}")
+
+    def forget(self, job_id: str) -> None:
+        with self.cancel_lock:
+            self.cancelled.discard(job_id)
 
     # ---- Pod specs (same as ml/pipeline/sgs/*-pod.example.yaml) ----
     def _pod(self, name: str, image: str, script: str, env: dict[str, str], limits: dict[str, str],
@@ -161,6 +206,8 @@ class KubernetesRunner:
         deadline = time.monotonic() + self.timeout_sec
         self._delete(name)  # a finished Pod left by an earlier try has the same name
         while True:
+            if self._was_cancelled(name.rsplit("-", 1)[-1]):
+                raise RunnerError(f"job {name} was cancelled before Pod creation")
             try:
                 self.core.create_namespaced_pod(self.namespace, pod)
                 return
@@ -179,6 +226,8 @@ class KubernetesRunner:
         deadline = time.monotonic() + self.timeout_sec
         try:
             while time.monotonic() < deadline:
+                if self._was_cancelled(name.rsplit("-", 1)[-1]):
+                    raise RunnerError(f"job {name} was cancelled")
                 status = self.core.read_namespaced_pod_status(name, self.namespace).status
                 if status.phase == "Succeeded":
                     self._save_log(name, log)

@@ -13,6 +13,7 @@ import java.io.IOException
 
 /** 서버에서 작업이 실패했을 때. message는 서버가 알려준 실패 이유. */
 class JobFailedException(message: String) : Exception(message)
+class JobCancelledException : Exception()
 
 /**
  * 서버의 GET /jobs/{id}를 pollMs마다 불러 진행 상태를 보낸다.
@@ -40,6 +41,7 @@ class ServerProgress(
             }
             if (status != null) {
                 onStatus(status)
+                if (status.isCancelled) throw JobCancelledException()
                 if (status.isFailed) throw JobFailedException(status.error ?: "알 수 없는 오류")
                 emit(status.toProgress())
                 if (status.isDone) return@flow

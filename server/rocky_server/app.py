@@ -2,6 +2,7 @@
 
 POST /jobs                upload a song and the instruments to play -> job id
 GET  /jobs/{id}           state and progress (stage, chunks, percent, time left)
+POST /jobs/{id}/cancel    stop a queued or active job
 GET  /jobs/{id}/result    PDF and MIDI files of a finished job
 GET  /jobs/{id}/files/... download one of those files
 GET  /health              liveness check
@@ -123,6 +124,15 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             body.update(run_progress(store.run_dir(job.id), elapsed))
         return body
 
+    @app.post("/jobs/{job_id}/cancel", dependencies=[Depends(check_key)])
+    def cancel_job(job_id: str) -> dict:
+        find(job_id)
+        try:
+            state = worker.cancel(job_id)
+        except NotImplementedError as exc:
+            raise HTTPException(501, str(exc)) from exc
+        return {"id": job_id, "state": state}
+
     @app.get("/jobs/{job_id}/result", dependencies=[Depends(check_key)])
     def job_result(job_id: str) -> dict:
         job = find(job_id)
@@ -151,7 +161,10 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
 
         @app.post("/agent/requests/{rid}/heartbeat", dependencies=[Depends(check_key)])
         def agent_heartbeat(rid: str, body: dict = Body(...)) -> dict:
-            if not runner.heartbeat(rid, str(body.get("agent", ""))[:80], body.get("note")):
+            result = runner.heartbeat(rid, str(body.get("agent", ""))[:80], body.get("note"))
+            if result == "cancel":
+                raise HTTPException(410, "job cancellation requested")
+            if not result:
                 raise HTTPException(409, "request is gone or taken by another agent")
             return {"ok": True}
 
