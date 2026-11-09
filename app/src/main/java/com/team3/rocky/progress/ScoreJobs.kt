@@ -115,6 +115,7 @@ object ScoreJobs {
     }
 
     private fun launch(app: Context, job: ScoreJob) {
+        if (job !in jobs) return
         job.runner = scope.launch {
             try {
                 if (job.audio == null) {
@@ -122,7 +123,8 @@ object ScoreJobs {
                 } else {
                     runOnServer(app, job, job.audio)
                 }
-                Toast.makeText(app, "'${job.title}' 악보가 완성됐어요. 진행상황 탭에서 볼 수 있어요", Toast.LENGTH_LONG).show()
+                if (job in jobs)
+                    Toast.makeText(app, "'${job.title}' 악보가 완성됐어요. 진행상황 탭에서 볼 수 있어요", Toast.LENGTH_LONG).show()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: JobCancelledException) {

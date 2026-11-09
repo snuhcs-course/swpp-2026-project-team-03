@@ -173,6 +173,7 @@ adb -s <폰1> reverse tcp:8000 tcp:8080                        # 폰1 → 워크
 adb -s <폰2> reverse tcp:8000 tcp:8081                        # 폰2 → 워크스페이스 2 (앱 주소는 그대로 localhost:8000)
 ```
 - agent를 껐다 켜도 괜찮다: 돌던 GPU Pod는 끝까지 돌고, 다시 켠 agent가 이어서 결과를 확인한다
+- **곡을 중단할 때는 앱의 취소 버튼 또는 `POST /jobs/<작업번호>/cancel`을 사용한다.** agent가 잠시 끊긴 사이 `kubectl delete pod`만 실행하면, 다음 agent가 같은 요청의 Pod를 다시 만들어 작업을 이어 간다. API의 취소 완료를 확인한 뒤 Pod 상태를 점검한다.
 
 ## E. 앱에서 확인
 1. 새 악보 → 우리 밴드 구성 → 음원 업로드 화면 맨 아래 **서버 설정: http://localhost:8000** → **연결 확인** → `연결됨 ✓`

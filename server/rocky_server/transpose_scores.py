@@ -36,10 +36,10 @@ def transpose_gp5(source: Path, target: Path, semitones: int) -> None:
 
     song = guitarpro.parse(str(source))
     shifted = copy.deepcopy(song)
-    try:
-        for track in shifted.tracks:
-            if track.isPercussionTrack:
-                continue
+    for index, track in enumerate(shifted.tracks):
+        if track.isPercussionTrack:
+            continue
+        try:
             for measure in track.measures:
                 for voice in measure.voices:
                     for beat in voice.beats:
@@ -50,14 +50,12 @@ def transpose_gp5(source: Path, target: Path, semitones: int) -> None:
                             if not 0 <= fret <= track.fretCount:
                                 raise ValueError(f"fret outside range in measure {measure.number}")
                             note.value = fret
-    except ValueError:
-        # An open lowest string cannot be moved down in standard tuning. Retune
-        # every string by the same interval, preserving playable fingerings.
-        shifted = song
-        for track in shifted.tracks:
-            if not track.isPercussionTrack:
-                for string in track.strings:
-                    string.value += semitones
+        except ValueError:
+            # Retune only the part that cannot use shifted frets. Keep the
+            # original fret numbers, including tied notes, for this track.
+            shifted.tracks[index] = copy.deepcopy(song.tracks[index])
+            for string in shifted.tracks[index].strings:
+                string.value += semitones
     def shifted_key(key):
         fifths, minor = key.value
         pitch = (fifths * 7 + (9 if minor else 0) + semitones) % 12

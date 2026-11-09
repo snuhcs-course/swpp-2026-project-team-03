@@ -178,3 +178,22 @@ def test_cancel_request_waits_for_agent_pod_deletion(server):
     assert store.get(job_id).state == "cancelling"
     assert runner.finish(req["rid"], "laptop", "Cancelled", "pod deleted")
     assert wait_state(store, job_id, {"cancelled", "failed"}).state == "cancelled"
+
+
+def test_cancel_before_any_agent_claim_releases_next_song(server):
+    url, store, runner, _ = server
+    first = upload(url)
+    for _ in range(50):
+        if any(r.job_id == first for r in runner.requests.values()):
+            break
+        time.sleep(.1)
+    import httpx
+    assert httpx.post(f"{url}/jobs/{first}/cancel").json()["state"] == "cancelling"
+    second = upload(url)
+    assert wait_state(store, first, {"cancelled"}, seconds=3).state == "cancelled"
+    for _ in range(30):
+        if any(r.job_id == second for r in runner.requests.values()):
+            break
+        time.sleep(.1)
+    req = runner.next_request("laptop")
+    assert req and req["job_id"] == second

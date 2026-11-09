@@ -31,10 +31,11 @@ namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
 | `GET` | `/health` | `{"ok": true}` |
 | `POST` | `/jobs` | multipart: `file` (wav/mp3/flac/m4a/ogg), `requested` (e.g. `piano,guitar`), `title` → `{"id", "state"}` |
 | `GET` | `/jobs/{id}` | `state` (`uploading`, `queued`, `running`, `publishing`, `cancelling`, `cancelled`, `complete`, `failed`), `queue_position`, `error`, `reason` (set only when the pipeline refused the input: `too_short`, `silent`, `not_band_audio`; `state` is then `failed` and `error` is a Korean message for the user), and progress: `stage` (`SEPARATE`, `TRANSCRIBE`, `BEATS`, `ARRANGE`), `completed`, `total`, `fraction` (0–1), `eta_sec` |
-| `POST` | `/jobs/{id}/cancel` | Idempotently request cancellation; returns `{"id", "state"}`. A queued song becomes `cancelled` immediately. An active song becomes `cancelling` until the agent confirms its Pod has been deleted, then becomes `cancelled`. Completed songs remain complete. |
+| `POST` | `/jobs/{id}/cancel` | Idempotently request cancellation; returns `{"id", "state"}`. A queued song, or a song whose Pod request was never claimed by an agent, becomes `cancelled` immediately. If an agent has claimed the request, it remains `cancelling` until the agent confirms Pod deletion. Completed songs remain complete. |
 | `GET` | `/jobs/{id}/result` | `full_band` and `instruments.<part>` with `pdf`, `midi`, `pages`; `original_parts`, `generated_parts`, `faint_parts` (parts the user said are in the song but whose stem barely sounds; the score may be empty or inaccurate) |
 | `GET` | `/jobs/{id}/files/{path}` | one file listed in the result (nothing else on the volume) |
-| `POST` | `/jobs/{id}/transpositions/{semitones}` | Render a completed score at an absolute offset from the original key (`-12` through `12`); returns the same band/part result shape. Zero returns the original. |
+| `POST` | `/jobs/{id}/transpositions/{semitones}` | Request an absolute offset from the original key (`-12` through `12`). A new render returns `202` with `state: queued` or `running`; a cached render and zero offset return the result immediately. |
+| `GET` | `/jobs/{id}/transpositions/{semitones}` | Poll the requested variant: `queued`, `running`, `failed` (with `error`), or `complete` (with the band/part result). A variant that was never requested returns `404`. |
 | `GET` | `/jobs/{id}/transpositions/{semitones}/result` | Read an already rendered offset. |
 | `GET` | `/jobs/{id}/transpositions/{semitones}/files/{path}` | Download a PDF, MIDI or MP3 from that offset. |
 | `DELETE` | `/jobs/{id}` | Deletes the job record, upload, run folder, result files and key changes → `{"id", "deleted", "pending"}`. A queued song is removed at once. A running song is cancelled the same way as `POST /jobs/{id}/cancel` and removed when its Pod has stopped (`pending: true`). A job shared to a band is not deleted (`409`), because band members open it from the server. |
@@ -49,6 +50,12 @@ Original files stay intact under the completed run; variants are under
 active in its private score folder. Rendering needs the laptop agent, the
 completed run on the shared volume, and the same CPU renderer dependencies as
 normal score publishing.
+The POST does not hold the HTTP connection while the agent or CPU Pod is slow.
+Different songs can render concurrently; variants of the same song render one
+at a time. Deleting a song while its variant is still rendering returns `409`.
+If a client stops polling, the server render continues; retry the same POST to
+rejoin that render or restart it after a failure. A server restart loses the
+in-memory request status, so retry the POST to resume an unfinished variant.
 
 ### Members and bands
 

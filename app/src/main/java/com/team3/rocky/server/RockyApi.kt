@@ -10,6 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.UUID
+import org.json.JSONObject
 
 /** 서버가 2xx가 아닌 응답을 보냈을 때. code는 HTTP 상태 코드. */
 class ApiException(val code: Int, message: String) : IOException(message)
@@ -106,8 +107,21 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
 
-    override fun transpose(jobId: String, semitones: Int): JobResult =
-        ApiJson.result(open("/jobs/$jobId/transpositions/$semitones", "POST", readTimeoutMs = 600_000).body())
+    override fun transpose(jobId: String, semitones: Int): JobResult {
+        val path = "/jobs/$jobId/transpositions/$semitones"
+        val initial = open(path, "POST").body()
+        if (!JSONObject(initial).has("state")) return ApiJson.result(initial) // cached result
+        val deadline = System.nanoTime() + 600_000_000_000L
+        while (System.nanoTime() < deadline) {
+            Thread.sleep(1_500)
+            val response = open(path).body()
+            when (ApiJson.jobState(response)) {
+                "complete" -> return ApiJson.result(response)
+                "failed" -> throw IOException(JSONObject(response).optString("error", "키 변경에 실패했어요"))
+            }
+        }
+        throw IOException("키 변경이 계속 진행 중이에요. 잠시 뒤 다시 시도해 주세요")
+    }
 
     override fun downloadTransposed(jobId: String, semitones: Int, path: String, dest: File) =
         downloadPath("/jobs/$jobId/transpositions/$semitones/files/$path", dest)
