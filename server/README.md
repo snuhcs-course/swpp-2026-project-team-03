@@ -50,6 +50,10 @@ Original files stay intact under the completed run; variants are under
 active in its private score folder. Rendering needs the laptop agent, the
 completed run on the shared volume, and the same CPU renderer dependencies as
 normal score publishing.
+In the Android result screen, the four key buttons change a pending offset;
+only the Apply button sends a request. For example, three quick `-2` taps
+select `-6` and produce one render when applied, rather than rendering `-2`,
+`-4`, and `-6` in sequence.
 The POST does not hold the HTTP connection while the agent or CPU Pod is slow.
 Different songs can render concurrently; variants of the same song render one
 at a time. Deleting a song while its variant is still rendering returns `409`.
