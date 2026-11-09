@@ -76,6 +76,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -564,27 +565,26 @@ fun HomeTab(
         Spacer(Modifier.height(32.dp))
         Text(tr("이렇게 만들어요", "How it works"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HowStep("1", tr("악기 고르기", "Pick instruments"), Modifier.weight(1f))
-            HowStep("2", tr("곡 올리기", "Upload a song"), Modifier.weight(1f))
-            HowStep("3", tr("악보 받기", "Get scores"), Modifier.weight(1f))
+        // 위아래로만 읽게 한 줄에 한 단계. 마지막 '나만의 악보 받기'를 강조한다.
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            HowStep("1", tr("우리 밴드 악기 고르기", "Pick your band's instruments"))
+            HowStep("2", tr("곡 올리기", "Upload a song"))
+            HowStep("3", tr("원곡 악기 선택하기", "Pick the song's instruments"))
+            HowStep("4", tr("나만의 악보 받기", "Get your own scores"), highlight = true)
         }
 
-        // 결과가 잘 나오는 곡을 고르는 요령. 옆으로 넘겨 본다.
+        // 결과가 잘 나오는 곡을 고르는 요령. 아래로 내리며 읽는다.
         Spacer(Modifier.height(28.dp))
         Text(tr("정확도 팁", "Tips"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(10.dp))
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            TipCard("drums", tr("밴드 곡일수록 정확해요", "Band songs work best"),
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TipCard(tr("밴드 곡일수록 정확해요", "Band songs work best"),
                 tr("드럼·베이스·기타·피아노 편성", "Drums, bass, guitar, keys"))
-            TipCard("guitar", tr("곡의 악기를 골라 주세요", "Pick the song's instruments"),
+            TipCard(tr("곡의 악기를 골라 주세요", "Pick the song's instruments"),
                 tr("고르면 더 정확해져요", "It improves accuracy"))
-            TipCard("piano", tr("MP3 · WAV만 가능", "MP3 or WAV only"),
+            TipCard(tr("MP3 · WAV만 가능", "MP3 or WAV only"),
                 tr("음질이 좋을수록 정확해요", "Better audio, better notes"))
-            TipCard("vocal", tr("라이브·커버도 돼요", "Live and covers work"),
+            TipCard(tr("라이브·커버도 돼요", "Live and covers work"),
                 tr("관객 소리가 크면 덜 정확해요", "Loud crowds lower accuracy"))
         }
         Spacer(Modifier.height(8.dp))
@@ -592,12 +592,32 @@ fun HomeTab(
 }
 
 @Composable
-private fun HowStep(no: String, text: String, modifier: Modifier) {
+private fun HowStep(no: String, text: String, highlight: Boolean = false) {
     val cs = MaterialTheme.colorScheme
-    Column(modifier.card(RoundedCornerShape(14.dp), cs).padding(horizontal = 12.dp, vertical = 14.dp)) {
-        Text(no, fontWeight = FontWeight.ExtraBold, color = cs.primary, fontSize = 18.sp)
-        Spacer(Modifier.height(6.dp))
-        Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier.fillMaxWidth()
+            .card(
+                shape, cs,
+                bg = if (highlight) cs.primary.copy(alpha = 0.12f) else cs.surface,
+                line = if (highlight) cs.primary else cs.outlineVariant,
+            )
+            .padding(horizontal = 14.dp, vertical = if (highlight) 16.dp else 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(28.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(if (highlight) cs.primary else cs.primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) { Text(no, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = if (highlight) cs.onPrimary else cs.primary) }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text, fontSize = if (highlight) 16.sp else 15.sp,
+            fontWeight = if (highlight) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (highlight) cs.primary else cs.onSurface,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        if (highlight) Text("♪", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = cs.primary)
     }
 }
 
@@ -637,16 +657,48 @@ private fun HomeJobCard(job: ScoreJob, more: Int, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TipCard(icon: String, title: String, body: String) {
+private fun TipCard(title: String, body: String) {
     val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.width(210.dp).card(RoundedCornerShape(18.dp), cs).padding(16.dp),
+    Row(
+        Modifier.fillMaxWidth().card(RoundedCornerShape(14.dp), cs).padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        InstrumentIcon(icon, cs.primary, size = 26.dp)
-        Spacer(Modifier.height(10.dp))
-        Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(4.dp))
-        Text(body, fontSize = 13.sp, lineHeight = 18.sp, color = cs.onSurfaceVariant, maxLines = 2)
+        Box(
+            Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(cs.primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) { BulbIcon(cs.primary, 20.dp) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text(body, fontSize = 13.sp, lineHeight = 18.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** 전구 아이콘 (정확도 팁). 24칸 격자에 선으로 그린다. */
+@Composable
+private fun BulbIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) {
+        val u = this.size.minDimension / 24f
+        val s = Stroke(width = 1.9f * u, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        // 둥근 유리 + 아래로 좁아지는 목
+        val glass = Path().apply {
+            moveTo(9f * u, 17f * u)
+            lineTo(9f * u, 14.6f * u)
+            cubicTo(6.6f * u, 13.3f * u, 5f * u, 11f * u, 5f * u, 8.6f * u)
+            cubicTo(5f * u, 4.8f * u, 8.1f * u, 2f * u, 12f * u, 2f * u)
+            cubicTo(15.9f * u, 2f * u, 19f * u, 4.8f * u, 19f * u, 8.6f * u)
+            cubicTo(19f * u, 11f * u, 17.4f * u, 13.3f * u, 15f * u, 14.6f * u)
+            lineTo(15f * u, 17f * u)
+            close()
+        }
+        drawPath(glass, color, style = s)
+        // 꼭지 (나사 부분 두 줄)
+        drawLine(color, Offset(9.5f * u, 19.6f * u), Offset(14.5f * u, 19.6f * u), s.width, StrokeCap.Round)
+        drawLine(color, Offset(10.5f * u, 22f * u), Offset(13.5f * u, 22f * u), s.width, StrokeCap.Round)
+        // 반짝임
+        drawArc(color, 200f, 60f, false, Offset(8f * u, 5f * u), Size(8f * u, 8f * u), style = Stroke(1.5f * u, cap = StrokeCap.Round))
     }
 }
 
