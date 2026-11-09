@@ -111,6 +111,8 @@ async function renderAllTracks({ scale, width }) {
     s.player.enablePlayer = false;
     s.display.layoutMode = at.LayoutMode.Page;
     s.display.scale = scale;
+    // alphaTab draws bar numbers red by default; print them black like the rest of the score.
+    s.display.resources.barNumberColor = new at.model.Color(0, 0, 0, 255);
     return s;
   };
   const score = at.importer.ScoreLoader.loadScoreFromBytes(bytes, settings());
