@@ -31,7 +31,10 @@ Each track is rendered in alphaTab's page layout on A4 (10 mm margins, scale
 0.75) and starts on a new page under a heading with the song title, artist and
 track name. Systems are never split across pages. alphaTab cuts long track
 names off beside the staff, so that label is hidden and the heading is used
-instead. If a numeric tempo mark is drawn on top of a tempo name, the converter
+instead. For a string instrument, the first page also states the imported GP5
+string tuning from top TAB line to bottom, including octave numbers. Check this
+line when a key change retunes an open low string; it is part of the playable
+score, not merely metadata. If a numeric tempo mark is drawn on top of a tempo name, the converter
 removes only the overlapping copy; the tempo name and the second mark remain.
 Converting the 18 reference GP5 files below takes about 10 seconds in total.
 
