@@ -195,18 +195,10 @@ fun RockyApp() {
                     onAddBand = { go(Screen.BandJoin) },
                 )
             }
-            Screen.Lineup -> LineupScreen(
-                title = tr("새 악보", "New score"),
-                heading = tr("우리 밴드 악기", "Your band"),
-                sub = tr(
-                    "연주할 악기를 모두 고르세요.\n곡에 없는 파트는 새로 만들어요.",
-                    "Pick every instrument you play.\nParts not in the song are added.",
-                ),
-                selected = lineup,
-                onToggle = { i -> lineup = Demo.toggleLineup(lineup, i) },
-                onGuitars = { n -> lineup = Demo.setGuitarCount(lineup, n) },
+            Screen.Lineup -> BandStageScreen(
+                lineup = lineup,
+                onChange = { lineup = it },
                 onBack = { back() },
-                nextLabel = tr("다음 · 악기 ${lineup.size}개", "Next · ${lineup.size} instruments"),
                 onNext = { go(Screen.Upload) },
             )
             Screen.Upload -> UploadScreen(
@@ -1029,11 +1021,7 @@ fun OriginalScreen(
     footer: @Composable () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    Page(tr("3 / 3단계", "Step 3 of 3"), onBack, actions = {
-        Row(Modifier.padding(end = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(3) { Box(Modifier.width(22.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(cs.primary)) }
-        }
-    }, bottom = {
+    Page(tr("3 / 3단계", "Step 3 of 3"), onBack, actions = { StepBars(3) }, bottom = {
         Button(
             onClick = onNext, enabled = canNext,
             modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -1124,7 +1112,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
     }
     val shape = RoundedCornerShape(24.dp)
     if (editServer) ServerDialog(onDismiss = { editServer = false })
-    Page(tr("곡 올리기", "Upload a song"), onBack, bottom = {
+    Page(tr("2 / 3단계", "Step 2 of 3"), onBack, actions = { StepBars(2) }, bottom = {
         Button(
             onClick = { picked?.let { onNext(it, audio) } }, enabled = picked != null,
             modifier = Modifier.fillMaxWidth().height(56.dp),
