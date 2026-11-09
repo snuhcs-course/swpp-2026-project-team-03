@@ -23,7 +23,7 @@ jobs:
           ORG_GRADLE_PROJECT_rocky.apiKey: ${{ secrets.ROCKY_API_KEY }}
         run: |
           chmod +x ./gradlew
-          ./gradlew testDebugUnitTest lintDebug assembleDebug
+          ./gradlew testDebugUnitTest jacocoTestReport lintDebug assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -34,7 +34,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-reports
-          path: app/build/reports/tests/testDebugUnitTest/
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/jacoco/jacocoTestReport/
 
   server:
     runs-on: ubuntu-latest
@@ -89,7 +92,8 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: chmod +x ./gradlew && ./gradlew connectedDebugAndroidTest
+          # instrumented tests, then unit tests + the merged (unit + instrumented) JaCoCo report
+          script: chmod +x ./gradlew && ./gradlew connectedDebugAndroidTest && ./gradlew jacocoTestReport
       - name: Upload reports and server log
         if: always()
         uses: actions/upload-artifact@v4
@@ -97,4 +101,6 @@ jobs:
           name: android-e2e-reports
           path: |
             app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/connected/
+            app/build/reports/jacoco/jacocoTestReport/
             /tmp/rocky/server.log
