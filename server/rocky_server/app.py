@@ -5,7 +5,18 @@ GET  /jobs/{id}           state and progress (stage, chunks, percent, time left)
 POST /jobs/{id}/cancel    stop a queued or active job
 GET  /jobs/{id}/result    PDF and MIDI files of a finished job
 GET  /jobs/{id}/files/... download one of those files
+DELETE /jobs/{id}         delete the job and its files (a running job is cancelled first)
 GET  /health              liveness check
+
+Members and bands (SQLite at ROCKY_HOME/rocky.db; see accounts.py). Login returns a token
+that later calls send as "Authorization: Bearer <token>":
+POST /auth/signup, POST /auth/login, POST /auth/logout, GET /auth/taken?email=|nickname=
+GET|PATCH /me             my profile (nickname, instruments)
+PATCH /me/works/{work_id}  rename my score in every band I shared it to
+GET  /me/works/{work_id}/shared  whether I shared that score to a band
+GET|POST /bands           my bands / make a band;  POST /bands/join  join with an invite code
+GET|PATCH /bands/{id}     band detail / rename (owner);  POST /bands/{id}/leave
+POST /bands/{id}/scores   share a score;  PATCH /bands/{id}/scores/{sid}  rename it
 
 Settings (environment variables):
   ROCKY_RUNNER      agent (SGS: a laptop agent creates the Pods), kubernetes (the API pod
@@ -28,8 +39,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
+from .accounts import AccountError, Accounts, User
 from .jobs import JobStore, Worker
 from .lineup import APP_PARTS, LineupError, pipeline_args
 from .progress import allowed_paths, result_files, run_progress
@@ -40,12 +52,14 @@ AUDIO_EXT = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
 CHUNK = 1024 * 1024
 
 
-def create_app(store: JobStore | None = None, runner=None, start_worker: bool = True) -> FastAPI:
+def create_app(store: JobStore | None = None, runner=None, start_worker: bool = True,
+               accounts: Accounts | None = None) -> FastAPI:
     store = store or JobStore(Path(os.environ.get("ROCKY_HOME", "/data/rocky-unified/app")),
                               Path(os.environ.get("ROCKY_RUNS", "/data/rocky-unified/runs")),
                               Path(os.environ.get("ROCKY_INPUTS", "/data/input/app")))
     runner = runner or make_runner(os.environ.get("ROCKY_RUNNER", "kubernetes"))
     worker = Worker(store, runner, int(os.environ.get("ROCKY_PARALLEL", "1")))
+    accounts = accounts or Accounts(store.root / "rocky.db")
     api_key = os.environ.get("ROCKY_API_KEY", "")
     max_bytes = int(os.environ.get("ROCKY_MAX_UPLOAD_MB", "60")) * CHUNK
     transpose_lock = threading.Lock()
@@ -57,15 +71,26 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         yield
 
     app = FastAPI(title="ROCKY API", version="1.0", lifespan=lifespan)
-    app.state.store, app.state.worker = store, worker
+    app.state.store, app.state.worker, app.state.accounts = store, worker, accounts
+
+    @app.exception_handler(AccountError)
+    async def account_error(_request, exc: AccountError):
+        return JSONResponse({"detail": exc.message, "field": exc.field}, status_code=exc.status)
 
     def check_key(x_rocky_key: str | None = Header(default=None)) -> None:
         if api_key and x_rocky_key != api_key:
             raise HTTPException(401, "missing or wrong X-Rocky-Key")
 
+    def current_user(authorization: str | None = Header(default=None)) -> User:
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        user = accounts.user_for_token(token) if token else None
+        if user is None:
+            raise HTTPException(401, "login required")
+        return user
+
     def find(job_id: str):
         job = store.get(job_id) if re.fullmatch(r"[0-9a-f]{12}", job_id) else None
-        if job is None:
+        if job is None or store.is_deleted(job_id):
             raise HTTPException(404, "no such job")
         return job
 
@@ -109,6 +134,9 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             store.path(job.id).unlink(missing_ok=True)
             raise HTTPException(422, "empty file")
         store.update(job, filename=target.name, state="queued")
+        if store.is_deleted(job.id):  # deleted while the file was still arriving
+            store.purge(job.id)
+            raise HTTPException(410, "job was deleted during upload")
         worker.notify()
         return {"id": job.id, "state": job.state}
 
@@ -134,6 +162,17 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         except NotImplementedError as exc:
             raise HTTPException(501, str(exc)) from exc
         return {"id": job_id, "state": state}
+
+    @app.delete("/jobs/{job_id}", dependencies=[Depends(check_key)])
+    def delete_job(job_id: str) -> dict:
+        find(job_id)
+        if accounts.job_shared(job_id):  # band members still open it from here
+            raise HTTPException(409, "the score is shared to a band")
+        with transpose_lock:  # not while a key change is writing into the run folder
+            outcome = worker.delete(job_id)
+        if outcome is None:
+            raise HTTPException(404, "no such job")
+        return {"id": job_id, "deleted": outcome == "deleted", "pending": outcome == "pending"}
 
     @app.get("/jobs/{job_id}/result", dependencies=[Depends(check_key)])
     def job_result(job_id: str) -> dict:
@@ -208,6 +247,95 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(404, "not a result file")
         media = {"pdf": "application/pdf", "mp3": "audio/mpeg"}.get(rel.rsplit(".", 1)[-1], "audio/midi")
         return FileResponse(run / rel, media_type=media, filename=Path(rel).name)
+
+    # ---- members ----
+    keyed = [Depends(check_key)]
+
+    def session(user: User, token: str) -> dict:
+        return {"token": token, "user": user.json()}
+
+    @app.post("/auth/signup", status_code=201, dependencies=keyed)
+    def sign_up(body: dict = Body(...)) -> dict:
+        user, token = accounts.sign_up(str(body.get("email", "")), str(body.get("password", "")),
+                                       str(body.get("nickname", "")), body.get("instruments") or [])
+        return session(user, token)
+
+    @app.post("/auth/login", dependencies=keyed)
+    def login(body: dict = Body(...)) -> dict:
+        found = accounts.login(str(body.get("email", "")), str(body.get("password", "")))
+        if found is None:  # same answer for an unknown email and a wrong password
+            raise HTTPException(401, "wrong email or password")
+        return session(*found)
+
+    @app.post("/auth/logout", dependencies=keyed)
+    def logout(authorization: str | None = Header(default=None)) -> dict:
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        if token:
+            accounts.logout(token)
+        return {"ok": True}
+
+    @app.get("/auth/taken", dependencies=keyed)
+    def taken(email: str = "", nickname: str = "", authorization: str | None = Header(default=None)) -> dict:
+        if email:
+            return {"taken": accounts.email_taken(email)}
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        me = accounts.user_for_token(token) if token else None
+        return {"taken": accounts.nickname_taken(nickname, me.id if me else None)}
+
+    @app.get("/me", dependencies=keyed)
+    def me(user: User = Depends(current_user)) -> dict:
+        return user.json()
+
+    @app.patch("/me", dependencies=keyed)
+    def update_me(body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        return accounts.update_profile(user, str(body.get("nickname", "")), body.get("instruments") or []).json()
+
+    @app.patch("/me/works/{work_id}", dependencies=keyed)
+    def rename_my_work(work_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        accounts.rename_my_work(user, work_id, str(body.get("title", "")))
+        return {"ok": True}
+
+    @app.get("/me/works/{work_id}/shared", dependencies=keyed)
+    def work_shared(work_id: int, user: User = Depends(current_user)) -> dict:
+        return {"shared": accounts.work_shared(user, work_id)}
+
+    # ---- bands ----
+    @app.get("/bands", dependencies=keyed)
+    def my_bands(user: User = Depends(current_user)) -> list:
+        return accounts.bands_of(user)
+
+    @app.post("/bands", status_code=201, dependencies=keyed)
+    def create_band(body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        return accounts.create_band(user, str(body.get("name", "")), str(body.get("instrument", "")))
+
+    @app.post("/bands/join", dependencies=keyed)
+    def join_band(body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        return accounts.join(user, str(body.get("code", "")), str(body.get("instrument", "")))
+
+    @app.get("/bands/{band_id}", dependencies=keyed)
+    def band_detail(band_id: int, user: User = Depends(current_user)) -> dict:
+        return accounts.detail(user, band_id)
+
+    @app.patch("/bands/{band_id}", dependencies=keyed)
+    def rename_band(band_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        return accounts.rename_band(user, band_id, str(body.get("name", "")))
+
+    @app.post("/bands/{band_id}/leave", dependencies=keyed)
+    def leave_band(band_id: int, user: User = Depends(current_user)) -> dict:
+        accounts.leave(user, band_id)
+        return {"ok": True}
+
+    @app.post("/bands/{band_id}/scores", dependencies=keyed)
+    def share_score(band_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        if "work_id" not in body:
+            raise HTTPException(422, "work_id is required")
+        return {"created": accounts.share(user, band_id, body)}
+
+    @app.patch("/bands/{band_id}/scores/{score_id}", dependencies=keyed)
+    def rename_score(band_id: int, score_id: int, body: dict = Body(...),
+                     user: User = Depends(current_user)) -> dict:
+        accounts.rename_score(user, band_id, score_id, str(body.get("title", "")))
+        return {"ok": True}
 
     # ---- laptop agent (ROCKY_RUNNER=agent): server/agent/rocky_agent.py ----
     if hasattr(runner, "next_request"):

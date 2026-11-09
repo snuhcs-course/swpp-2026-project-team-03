@@ -36,6 +36,7 @@ class ServerProgressTest {
         override fun cancel(jobId: String) = "cancelled"
         override fun result(jobId: String) = throw UnsupportedOperationException()
         override fun download(jobId: String, path: String, dest: File) = throw UnsupportedOperationException()
+        override fun delete(jobId: String) = throw UnsupportedOperationException()
     }
 
     private fun track(server: ScoreServer, maxMissed: Int = 3) =

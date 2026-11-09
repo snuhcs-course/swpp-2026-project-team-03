@@ -292,3 +292,73 @@ def test_status_shows_wait_note(setup):
     job_id = upload(client).json()["id"]
     store.update(store.get(job_id), state="running", note="GPU 차례를 기다리는 중")
     assert client.get(f"/jobs/{job_id}").json()["note"] == "GPU 차례를 기다리는 중"
+
+
+def test_delete_complete_job_removes_its_files(setup):
+    client, store, _, worker = setup()
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    assert store.run_dir(job_id).exists()
+    r = client.delete(f"/jobs/{job_id}")
+    assert r.status_code == 200 and r.json() == {"id": job_id, "deleted": True, "pending": False}
+    assert not store.run_dir(job_id).exists()
+    assert not store.path(job_id).exists() and not store.log(job_id).exists()
+    assert client.get(f"/jobs/{job_id}").status_code == 404
+    assert client.get(f"/jobs/{job_id}/files/scores/full_band.pdf").status_code == 404
+    assert client.delete(f"/jobs/{job_id}").status_code == 404
+
+
+def test_delete_queued_job_never_runs(setup):
+    client, store, _, worker = setup()
+    job_id = upload(client).json()["id"]
+    assert client.delete(f"/jobs/{job_id}").json()["deleted"] is True
+    assert list(store.inputs.iterdir()) == []
+    assert worker.claim() is None
+
+
+def test_delete_running_job_is_removed_when_it_ends(setup):
+    client, store, runner, worker = setup()
+    job_id = upload(client).json()["id"]
+    job = worker.claim()
+    r = client.delete(f"/jobs/{job_id}")
+    assert r.json() == {"id": job_id, "deleted": False, "pending": True}
+    assert ("cancel", job_id) in runner.calls  # stopped through the same cancel as POST /cancel
+    assert client.get(f"/jobs/{job_id}").status_code == 404
+    worker.run(job)
+    assert not store.run_dir(job_id).exists()
+    assert not store.path(job_id).exists() and not store.is_deleted(job_id)
+
+
+def test_delete_needs_key_and_valid_id(setup):
+    client, *_ = setup(key="k")
+    job_id = upload(client, headers={"X-Rocky-Key": "k"}).json()["id"]
+    assert client.delete(f"/jobs/{job_id}").status_code == 401
+    assert client.delete("/jobs/zzz", headers={"X-Rocky-Key": "k"}).status_code == 404
+    assert client.delete(f"/jobs/{job_id}", headers={"X-Rocky-Key": "k"}).status_code == 200
+
+
+def test_delete_removes_key_changes_too(setup):
+    client, store, _, worker = setup()
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    assert client.post(f"/jobs/{job_id}/transpositions/2").status_code == 200
+    assert (store.run_dir(job_id) / "transpositions" / "+2").is_dir()
+    assert client.delete(f"/jobs/{job_id}").json()["deleted"] is True
+    assert not store.run_dir(job_id).exists()
+
+
+def test_delete_cancelled_job(setup):
+    client, store, _, worker = setup()
+    job_id = upload(client).json()["id"]
+    client.post(f"/jobs/{job_id}/cancel")
+    assert client.delete(f"/jobs/{job_id}").json()["deleted"] is True
+    assert not store.path(job_id).exists()
+
+
+def test_deleted_running_job_is_not_run_again_after_restart(setup):
+    client, store, runner, worker = setup()
+    job_id = upload(client).json()["id"]
+    worker.claim()
+    client.delete(f"/jobs/{job_id}")  # cancelling, then the server restarts
+    worker.start()
+    assert store.get(job_id) is None and worker.claim() is None

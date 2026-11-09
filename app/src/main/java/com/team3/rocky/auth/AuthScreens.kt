@@ -85,6 +85,7 @@ fun LoginScreen(auth: AuthRepository, onLoggedIn: (User) -> Unit, onSignUp: () -
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var editServer by remember { mutableStateOf(false) }
 
     fun submit() {
         if (busy) return
@@ -141,7 +142,12 @@ fun LoginScreen(auth: AuthRepository, onLoggedIn: (User) -> Unit, onSignUp: () -
             "Google · Apple 로그인은 준비 중이에요",
             fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.fillMaxWidth(),
         )
+        // 회원 정보는 ROCKY 서버에 있으므로, 로그인 전에 서버 주소를 바꿀 수 있어야 한다.
+        TextButton(onClick = { editServer = true }, modifier = Modifier.testTag("login_server")) {
+            Text("서버 설정", fontSize = 12.sp)
+        }
     }
+    if (editServer) com.team3.rocky.ServerDialog(onDismiss = { editServer = false })
 }
 
 // ---------- 회원가입 ----------

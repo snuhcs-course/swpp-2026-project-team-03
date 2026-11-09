@@ -28,6 +28,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AuthFlowTest {
     init {
+        com.team3.rocky.server.Backend.local = true  // 서버 없이 폰 안의 회원 DB로 화면을 시험한다
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         ctx.deleteDatabase(UserDatabase.DB_NAME)
         ctx.getSharedPreferences("rocky_session", Context.MODE_PRIVATE).edit().clear().commit()

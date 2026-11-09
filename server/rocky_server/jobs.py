@@ -83,6 +83,23 @@ class JobStore:
         self.save(job)
         return job
 
+    # ---- delete (NFR-07): the user removed the song, so the server keeps nothing of it ----
+
+    def tombstone(self, job_id: str) -> Path:
+        """Marks a job the user deleted while it was still running; it is purged when it stops."""
+        return self.root / f"{job_id}.deleted"
+
+    def is_deleted(self, job_id: str) -> bool:
+        return self.tombstone(job_id).exists()
+
+    def purge(self, job_id: str) -> None:
+        """Remove the record, log, upload, run folder (results and key changes) and the mark."""
+        shutil.rmtree(self.run_dir(job_id), ignore_errors=True)
+        for f in self.inputs.glob(f"{job_id}.*"):
+            f.unlink(missing_ok=True)
+        for f in (self.log(job_id), self.path(job_id), self.tombstone(job_id)):
+            f.unlink(missing_ok=True)
+
     def update(self, job: Job, **changes) -> Job:
         with self.lock:
             current = self.get(job.id) or job
@@ -116,6 +133,9 @@ class Worker:
     def start(self) -> None:
         # Jobs cut off by a restart are run again; --resume skips finished stages.
         for job in self.store.all():
+            if self.store.is_deleted(job.id):  # deleted before the restart: never run it again
+                self.store.purge(job.id)
+                continue
             if job.state in ("running", "publishing"):
                 self.store.update(job, state="queued")
             elif job.state == "cancelling":
@@ -179,6 +199,27 @@ class Worker:
         self.notify()
         return job.state
 
+    def delete(self, job_id: str) -> str | None:
+        """Delete a job and all its files. None if there is no such job.
+
+        "deleted": gone now. "pending": the song is still uploading or its Pod is
+        being stopped (cancel above); it is purged as soon as that finishes.
+        """
+        job = self.store.get(job_id)
+        if job is None:
+            return None
+        self.store.tombstone(job_id).touch()
+        if job.state == "uploading":  # create_job purges it when the upload ends
+            return "pending"
+        if job.state in ("queued", "running", "publishing", "cancelling"):
+            try:
+                if self.cancel(job_id) == "cancelling":
+                    return "pending"
+            except NotImplementedError:
+                return "pending"  # this runner cannot stop it: purged when it ends
+        self.store.purge(job_id)
+        return "deleted"
+
     def _clear_cancelled_files(self, job: Job) -> None:
         shutil.rmtree(self.store.run_dir(job.id), ignore_errors=True)
         if job.filename:
@@ -193,6 +234,8 @@ class Worker:
         forget = getattr(self.runner, "forget", None)
         if callable(forget):
             forget(job.id)
+        if self.store.is_deleted(job.id):
+            self.store.purge(job.id)
 
     def _is_cancelling(self, job_id: str) -> bool:
         current = self.store.get(job_id)
@@ -242,6 +285,9 @@ class Worker:
                 self._finish_cancel(job)
             else:
                 store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc))
+        finally:
+            if store.is_deleted(job.id) and not self._is_cancelling(job.id):
+                store.purge(job.id)
 
 
 def failure_reason(run: Path, exc: Exception) -> str:

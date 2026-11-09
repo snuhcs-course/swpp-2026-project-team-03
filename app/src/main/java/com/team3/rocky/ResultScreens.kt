@@ -396,7 +396,7 @@ fun ResultScreen(
                         // 재생을 시작한 뒤에는 연주 중인 마디에 색을 칠한다.
                         val box = currentBox?.takeIf { it.page == i && duration > 0 }
                         Image(
-                            bitmap = bmp, contentDescription = "악보 ${i + 1}쪽",
+                            bitmap = bmp, contentDescription = "악보",
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier.fillMaxWidth().drawWithContent {
                                 drawContent()

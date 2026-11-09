@@ -36,6 +36,8 @@ interface ScoreServer {
         throw UnsupportedOperationException("key change is unavailable")
     fun downloadTransposed(jobId: String, semitones: Int, path: String, dest: File): Unit =
         throw UnsupportedOperationException("key change is unavailable")
+    /** 서버에 남은 작업과 결과 파일을 지운다. 이미 없으면 그대로 성공으로 본다. */
+    fun delete(jobId: String)
 }
 
 /**
@@ -122,6 +124,11 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
         c.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
         c.disconnect()
         if (!tmp.renameTo(dest)) throw IOException("could not save $dest")
+    }
+
+    override fun delete(jobId: String) {
+        val c = open("/jobs/$jobId", "DELETE")
+        if (c.responseCode == 404) c.disconnect() else c.body()  // 404 = 이미 지워짐
     }
 
     companion object {

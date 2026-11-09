@@ -28,7 +28,7 @@ class AuthRepositoryTest {
 
     @Before fun setUp() {
         db = UserDatabase(ctx, name = null)   // in-memory: the app's real DB is not touched
-        auth = AuthRepository(ctx, db)
+        auth = AuthRepository(ctx, LocalAccounts(db))
         auth.logout()
     }
 

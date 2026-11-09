@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
 
 /**
  * 기기 안의 회원 DB (SQLite, 파일 이름 rocky_users.db).
- * 서버가 생기면 회원 정보는 서버로 옮기고, 이 클래스는 같은 기능의 서버 API 호출로 바꾼다.
+ * 앱은 서버의 회원 DB([ServerAccounts])를 쓰고, 이 클래스는 서버 없이 시험할 때([LocalAccounts])만 쓴다.
  */
 class UserDatabase(context: Context, name: String? = DB_NAME) :
     SQLiteOpenHelper(context.applicationContext, name, null, VERSION) {

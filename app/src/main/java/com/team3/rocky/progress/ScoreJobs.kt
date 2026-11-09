@@ -15,6 +15,7 @@ import com.team3.rocky.server.JobCancelledException
 import com.team3.rocky.server.RockyApi
 import com.team3.rocky.server.ScoreServer
 import com.team3.rocky.server.ScoreStore
+import com.team3.rocky.server.ServerCleanup
 import com.team3.rocky.server.ServerProgress
 import com.team3.rocky.server.ServerSettings
 import kotlinx.coroutines.CancellationException
@@ -178,6 +179,8 @@ object ScoreJobs {
     fun cancel(ctx: Context, job: ScoreJob) {
         if (job.done || job.failed) {
             remove(job)
+            // 보관함에 저장하지 않은 결과는 다시 열 수 없으니 폰과 서버의 파일도 지운다 (NFR-07).
+            if (job.isServer && job.done && !job.saved) ServerCleanup.deleteWork(ctx, job.id, job.serverId)
             return
         }
         if (job.cancelling) return
