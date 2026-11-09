@@ -237,7 +237,7 @@ val TightButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
  * 제스처 막대처럼 눌러지는 시스템 영역. 이미 다른 곳에서 비켜 줬으면 다시 더하지 않는다.
  */
 val BottomSystemBars: WindowInsets
-    get() = WindowInsets.navigationBars.union(WindowInsets.tappableElement)
+    @Composable get() = WindowInsets.navigationBars.union(WindowInsets.tappableElement)
         .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
 
 /** 주요 버튼 모양 (시안 A): 알약 대신 살짝 둥근 사각형. */
