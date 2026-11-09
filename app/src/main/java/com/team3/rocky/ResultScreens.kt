@@ -285,6 +285,9 @@ fun ResultScreen(
         }
     }
 
+    // 악보 맨 아래 별점 (1~5). 품질 개선용으로 모은다.
+    var stars by remember(work.id) { mutableStateOf(RatingStore.stars(ctx, work.id)) }
+
     val sheet: @Composable (Modifier, Boolean) -> Unit = { modifier, bleed ->
         ScoreSheet(
             pages = pages, scroll = scoreScroll, zoom = zoom,
@@ -292,6 +295,8 @@ fun ResultScreen(
             fullScreen = fullScreen, onToggleFullScreen = { fullScreen = !fullScreen },
             hint = hint, onHintClick = { hint = null },
             bleed = bleed,
+            stars = stars,
+            onRate = { n -> stars = n; RatingStore.rate(ctx, work, n) },
             modifier = modifier,
         )
     }
@@ -416,6 +421,8 @@ private fun ScoreSheet(
     hint: String?,
     onHintClick: () -> Unit,
     bleed: Boolean,
+    stars: Int,
+    onRate: (Int) -> Unit,
     modifier: Modifier,
 ) {
     val currentOnZoom by rememberUpdatedState(onZoom)
@@ -461,6 +468,8 @@ private fun ScoreSheet(
                         modifier = Modifier.width(pageWidth), contentScale = ContentScale.FillWidth,
                     )
                 }
+                // 악보를 끝까지 본 다음에 평가한다.
+                RatingCard(stars, onRate, Modifier.width(maxWidth - side * 2))
             }
         }
         // 위 가운데 손잡이 (종이 느낌)
@@ -505,6 +514,42 @@ private fun ScoreSheet(
                 contentAlignment = Alignment.Center,
             ) { FullScreenGlyph(exit = fullScreen, color = Color.White) }
         }
+    }
+}
+
+/** 악보 맨 아래 별점 칸. 흰 종이 위에 놓이므로 밝은 색으로 그린다. */
+@Composable
+private fun RatingCard(stars: Int, onRate: (Int) -> Unit, modifier: Modifier) {
+    val orange = MaterialTheme.colorScheme.primary
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xFFF4F4F5))
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(tr("이 악보는 어땠나요?", "How was this score?"), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF18181B))
+        Spacer(Modifier.height(2.dp))
+        Text(
+            tr("별점은 악보를 더 정확하게 만드는 데 써요", "Your rating helps us make better scores"),
+            fontSize = 12.sp, color = Color(0xFF71717A), maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.Center) {
+            for (n in 1..5) {
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).clickable { onRate(n) }
+                        .semantics { contentDescription = tr("별 ${n}개", "$n stars") },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("★", fontSize = 32.sp, color = if (n <= stars) orange else Color(0xFFD4D4D8))
+                }
+            }
+        }
+        Text(
+            if (stars == 0) tr("별을 눌러 5점 만점으로 평가해 주세요", "Tap a star to rate out of 5")
+            else tr("${stars}점 · 고마워요! 다시 누르면 바꿀 수 있어요", "$stars / 5 · Thanks! Tap again to change"),
+            fontSize = 12.sp, color = if (stars == 0) Color(0xFF71717A) else orange,
+            fontWeight = if (stars == 0) FontWeight.Normal else FontWeight.SemiBold, maxLines = 1,
+        )
     }
 }
 
