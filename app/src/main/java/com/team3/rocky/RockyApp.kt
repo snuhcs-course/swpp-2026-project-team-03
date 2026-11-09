@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +45,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +84,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -219,18 +222,13 @@ fun RockyApp() {
               // 파이프라인 규칙: 원곡에 기타가 없으면 기타는 1대까지만 새로 만들 수 있다.
               val twoGuitarsFromNone = !originalUnknown && original.isNotEmpty() &&
                   Demo.guitarCount(original) == 0 && Demo.guitarCount(lineup) == 2
-              LineupScreen(
-                title = tr("원곡 악기", "Song's instruments"),
-                heading = tr("곡에 나오는 악기", "In the song"),
-                sub = tr(
-                    "올린 곡에서 들리는 악기만 고르세요.",
-                    "Pick what you hear in the song.",
-                ),
+              OriginalScreen(
+                songTitle = s.title,
+                songSub = s.audio?.fileName ?: tr("데모 곡", "Demo song"),
                 selected = original,
                 onToggle = { i -> original = Demo.toggleLineup(original, i); originalUnknown = false },
                 onGuitars = { n -> original = Demo.setGuitarCount(original, n); originalUnknown = false },
                 onBack = { back() },
-                nextLabel = tr("악보 만들기 시작", "Make my scores"),
                 canNext = (original.isNotEmpty() || originalUnknown) && !twoGuitarsFromNone,
                 unknown = originalUnknown,
                 onUnknown = { originalUnknown = !originalUnknown; if (originalUnknown) original = emptySet() },
@@ -244,9 +242,7 @@ fun RockyApp() {
                             ),
                             strong = true,
                         )
-                        originalUnknown -> InfoNote(
-                            tr("곡을 분석해 악기를 찾아요.", "We'll detect the instruments."),
-                        )
+                        originalUnknown -> Unit   // 밑줄 글자에 이미 "곡을 분석해 찾아요"가 있다
                         original.isNotEmpty() -> InfoNote(
                             if (ai.isEmpty()) tr("곡 그대로 악보로 옮겨요", "Scored as in the song")
                             else tr("새로 만들 파트: ", "Will add: ") +
@@ -955,7 +951,9 @@ fun LineupScreen(
 
 /**
  * 악기 칸. 누르면 켜고 끈다.
- * [onCount]가 있으면(기타) 켜졌을 때 칸 안에 − 1대 + 버튼이 나와서 대수를 바꿀 수 있다.
+ * [onCount]가 있으면(기타) 켜졌을 때 이름 아래에 − 1대 + 버튼이 나와서 대수를 바꿀 수 있다.
+ * 작은 폰에서도 잘리지 않게 이름과 대수 버튼을 다른 줄에 둔다.
+ * [onBg]·[onFg]는 켜졌을 때 색. 우리 밴드는 주황, 원곡 화면은 흰색(무채색)으로 구분한다.
  */
 @Composable
 fun InstrumentTile(
@@ -963,50 +961,144 @@ fun InstrumentTile(
     count: Int,
     modifier: Modifier,
     onCount: ((Int) -> Unit)? = null,
+    onBg: Color = MaterialTheme.colorScheme.primary,
+    onFg: Color = MaterialTheme.colorScheme.onPrimary,
     onClick: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val on = count > 0
     val shape = RoundedCornerShape(20.dp)
-    val fg = if (on) cs.onPrimary else cs.onSurface
+    val fg = if (on) onFg else cs.onSurface
     Column(
-        modifier.height(132.dp)
+        modifier.height(140.dp)
             .clip(shape)
-            .background(if (on) cs.primary else cs.surface)
-            .border(BorderStroke(2.dp, if (on) cs.primary else cs.surfaceVariant), shape)
+            .background(if (on) onBg else cs.surface)
+            .border(BorderStroke(2.dp, if (on) onBg else cs.surfaceVariant), shape)
             .clickable(onClick = onClick)
-            .padding(18.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            InstrumentIcon(inst, fg, size = 40.dp)
+            InstrumentIcon(inst, fg, size = 36.dp)
             Spacer(Modifier.weight(1f))
-            if (onCount != null && !on) Text(tr("1~2대", "1–2"), fontSize = 13.sp, color = cs.onSurfaceVariant)
+            if (onCount != null && !on) Text(tr("1~2대", "1–2"), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1)
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(Demo.kor(inst), fontSize = 19.sp, fontWeight = FontWeight.Bold, color = fg)
-            Spacer(Modifier.weight(1f))
+        Column {
+            Text(Demo.kor(inst), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
             if (onCount != null && on) {
-                StepButton("−", enabled = count > 1) { onCount(count - 1) }
-                Text(tr("${count}대", "×$count"), fontSize = 15.sp, maxLines = 1, fontWeight = FontWeight.Bold, color = fg,
-                    modifier = Modifier.padding(horizontal = 6.dp))
-                StepButton("+", enabled = count < 2) { onCount(count + 1) }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StepButton("−", enabled = count > 1, bg = onFg, fg = onBg) { onCount(count - 1) }
+                    Text(tr("${count}대", "×$count"), fontSize = 15.sp, maxLines = 1, fontWeight = FontWeight.Bold, color = fg,
+                        modifier = Modifier.padding(horizontal = 8.dp))
+                    StepButton("+", enabled = count < 2, bg = onFg, fg = onBg) { onCount(count + 1) }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun StepButton(text: String, enabled: Boolean, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
+private fun StepButton(text: String, enabled: Boolean, bg: Color, fg: Color, onClick: () -> Unit) {
     Box(
-        Modifier.size(30.dp)
+        Modifier.size(32.dp)
             .clip(androidx.compose.foundation.shape.CircleShape)
-            .background(cs.onPrimary.copy(alpha = if (enabled) 1f else 0.35f))
-            .clickable(enabled = enabled, onClick = onClick),
+            .background(bg.copy(alpha = if (enabled) 1f else 0.35f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = if (text == "+") tr("기타 늘리기", "More guitars") else tr("기타 줄이기", "Fewer guitars") },
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = cs.primary)
+        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = fg)
+    }
+}
+
+// ---------- 2-1. 원곡 악기 (곡을 올린 다음) ----------
+/**
+ * 원곡에 나오는 악기를 고르는 화면. 우리 밴드 화면과 헷갈리지 않게
+ * 맨 위에 올린 곡을 보여 주고, 선택 색을 주황 대신 흰색(무채색)으로 쓴다.
+ */
+@Composable
+fun OriginalScreen(
+    songTitle: String,
+    songSub: String,
+    selected: Set<String>,
+    unknown: Boolean,
+    onToggle: (String) -> Unit,
+    onGuitars: (Int) -> Unit,
+    onUnknown: () -> Unit,
+    onBack: () -> Unit,
+    canNext: Boolean,
+    onNext: () -> Unit,
+    footer: @Composable () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Page(tr("3 / 3단계", "Step 3 of 3"), onBack, actions = {
+        Row(Modifier.padding(end = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(3) { Box(Modifier.width(22.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(cs.onSurface)) }
+        }
+    }, bottom = {
+        Button(
+            onClick = onNext, enabled = canNext,
+            colors = ButtonDefaults.buttonColors(containerColor = cs.onSurface, contentColor = cs.surface),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+        ) { Text(tr("악보 만들기 시작", "Make my scores"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
+    }) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            // 올린 곡
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(cs.surface).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.size(38.dp).border(1.dp, cs.onSurfaceVariant, androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) { Box(Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.onSurface)) }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(tr("올린 곡", "Your song"), fontSize = 12.sp, color = cs.onSurfaceVariant)
+                    Text(songTitle, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(songSub, fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+            Text(tr("이 곡에서는\n어떤 악기가 들리나요?", "Which instruments\ndo you hear?"),
+                fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(tr("우리 밴드 말고, 곡에 나오는 악기만 골라주세요", "Not your band, only what plays in the song"),
+                color = cs.onSurfaceVariant, fontSize = 14.sp)
+            Spacer(Modifier.height(18.dp))
+            Demo.INSTRUMENTS.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { inst ->
+                        val count = if (inst == "guitar") Demo.guitarCount(selected) else if (inst in selected) 1 else 0
+                        InstrumentTile(
+                            inst, count, Modifier.weight(1f),
+                            onCount = if (inst == "guitar") onGuitars else null,
+                            onBg = cs.onSurface, onFg = cs.surface,
+                        ) { onToggle(inst) }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            // '잘 모르겠어요'는 밑줄 글자로. 고르면 위의 악기 선택이 비워진다.
+            TextButton(onClick = onUnknown, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text(
+                    if (unknown) tr("✓ 잘 모르겠어요 (곡을 분석해 찾아요)", "✓ Not sure (we'll detect them)")
+                    else tr("잘 모르겠어요, 곡을 분석해 주세요", "Not sure, detect them for me"),
+                    color = cs.onSurface, fontSize = 15.sp,
+                    fontWeight = if (unknown) FontWeight.Bold else FontWeight.Normal,
+                    textDecoration = TextDecoration.Underline,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            footer()
+            Spacer(Modifier.height(16.dp))
+        }
     }
 }
 
