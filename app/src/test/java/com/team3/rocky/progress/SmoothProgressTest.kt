@@ -42,4 +42,17 @@ class SmoothProgressTest {
         assertTrue(bar.shown <= 0.99f)
         assertEquals(1f, bar.step(JobProgress(Stage.ARRANGE, 1, 1, 0, done = true), 0.1f), 0f)
     }
+
+    @Test fun showsOnePercentAsSoonAsTheSongIsUploaded() {
+        val bar = SmoothProgress()
+        assertEquals(0, (bar.step(null, 5f) * 100).toInt())
+        bar.started()
+        // 서버의 첫 진행 상태가 오기 전에도 1%
+        assertEquals(1, (bar.step(null, 5f) * 100).toInt())
+        // 다시 불러도 이미 앞서 있으면 뒤로 가지 않는다
+        repeat(100) { bar.step(at(Stage.SEPARATE, 5, 10, 300), 1f) }
+        val before = bar.shown
+        bar.started()
+        assertEquals(before, bar.shown, 0f)
+    }
 }

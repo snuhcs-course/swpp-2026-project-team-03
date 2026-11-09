@@ -124,6 +124,7 @@ object ScoreJobs {
         job.runner = scope.launch {
             try {
                 if (job.audio == null) {
+                    job.bar.started()
                     demoSource.track(job.id.toString()).collect { job.progress = it }
                     // 데모 곡은 서버가 없으니, 실제 원곡(드럼·베이스·기타)에 없는 악기를 '있다'고 고르면
                     // 소리가 거의 없는 파트로 보고 ⚠️를 붙인다 (예: 피아노). 화면 확인용.
@@ -164,6 +165,8 @@ object ScoreJobs {
             }
         }
         job.phase = null
+        // 서버에 올라간 순간부터 1%. (올리는 중에는 '곡을 보내는 중'으로 0%)
+        job.bar.started()
         val id = job.serverId!!
         val tracker = ServerProgress(server, maxMissed = 90, onStatus = { st ->
             // 서버의 note는 영어·개발 용어일 수 있어서 보여주지 않고, 사용자가 알 것만 적는다.

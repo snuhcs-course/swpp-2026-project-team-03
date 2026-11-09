@@ -27,6 +27,9 @@ class SmoothProgress(
     /** 처음부터 다시 만들 때 0%로 되돌린다. */
     fun reset() { shown = 0f }
 
+    /** 곡이 서버에 올라가면 바로 [floor](1%)부터 보여준다. 첫 진행 상태가 오기 전에도 0%에 멈춰 보이지 않게. */
+    fun started(floor: Float = 0.01f) { shown = max(shown, floor) }
+
     /** [dtSec]초가 지났을 때 보여줄 값. */
     fun step(p: JobProgress?, dtSec: Float): Float {
         if (p == null) return shown
