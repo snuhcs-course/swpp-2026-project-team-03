@@ -143,7 +143,11 @@ fun RockyApp() {
     fun go(s: Screen) { stack.add(s) }
     fun back() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     // 로그인·로그아웃 뒤에는 이전 화면으로 돌아갈 수 없게 쌓인 화면을 비운다.
-    fun restart(s: Screen) { stack.clear(); stack.add(s) }
+    // Keep the navigation stack nonempty while Compose observes each update.
+    fun restart(s: Screen) {
+        stack.add(s)
+        while (stack.size > 1) stack.removeAt(0)
+    }
     fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main) }
     fun newScore(preset: Set<String>) { lineup = preset; go(Screen.Lineup) }
     fun openTab(t: Tab) { tab = t; restart(Screen.Main) }
