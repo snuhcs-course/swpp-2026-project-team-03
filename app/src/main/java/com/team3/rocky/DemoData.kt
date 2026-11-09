@@ -88,6 +88,22 @@ object Demo {
     }
 
     /** 원곡에 없어서 AI가 새로 만드는 파트. 원곡 구성을 모르면 데모 곡 기준으로 본다. */
+    /**
+     * 사용자가 '원곡에 있다'고 골랐는데 ROCKY가 원곡에서 그 악기를 찾지 못한 파트 → 결과 화면에 ⚠️ 표시.
+     * [claimed]가 비어 있으면('잘 모르겠어요') 표시하지 않는다.
+     * 서버가 undetected_parts를 따로 보내면 그것을 쓰고, 아니면 고른 것 중 [detected]에 없는 것으로 본다.
+     * [detected]도 비어 있으면(서버가 판단 결과를 주지 않음) 아무것도 표시하지 않는다.
+     */
+    fun unrecognized(
+        lineup: List<String>, claimed: List<String>, detected: List<String>, reported: List<String> = emptyList(),
+    ): List<String> {
+        if (claimed.isEmpty() || (detected.isEmpty() && reported.isEmpty())) return emptyList()
+        val missing = (if (reported.isNotEmpty()) reported else claimed.filter { it !in detected })
+            .filter { it in INSTRUMENTS }.toMutableSet()
+        if ("guitar" in missing && GUITAR2 in lineup && GUITAR2 in claimed) missing += GUITAR2
+        return ordered(missing.filter { it in lineup && it in claimed })
+    }
+
     fun aiGenerated(lineup: List<String>, original: List<String>): Set<String> =
         if (original.isEmpty()) lineup.filter { it in LEGACY_AI_GENERATED }.toSet()
         else lineup.filter { it !in original }.toSet()
@@ -139,8 +155,10 @@ data class Work(
     val instruments: List<String>,
     val date: String,
     val original: List<String> = emptyList(),
+    /** 원곡에 있다고 골랐지만 원곡에서 찾지 못한 파트 (⚠️) */
+    val unrecognized: List<String> = emptyList(),
 ) {
-    val aiGenerated: Set<String> get() = Demo.aiGenerated(instruments, original)
+    val aiGenerated: Set<String> get() = Demo.aiGenerated(instruments, original) - unrecognized.toSet()
 }
 
 object WorkStore {
@@ -160,6 +178,7 @@ object WorkStore {
                 instruments = p[2].split(",").filter { it.isNotBlank() },
                 date = p[3],
                 original = p.getOrNull(4).orEmpty().split(",").filter { it.isNotBlank() },
+                unrecognized = p.getOrNull(5).orEmpty().split(",").filter { it.isNotBlank() },
             )
         }
     }
@@ -174,7 +193,8 @@ object WorkStore {
     private fun save(ctx: Context, list: List<Work>) {
         val raw = list.joinToString("\n") {
             val title = it.title.replace("\t", " ").replace("\n", " ")
-            "${it.id}\t$title\t${it.instruments.joinToString(",")}\t${it.date}\t${it.original.joinToString(",")}"
+            "${it.id}\t$title\t${it.instruments.joinToString(",")}\t${it.date}\t${it.original.joinToString(",")}" +
+                "\t${it.unrecognized.joinToString(",")}"
         }
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(key(ctx), raw).apply()
     }

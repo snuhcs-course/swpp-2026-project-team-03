@@ -95,6 +95,16 @@ fun ResultScreen(
     val scope = rememberCoroutineScope()
     var saved by remember { mutableStateOf(WorkStore.load(ctx).any { it.id == work.id }) }
     val ai = work.aiGenerated
+    // 원곡에 있다고 골랐지만 원곡에서 찾지 못한 파트. 칩을 누르면 무슨 뜻인지 3초 동안 보여준다.
+    val warn = work.unrecognized.toSet()
+    var hint by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(hint) {
+        if (hint != null) { kotlinx.coroutines.delay(3000); hint = null }
+    }
+    fun warnText(inst: String) = Demo.label(inst, work.instruments).let { name ->
+        tr("⚠️ 원곡에서 $name 소리를 찾지 못했어요. 악보가 비어 있거나 부정확할 수 있어요",
+            "⚠️ We couldn't hear the $name in the original. This score may be empty or inaccurate")
+    }
     // 서버에서 만든 악보면 폰에 받아 둔 PDF·MIDI를, 아니면 데모 파일(assets/demo)을 쓴다.
     val local = remember(work.id) { ScoreStore.load(ctx, work.id) }
     // 서버 결과는 기타 2를 따로 가질 수 있어서 파트 이름 그대로, 데모는 파일 이름(assetBase)으로.
@@ -217,8 +227,22 @@ fun ResultScreen(
                 fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (ai.isNotEmpty()) {
-                Text(tr("✨ AI가 만든 파트", "✨ Made by AI"), fontSize = 12.sp, color = cs.secondary, maxLines = 1)
+            // ✨·⚠️ 설명도 한 줄로. 둘 다 있으면 짧게 줄인다. 누르면 ⚠️ 뜻을 보여준다.
+            val legend = listOfNotNull(
+                if (ai.isEmpty()) null
+                else if (warn.isEmpty()) tr("✨ AI가 만든 파트", "✨ Made by AI") else tr("✨ AI 생성", "✨ AI"),
+                if (warn.isEmpty()) null else tr("⚠️ 원곡에서 못 찾음", "⚠️ Not heard"),
+            ).joinToString("  ")
+            if (legend.isNotEmpty()) {
+                Text(
+                    legend, fontSize = 12.sp, color = cs.secondary, maxLines = 1,
+                    modifier = Modifier.clickable(enabled = warn.isNotEmpty()) {
+                        hint = tr(
+                            "⚠️ 원곡에 있다고 고른 악기인데, 원곡에서 소리를 찾지 못했어요",
+                            "⚠️ You said the song has this instrument, but we couldn't hear it",
+                        )
+                    },
+                )
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -228,10 +252,18 @@ fun ResultScreen(
         ) {
             PartChip(null, tr("전체", "All"), selectedPart == null, ai = false) { selectPart(null) }
             work.instruments.forEach { inst ->
+                val mark = when {
+                    inst in warn -> "⚠️ "
+                    inst in ai -> "✨ "
+                    else -> ""
+                }
                 PartChip(
-                    inst, (if (inst in ai) "✨ " else "") + Demo.label(inst, work.instruments),
-                    selectedPart == inst, ai = inst in ai,
-                ) { selectPart(inst) }
+                    inst, mark + Demo.label(inst, work.instruments),
+                    selectedPart == inst, ai = inst in ai, warn = inst in warn,
+                ) {
+                    selectPart(inst)
+                    if (inst in warn) hint = warnText(inst)
+                }
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -310,6 +342,17 @@ fun ResultScreen(
                     }
                 }
             }
+            // ⚠️ 뜻 안내. 악보 위에 잠깐 떠 있다가 3초 뒤 사라진다 (눌러도 닫힘).
+            hint?.let { text ->
+                Text(
+                    text, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFFF2F2F2), maxLines = 2,
+                    modifier = Modifier.padding(10.dp).fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xF02A2A33))
+                        .clickable { hint = null }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                )
+            }
         }
         // 밴드 곡이 아니면 결과가 좋지 않을 수 있다는 것을 작게 알린다.
         Text(
@@ -322,7 +365,9 @@ fun ResultScreen(
 
 /** 파트 고르기 칸. 악기 그림 + 이름 한 줄. [inst]가 null이면 '전체'. */
 @Composable
-private fun PartChip(inst: String?, text: String, selected: Boolean, ai: Boolean, onClick: () -> Unit) {
+private fun PartChip(
+    inst: String?, text: String, selected: Boolean, ai: Boolean, warn: Boolean = false, onClick: () -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
     val fg = if (selected) cs.onPrimary else if (ai) cs.secondary else cs.onSurface
     Row(
@@ -331,6 +376,7 @@ private fun PartChip(inst: String?, text: String, selected: Boolean, ai: Boolean
             .background(
                 when {
                     selected -> cs.primary
+                    warn -> cs.error.copy(alpha = 0.16f)
                     ai -> cs.secondary.copy(alpha = 0.18f)
                     else -> cs.surface
                 },
@@ -461,7 +507,8 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
                     InstrumentIcon(inst, cs.primary, size = 18.dp)
                     Spacer(Modifier.width(6.dp))
                     Text(Demo.label(inst, work.instruments), fontWeight = FontWeight.Bold, color = cs.primary, fontSize = 14.sp)
-                    if (inst in work.aiGenerated) Text("  ✨ " + tr("AI가 만든 파트", "Made by AI"), fontSize = 12.sp, color = cs.secondary)
+                    if (inst in work.unrecognized) Text("  ⚠️ " + tr("원곡에서 못 찾음", "Not heard in the song"), fontSize = 12.sp, color = cs.secondary)
+                    else if (inst in work.aiGenerated) Text("  ✨ " + tr("AI가 만든 파트", "Made by AI"), fontSize = 12.sp, color = cs.secondary)
                 }
                 Spacer(Modifier.height(6.dp))
                 items.forEach { ExportRow(it, checked) }

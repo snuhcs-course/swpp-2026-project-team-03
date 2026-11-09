@@ -38,6 +38,8 @@ data class JobResult(
     val originalParts: List<String>,
     /** 원곡에 없어서 MIDI-GPT가 새로 만든 악기 → 결과 화면에 'AI 생성' 표시 */
     val generatedParts: List<String>,
+    /** 사용자가 원곡에 있다고 했지만 원곡에서 찾지 못한 악기 (서버가 보내 줄 때만) → ⚠️ 표시 */
+    val undetectedParts: List<String> = emptyList(),
 )
 
 object ApiJson {
@@ -66,6 +68,7 @@ object ApiJson {
             instruments = inst.keys().asSequence().associateWith { part(inst.getJSONObject(it)) },
             originalParts = o.strings("original_parts"),
             generatedParts = o.strings("generated_parts"),
+            undetectedParts = o.strings("undetected_parts"),
         )
     }
 

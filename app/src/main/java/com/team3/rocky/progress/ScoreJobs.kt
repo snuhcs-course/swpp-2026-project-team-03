@@ -54,6 +54,11 @@ class ScoreJob(
     /** 업로드 중 같은 진행률이 없는 단계 안내 */
     var phase by mutableStateOf<String?>(null)
         internal set
+    /** 사용자가 고른 원곡 구성 그대로 (비어 있으면 '잘 모르겠어요'). ⚠️ 판단에 쓴다. */
+    val claimed: List<String> = original
+    /** 원곡에 있다고 골랐지만 원곡에서 찾지 못한 파트 (⚠️) */
+    var unrecognized by mutableStateOf<List<String>>(emptyList())
+        internal set
     /** 서버 작업 번호. 업로드가 끝나면 생긴다 */
     internal var serverId: String? = null
     internal var runner: Job? = null
@@ -71,6 +76,7 @@ class ScoreJob(
         id = id, title = title, instruments = lineup,
         date = SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.KOREA).format(Date(id)),
         original = original,
+        unrecognized = unrecognized,
     )
 }
 
@@ -121,6 +127,8 @@ object ScoreJobs {
             try {
                 if (job.audio == null) {
                     demoSource.track(job.id.toString()).collect { job.progress = it }
+                    // 데모 곡의 실제 원곡 구성과 비교해 ⚠️를 정한다 (예: 피아노가 원곡에 있다고 고르면 ⚠️).
+                    job.unrecognized = Demo.unrecognized(job.lineup, job.claimed, Demo.DEMO_ORIGINAL)
                 } else {
                     runOnServer(app, job, job.audio)
                 }
@@ -175,9 +183,16 @@ object ScoreJobs {
         }
         job.phase = tr("완성된 악보를 받는 중", "Downloading your scores")
         val local = withContext(Dispatchers.IO) { ScoreStore.download(app, server, id, job.id) }
-        job.original = originalFromServer(
-            job.lineup, local.result.originalParts,
-            generated = local.result.generatedParts, resultParts = local.result.instruments.keys,
+        val missing = Demo.unrecognized(
+            job.lineup, job.claimed, local.result.originalParts, reported = local.result.undetectedParts,
+        ).filter { it !in local.result.generatedParts }
+        job.unrecognized = missing
+        // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮기려던 파트이므로 ✨ 대상에서 뺀다.
+        job.original = Demo.ordered(
+            originalFromServer(
+                job.lineup, local.result.originalParts,
+                generated = local.result.generatedParts, resultParts = local.result.instruments.keys,
+            ) + missing,
         )
         job.phase = null
         job.progress = JobProgress(Stage.ARRANGE, 1, 1, 0, done = true)
