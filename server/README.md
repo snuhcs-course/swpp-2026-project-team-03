@@ -16,6 +16,9 @@ laptop logged in with kubectl, creates them, waits out the GPU quota, watches th
 reports the result through `/agent/*` and deletes them. Step-by-step deployment in
 Korean: `DEPLOY_ko.md`.
 
+For Android Emulator verification of alphaTab, cancellation, and key changes,
+see `EMULATOR_TEST_ko.md`.
+
 The API pod has no GPU, so the 30-minute idle-GPU rule does not apply to it.
 A GPU is used only while a song's GPU Pod runs. `ROCKY_PARALLEL` controls how
 many songs can be in flight; the others wait in upload order. The current SGS
@@ -31,6 +34,20 @@ namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
 | `POST` | `/jobs/{id}/cancel` | Idempotently request cancellation; returns `{"id", "state"}`. A queued song becomes `cancelled` immediately. An active song becomes `cancelling` until the agent confirms its Pod has been deleted, then becomes `cancelled`. Completed songs remain complete. |
 | `GET` | `/jobs/{id}/result` | `full_band` and `instruments.<part>` with `pdf`, `midi`, `pages`; `original_parts`, `generated_parts` |
 | `GET` | `/jobs/{id}/files/{path}` | one file listed in the result (nothing else on the volume) |
+| `POST` | `/jobs/{id}/transpositions/{semitones}` | Render a completed score at an absolute offset from the original key (`-12` through `12`); returns the same band/part result shape. Zero returns the original. |
+| `GET` | `/jobs/{id}/transpositions/{semitones}/result` | Read an already rendered offset. |
+| `GET` | `/jobs/{id}/transpositions/{semitones}/files/{path}` | Download a PDF, MIDI or MP3 from that offset. |
+
+Key changes run in a CPU Pod. `transpose_scores.py` shifts pitched MIDI notes and
+the guitar/bass GP5 notes; drum hits and timing stay fixed. If an open low string
+cannot sound the requested lower pitch on the original tuning, its GP5 track is
+retuned by the same interval so the TAB remains playable. The script then calls
+the existing `publish_scores.py` to regenerate all band and part PDFs/MP3s.
+Original files stay intact under the completed run; variants are under
+`transpositions/{+n|-n}`. The app downloads a complete variant before making it
+active in its private score folder. Rendering needs the laptop agent, the
+completed run on the shared volume, and the same CPU renderer dependencies as
+normal score publishing.
 
 When `ROCKY_API_KEY` is set, every request except `/health` needs the header
 `X-Rocky-Key`. Interactive docs: `/docs`.

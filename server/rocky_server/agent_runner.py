@@ -118,6 +118,10 @@ class AgentRunner:
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run(job_id, "pdf", self.builder.pdf_pod(job_id, run), log, note)
 
+    def run_transpose(self, job_id: str, source: Path, target: Path, semitones: int,
+                      log: Path, note=lambda _msg: None) -> None:
+        self._run(job_id, "transpose", self.builder.transpose_pod(job_id, source, target, semitones), log, note)
+
     # ---- called through the API by the agent ----
     def next_request(self, agent: str) -> dict | None:
         """Give the oldest request nobody (alive) is handling to this agent."""

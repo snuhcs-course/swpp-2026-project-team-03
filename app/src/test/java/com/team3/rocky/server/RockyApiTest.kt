@@ -19,17 +19,21 @@ class RockyApiTest {
     private var lastBody = ""
     private var lastKey: String? = null
     private var lastType: String? = null
+    private var lastMethod: String? = null
 
     @Before fun start() {
         http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         http.createContext("/") { ex ->
             lastKey = ex.requestHeaders.getFirst("X-Rocky-Key")
             lastType = ex.requestHeaders.getFirst("Content-Type")
+            lastMethod = ex.requestMethod
             lastBody = ex.requestBody.readBytes().toString(Charsets.UTF_8)
             val (code, body) = when (ex.requestURI.path) {
                 "/jobs" -> 201 to """{"id":"abc123abc123","state":"queued"}"""
                 "/jobs/abc123abc123" -> 200 to """{"id":"abc123abc123","state":"running","stage":"BEATS","completed":0,"total":1}"""
                 "/jobs/abc123abc123/files/scores/full_band.pdf" -> 200 to "%PDF-1.4 fake"
+                "/jobs/abc123abc123/transpositions/-1" -> 200 to """{"id":"abc123abc123","title":"Song","full_band":{"pdf":"scores/full_band.pdf"},"instruments":{}}"""
+                "/jobs/abc123abc123/transpositions/-1/files/scores/full_band.pdf" -> 200 to "%PDF-1.4 shifted"
                 else -> 404 to """{"detail":"no such job"}"""
             }
             val bytes = body.toByteArray()
@@ -81,6 +85,15 @@ class RockyApiTest {
         val dest = tmp.root.resolve("scores/full_band.pdf")
         api().download("abc123abc123", "scores/full_band.pdf", dest)
         assertEquals("%PDF-1.4 fake", dest.readText())
+    }
+
+    @Test fun transposeAndDownloadShiftedScore() {
+        val result = api().transpose("abc123abc123", -1)
+        assertEquals("POST", lastMethod)
+        assertEquals("scores/full_band.pdf", result.fullBand.pdf)
+        val dest = tmp.root.resolve("transposed/full_band.pdf")
+        api().downloadTransposed("abc123abc123", -1, result.fullBand.pdf, dest)
+        assertEquals("%PDF-1.4 shifted", dest.readText())
     }
 
     @Test fun healthIsFalseWhenNothingListens() {

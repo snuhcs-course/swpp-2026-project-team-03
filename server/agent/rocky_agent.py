@@ -44,12 +44,21 @@ class PodCancellationRequested(Exception):
 
 
 def say(msg: str) -> None:
-    print(time.strftime("%H:%M:%S"), msg, flush=True)
+    line = f"{time.strftime('%H:%M:%S')} {msg}"
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        # Windows consoles may still use cp949 even when the source is UTF-8.
+        encoding = sys.stdout.encoding or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding), flush=True)
 
 
 class Api:
     def __init__(self, base: str, key: str, agent: str) -> None:
         self.base, self.key, self.agent = base.rstrip("/"), key, agent
+        host = urllib.parse.urlparse(self.base).hostname
+        self.opener = (urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                       if host in ("localhost", "127.0.0.1") else urllib.request.build_opener())
 
     def call(self, method: str, path: str, body: dict | None = None):
         data = None if body is None else json.dumps(body).encode()
@@ -57,7 +66,7 @@ class Api:
         req.add_header("Content-Type", "application/json")
         if self.key:
             req.add_header("X-Rocky-Key", self.key)
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with self.opener.open(req, timeout=20) as resp:
             text = resp.read().decode()
             return resp.status, (json.loads(text) if text else None)
 

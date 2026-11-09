@@ -57,6 +57,11 @@ class SubprocessRunner:
         self.pdf_cmd = os.environ.get(
             "ROCKY_PDF_CMD",
             "/data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py {run}")
+        self.transpose_cmd = os.environ.get(
+            "ROCKY_TRANSPOSE_CMD",
+            "/data/rocky-unified/.venv/bin/python /data/server/rocky_server/transpose_scores.py "
+            "{audio} {run} {requested} && "
+            "/data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py {run}")
 
     def cancel(self, job_id: str) -> None:
         with self.lock:
@@ -97,6 +102,10 @@ class SubprocessRunner:
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run(job_id, self.pdf_cmd, run, run, "", log)
+
+    def run_transpose(self, job_id: str, source: Path, target: Path, semitones: int,
+                      log: Path, note=lambda _msg: None) -> None:
+        self._run(job_id, self.transpose_cmd, source, target, str(semitones), log)
 
 
 class KubernetesRunner:
@@ -198,6 +207,24 @@ class KubernetesRunner:
         return self._pod(f"rocky-pdf-{job_id}", self.pdf_image, script, {"ROCKY_OUTPUT_DIR": str(run)},
                          {"cpu": "4", "memory": "8Gi"}, working_dir="/data/rocky-unified/ml/gp5_to_pdf")
 
+    def transpose_pod(self, job_id: str, source: Path, target: Path, semitones: int):
+        script = "\n".join([
+            "set -euo pipefail",
+            "export DEBIAN_FRONTEND=noninteractive QT_QPA_PLATFORM=offscreen",
+            "export XDG_RUNTIME_DIR=/tmp/rocky-qt-runtime",
+            'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"',
+            "apt-get -o Acquire::Retries=5 update -qq",
+            "apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils",
+            '/data/rocky-unified/.venv/bin/python /data/server/rocky_server/transpose_scores.py '
+            '"$ROCKY_SOURCE_DIR" "$ROCKY_OUTPUT_DIR" "$ROCKY_SEMITONES"',
+            '/data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py "$ROCKY_OUTPUT_DIR" '
+            "--musescore musescore3 --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js",
+        ])
+        env = {"ROCKY_SOURCE_DIR": str(source), "ROCKY_OUTPUT_DIR": str(target),
+               "ROCKY_SEMITONES": str(semitones)}
+        return self._pod(f"rocky-transpose-{job_id}", self.pdf_image, script, env,
+                         {"cpu": "4", "memory": "8Gi"}, working_dir="/data/rocky-unified/ml/gp5_to_pdf")
+
     # ---- running ----
     def _create(self, pod, note) -> None:
         """Create the Pod; while the GPU quota is taken, wait and retry."""
@@ -274,6 +301,10 @@ class KubernetesRunner:
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run_pod(self.pdf_pod(job_id, run), log, note)
+
+    def run_transpose(self, job_id: str, source: Path, target: Path, semitones: int,
+                      log: Path, note=lambda _msg: None) -> None:
+        self._run_pod(self.transpose_pod(job_id, source, target, semitones), log, note)
 
 
 def make_runner(kind: str):
