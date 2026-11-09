@@ -179,6 +179,8 @@ def result_files(run: Path) -> dict:
         "instruments": parts,
         "original_parts": manifest.get("original_parts", []),
         "generated_parts": manifest.get("generated_targets", []),
+        # Declared parts whose stem barely sounds (note gate "faint"); the app marks them with a warning.
+        "faint_parts": manifest.get("faint_parts", []),
     }
 
 

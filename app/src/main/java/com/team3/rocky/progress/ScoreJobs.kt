@@ -56,14 +56,12 @@ class ScoreJob(
         internal set
     /** 사용자가 고른 원곡 구성 그대로 (비어 있으면 '잘 모르겠어요'). ⚠️ 판단에 쓴다. */
     val claimed: List<String> = original
-    /** 원곡에 있다고 골랐지만 원곡에서 찾지 못한 파트 (⚠️) */
+    /** 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트 (⚠️) */
     var unrecognized by mutableStateOf<List<String>>(emptyList())
         internal set
     /** 서버 작업 번호. 업로드가 끝나면 생긴다 */
     internal var serverId: String? = null
     internal var runner: Job? = null
-    /** 취소할 때 서버에도 알리려고 들고 있는다 */
-    internal var server: ScoreServer? = null
     /** 화면의 진행 막대. 서버 값이 뛰더라도 일정하게 올라가도록 따로 둔다 */
     val bar = SmoothProgress()
 
@@ -127,8 +125,11 @@ object ScoreJobs {
             try {
                 if (job.audio == null) {
                     demoSource.track(job.id.toString()).collect { job.progress = it }
-                    // 데모 곡의 실제 원곡 구성과 비교해 ⚠️를 정한다 (예: 피아노가 원곡에 있다고 고르면 ⚠️).
-                    job.unrecognized = Demo.unrecognized(job.lineup, job.claimed, Demo.DEMO_ORIGINAL)
+                    // 데모 곡은 서버가 없으니, 실제 원곡(드럼·베이스·기타)에 없는 악기를 '있다'고 고르면
+                    // 소리가 거의 없는 파트로 보고 ⚠️를 붙인다 (예: 피아노). 화면 확인용.
+                    job.unrecognized = Demo.faintParts(
+                        job.lineup, job.claimed, job.claimed.filter { it !in Demo.DEMO_ORIGINAL },
+                    )
                 } else {
                     runOnServer(app, job, job.audio)
                 }
@@ -148,7 +149,6 @@ object ScoreJobs {
 
     private suspend fun runOnServer(app: Context, job: ScoreJob, audio: AudioFile) {
         val server = serverFactory(app)
-        job.server = server
         if (job.serverId == null) {
             if (!ServerSettings.isConfigured(app)) throw IOException("no server address")
             job.phase = tr("곡을 보내는 중", "Sending your song")
@@ -183,16 +183,15 @@ object ScoreJobs {
         }
         job.phase = tr("완성된 악보를 받는 중", "Downloading your scores")
         val local = withContext(Dispatchers.IO) { ScoreStore.download(app, server, id, job.id) }
-        val missing = Demo.unrecognized(
-            job.lineup, job.claimed, local.result.originalParts, reported = local.result.undetectedParts,
-        ).filter { it !in local.result.generatedParts }
-        job.unrecognized = missing
-        // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮기려던 파트이므로 ✨ 대상에서 뺀다.
+        val faint = Demo.faintParts(job.lineup, job.claimed, local.result.faintParts)
+            .filter { it !in local.result.generatedParts }
+        job.unrecognized = faint
+        // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮긴 파트이므로 ✨ 대상에서 뺀다.
         job.original = Demo.ordered(
             originalFromServer(
                 job.lineup, local.result.originalParts,
                 generated = local.result.generatedParts, resultParts = local.result.instruments.keys,
-            ) + missing,
+            ) + faint,
         )
         job.phase = null
         job.progress = JobProgress(Stage.ARRANGE, 1, 1, 0, done = true)
@@ -200,15 +199,13 @@ object ScoreJobs {
 
     fun find(id: Long) = jobs.firstOrNull { it.id == id }
 
-    /** 목록에서 지운다. 아직 만드는 중이면 취소하고, 서버에도 멈추라고 알린다(다음 곡이 기다리지 않게). */
+    /**
+     * 목록에서 지운다. 아직 만드는 중이면 취소한다.
+     * 서버 작업까지 멈추는 취소는 feat/cancel-score-jobs(재욱, POST /jobs/{id}/cancel)에서 들어온다.
+     */
     fun remove(job: ScoreJob) {
         job.runner?.cancel()
         jobs.remove(job)
-        val id = job.serverId
-        val server = job.server
-        if (id != null && server != null && !job.done && !job.failed) {
-            scope.launch(Dispatchers.IO) { runCatching { server.cancel(id) } }
-        }
     }
 
     /** 로그아웃하면 다른 회원에게 보이지 않게 비운다. */

@@ -1,3 +1,5 @@
+import json
+
 from rocky_server.progress import (allowed_paths, current_app_stage, overall_fraction, result_files,
                                   run_progress)
 
@@ -58,7 +60,16 @@ def test_result_lists_pdf_and_midi_per_part(tmp_path):
     assert r["full_band"]["mp3"] == "scores/band.mp3"
     assert r["instruments"]["piano"]["midi"] == "scores/piano.mid"
     assert r["generated_parts"] == ["piano"]
+    assert r["faint_parts"] == []
     assert "manifest.json" not in allowed_paths(r)
+
+
+def test_result_passes_faint_parts_to_the_app(tmp_path):
+    write_outputs(tmp_path)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["faint_parts"] = ["bass"]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert result_files(tmp_path)["faint_parts"] == ["bass"]
 
 
 def test_arrange_progress_moves_forward_and_ends_at_100(tmp_path):

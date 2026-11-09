@@ -89,19 +89,16 @@ object Demo {
 
     /** 원곡에 없어서 AI가 새로 만드는 파트. 원곡 구성을 모르면 데모 곡 기준으로 본다. */
     /**
-     * 사용자가 '원곡에 있다'고 골랐는데 ROCKY가 원곡에서 그 악기를 찾지 못한 파트 → 결과 화면에 ⚠️ 표시.
-     * [claimed]가 비어 있으면('잘 모르겠어요') 표시하지 않는다.
-     * 서버가 undetected_parts를 따로 보내면 그것을 쓰고, 아니면 고른 것 중 [detected]에 없는 것으로 본다.
-     * [detected]도 비어 있으면(서버가 판단 결과를 주지 않음) 아무것도 표시하지 않는다.
+     * ⚠️ 표시할 파트: 사용자가 '원곡에 있다'고 골랐는데 원곡에서 소리가 거의 들리지 않은 악기.
+     * 서버(파이프라인 note gate)가 [faint]로 알려 준다. 악보는 나오지만 음이 아주 적을 수 있다.
+     * '잘 모르겠어요'([claimed]가 비어 있음)면 그런 악기는 원곡에 없는 것으로 처리되므로 표시하지 않는다.
+     * 기타가 약하면 우리 밴드의 기타 2도 같은 원곡 기타에서 나오므로 함께 표시한다.
      */
-    fun unrecognized(
-        lineup: List<String>, claimed: List<String>, detected: List<String>, reported: List<String> = emptyList(),
-    ): List<String> {
-        if (claimed.isEmpty() || (detected.isEmpty() && reported.isEmpty())) return emptyList()
-        val missing = (if (reported.isNotEmpty()) reported else claimed.filter { it !in detected })
-            .filter { it in INSTRUMENTS }.toMutableSet()
-        if ("guitar" in missing && GUITAR2 in lineup && GUITAR2 in claimed) missing += GUITAR2
-        return ordered(missing.filter { it in lineup && it in claimed })
+    fun faintParts(lineup: List<String>, claimed: List<String>, faint: List<String>): List<String> {
+        if (claimed.isEmpty()) return emptyList()
+        val set = faint.filter { it in INSTRUMENTS }.toMutableSet()
+        if ("guitar" in set && GUITAR2 in lineup && GUITAR2 in claimed) set += GUITAR2
+        return ordered(set.filter { it in lineup && it in claimed })
     }
 
     fun aiGenerated(lineup: List<String>, original: List<String>): Set<String> =
@@ -155,7 +152,7 @@ data class Work(
     val instruments: List<String>,
     val date: String,
     val original: List<String> = emptyList(),
-    /** 원곡에 있다고 골랐지만 원곡에서 찾지 못한 파트 (⚠️) */
+    /** 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트 (⚠️) */
     val unrecognized: List<String> = emptyList(),
 ) {
     val aiGenerated: Set<String> get() = Demo.aiGenerated(instruments, original) - unrecognized.toSet()

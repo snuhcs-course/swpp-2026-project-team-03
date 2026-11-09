@@ -29,12 +29,6 @@ interface ScoreServer {
     fun status(jobId: String): JobStatus
     fun result(jobId: String): JobResult
     fun download(jobId: String, path: String, dest: File)
-
-    /**
-     * 서버에서 돌고 있는 작업을 멈춘다. 서버에 아직 이 기능이 없으면(404·405) 그냥 넘어간다.
-     * 기본은 아무것도 하지 않아서, 테스트용 가짜 서버는 따로 만들지 않아도 된다.
-     */
-    fun cancel(jobId: String) {}
 }
 
 /**
@@ -100,17 +94,6 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
     override fun status(jobId: String): JobStatus = ApiJson.status(open("/jobs/$jobId").body())
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
-
-    /** DELETE /jobs/{id}. 서버 쪽 취소 기능과 주소를 맞춰야 한다. */
-    override fun cancel(jobId: String) {
-        val c = open("/jobs/$jobId", "DELETE", readTimeoutMs = 10_000)
-        try {
-            val code = c.responseCode
-            if (code !in 200..299 && code != 404 && code != 405) throw ApiException(code, "HTTP $code")
-        } finally {
-            c.disconnect()
-        }
-    }
 
     override fun download(jobId: String, path: String, dest: File) {
         val c = open("/jobs/$jobId/files/$path", readTimeoutMs = 60_000)

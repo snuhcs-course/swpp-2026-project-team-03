@@ -95,15 +95,15 @@ fun ResultScreen(
     val scope = rememberCoroutineScope()
     var saved by remember { mutableStateOf(WorkStore.load(ctx).any { it.id == work.id }) }
     val ai = work.aiGenerated
-    // 원곡에 있다고 골랐지만 원곡에서 찾지 못한 파트. 칩을 누르면 무슨 뜻인지 3초 동안 보여준다.
+    // 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트. 칩을 누르면 무슨 뜻인지 3초 동안 보여준다.
     val warn = work.unrecognized.toSet()
     var hint by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(hint) {
         if (hint != null) { kotlinx.coroutines.delay(3000); hint = null }
     }
     fun warnText(inst: String) = Demo.label(inst, work.instruments).let { name ->
-        tr("⚠️ 원곡에서 $name 소리를 찾지 못했어요. 악보가 비어 있거나 부정확할 수 있어요",
-            "⚠️ We couldn't hear the $name in the original. This score may be empty or inaccurate")
+        tr("⚠️ 원곡에서 $name 소리가 거의 들리지 않았어요. 악보에 음이 아주 적을 수 있어요",
+            "⚠️ The $name was barely audible in the song. This score may have very few notes")
     }
     // 서버에서 만든 악보면 폰에 받아 둔 PDF·MIDI를, 아니면 데모 파일(assets/demo)을 쓴다.
     val local = remember(work.id) { ScoreStore.load(ctx, work.id) }
@@ -231,15 +231,15 @@ fun ResultScreen(
             val legend = listOfNotNull(
                 if (ai.isEmpty()) null
                 else if (warn.isEmpty()) tr("✨ AI가 만든 파트", "✨ Made by AI") else tr("✨ AI 생성", "✨ AI"),
-                if (warn.isEmpty()) null else tr("⚠️ 원곡에서 못 찾음", "⚠️ Not heard"),
+                if (warn.isEmpty()) null else tr("⚠️ 소리가 거의 없음", "⚠️ Barely audible"),
             ).joinToString("  ")
             if (legend.isNotEmpty()) {
                 Text(
                     legend, fontSize = 12.sp, color = cs.secondary, maxLines = 1,
                     modifier = Modifier.clickable(enabled = warn.isNotEmpty()) {
                         hint = tr(
-                            "⚠️ 원곡에 있다고 고른 악기인데, 원곡에서 소리를 찾지 못했어요",
-                            "⚠️ You said the song has this instrument, but we couldn't hear it",
+                            "⚠️ 원곡에 있다고 고른 악기인데, 원곡에서 소리가 거의 들리지 않았어요",
+                            "⚠️ You said the song has this instrument, but it was barely audible",
                         )
                     },
                 )
@@ -507,7 +507,7 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
                     InstrumentIcon(inst, cs.primary, size = 18.dp)
                     Spacer(Modifier.width(6.dp))
                     Text(Demo.label(inst, work.instruments), fontWeight = FontWeight.Bold, color = cs.primary, fontSize = 14.sp)
-                    if (inst in work.unrecognized) Text("  ⚠️ " + tr("원곡에서 못 찾음", "Not heard in the song"), fontSize = 12.sp, color = cs.secondary)
+                    if (inst in work.unrecognized) Text("  ⚠️ " + tr("원곡에서 소리가 거의 없음", "Barely audible in the song"), fontSize = 12.sp, color = cs.secondary)
                     else if (inst in work.aiGenerated) Text("  ✨ " + tr("AI가 만든 파트", "Made by AI"), fontSize = 12.sp, color = cs.secondary)
                 }
                 Spacer(Modifier.height(6.dp))
