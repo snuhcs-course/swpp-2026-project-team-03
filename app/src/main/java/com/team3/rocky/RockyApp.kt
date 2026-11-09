@@ -588,8 +588,6 @@ fun HomeTab(
                 tr("밴드 악기로 연주한 곡이 가장 정확해요", "Songs played by a band work best"))
             TipCard(tr("원곡 악기 선택", "The song's instruments"),
                 tr("곡에서 들리는 악기를 고르면 더 정확해요", "Picking what you hear improves accuracy"))
-            TipCard(tr("파일 형식", "File type"),
-                tr("MP3·WAV 파일만 올릴 수 있어요", "Only MP3 or WAV files"))
             TipCard(tr("음질", "Audio quality"),
                 tr("음질이 좋을수록 더 정확해요", "Better audio gives better notes"))
             TipCard(tr("라이브·커버 곡", "Live and covers"),
