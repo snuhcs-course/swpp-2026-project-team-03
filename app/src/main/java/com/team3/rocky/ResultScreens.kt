@@ -1,5 +1,7 @@
 package com.team3.rocky
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.layout.layout
 import android.Manifest
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
@@ -209,9 +211,9 @@ fun ResultScreen(
             if (local != null) {
                 local.pdf(serverPart(scoreBase))
                     ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
-                    .orEmpty().map { it.asImageBitmap() }
+                    .orEmpty().map { trimMargins(it).asImageBitmap() }
             } else Assets.pages(ctx, scoreBase).mapNotNull { n ->
-                ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) }?.asImageBitmap()
+                ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) }?.let { trimMargins(it).asImageBitmap() }
             }
         }
     }
@@ -242,11 +244,12 @@ fun ResultScreen(
     // 기타가 맨 끝에 있으면 '그 밖의 것'으로 읽혀서, 다른 악기 사이에 둔다.
     val chipParts = work.instruments.sortedBy { RESULT_ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } }
 
-    val playerBar: @Composable () -> Unit = {
-        val listening = selectedPart?.let { tr("${Demo.label(it, work.instruments)}만", "${Demo.label(it, work.instruments)} only") }
-            ?: tr("밴드 전체", "Full band")
+    val playerBar: @Composable (Boolean) -> Unit = { flat ->
+        val listening = selectedPart?.let { tr("${Demo.label(it, work.instruments)}만 듣는 중", "Playing ${Demo.label(it, work.instruments)} only") }
+            ?: tr("밴드 전체 듣는 중", "Playing the full band")
         Row(
-            Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs)
+            Modifier.fillMaxWidth()
+                .then(if (flat) Modifier else Modifier.card(RoundedCornerShape(16.dp), cs))
                 .padding(start = 8.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -282,12 +285,13 @@ fun ResultScreen(
         }
     }
 
-    val sheet: @Composable (Modifier) -> Unit = { modifier ->
+    val sheet: @Composable (Modifier, Boolean) -> Unit = { modifier, bleed ->
         ScoreSheet(
             pages = pages, scroll = scoreScroll, zoom = zoom,
             onZoom = { z -> zoom = (zoom * z).coerceIn(1f, 4f) },
             fullScreen = fullScreen, onToggleFullScreen = { fullScreen = !fullScreen },
             hint = hint, onHintClick = { hint = null },
+            bleed = bleed,
             modifier = modifier,
         )
     }
@@ -295,16 +299,16 @@ fun ResultScreen(
     if (fullScreen) {
         // 전체 화면: 악보와 재생 바만. 뒤로 가기나 오른쪽 아래 버튼으로 돌아온다.
         Column(Modifier.fillMaxSize().background(cs.background).statusBarsPadding()) {
-            sheet(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp, vertical = 8.dp))
+            sheet(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp, vertical = 8.dp), false)
             Box(
                 Modifier.windowInsetsPadding(BottomSystemBars)
                     .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp),
-            ) { playerBar() }
+            ) { playerBar(false) }
         }
         return
     }
 
-    Page(work.title, onBack, bottom = playerBar, actions = {
+    Page(work.title, onBack, actions = {
         Box {
             TextButton(onClick = { menuOpen = true }) {
                 Text("⋮", fontSize = 22.sp, color = cs.onSurface,
@@ -351,35 +355,42 @@ fun ResultScreen(
             }
             Spacer(Modifier.height(8.dp))
         }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            PartChip(null, tr("전체", "All"), selectedPart == null, ai = false) { selectPart(null) }
-            chipParts.forEach { inst ->
-                val mark = when {
-                    inst in warn -> "⚠️ "
-                    inst in ai -> "✨ "
-                    else -> ""
-                }
-                PartChip(inst, mark + Demo.label(inst, work.instruments), selectedPart == inst, ai = inst in ai, warn = inst in warn) {
-                    selectPart(inst)
-                    // 표시의 뜻은 칩을 누를 때만 잠깐 보여준다.
-                    hint = when (inst) {
-                        in warn -> warnText(inst)
-                        in ai -> tr("✨ 원곡에 없어서 AI로 만든 파트예요", "✨ Not in the song, made with AI")
-                        else -> null
+        // 위: 악기 칩과 재생 바를 카드 하나로 묶는다.
+        Column(Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    .padding(start = 12.dp, end = 12.dp, top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PartChip(null, tr("전체", "All"), selectedPart == null, ai = false) { selectPart(null) }
+                chipParts.forEach { inst ->
+                    val mark = when {
+                        inst in warn -> "⚠️ "
+                        inst in ai -> "✨ "
+                        else -> ""
+                    }
+                    PartChip(inst, mark + Demo.label(inst, work.instruments), selectedPart == inst, ai = inst in ai, warn = inst in warn) {
+                        selectPart(inst)
+                        // 표시의 뜻은 칩을 누를 때만 잠깐 보여준다.
+                        hint = when (inst) {
+                            in warn -> warnText(inst)
+                            in ai -> tr("✨ 원곡에 없어서 AI로 만든 파트예요", "✨ Not in the song, made with AI")
+                            else -> null
+                        }
                     }
                 }
             }
+            HorizontalDivider(color = cs.outlineVariant, modifier = Modifier.padding(top = 12.dp))
+            Box(Modifier.padding(start = 2.dp, top = 4.dp, bottom = 4.dp)) { playerBar(true) }
         }
-        Spacer(Modifier.height(8.dp))
-        sheet(Modifier.fillMaxWidth().weight(1f))
         Text(
             tr("밴드 곡이 아니면 악보가 부정확할 수 있어요", "Less accurate for non-band songs"),
             fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
+        Spacer(Modifier.height(10.dp))
+        // 아래: 악보. 화면 양옆 끝까지, 아래에서 올라온 종이처럼.
+        sheet(Modifier.fillMaxWidth().weight(1f).bleed(20.dp), true)
     }
 }
 
@@ -391,7 +402,8 @@ private val RESULT_ORDER = listOf("drums", "guitar", Demo.GUITAR2, "bass", "pian
 
 /**
  * 악보 영역. 두 손가락으로 벌리면 확대(최대 4배), 확대하면 위아래·옆으로 넘겨 본다.
- * 오른쪽 아래 버튼으로 전체 화면을 켜고 끈다.
+ * [bleed]면 화면 양옆 끝까지 닿고 위 모서리만 둥근, 아래에서 올라온 종이 모양(결과 화면).
+ * 오른쪽 위 버튼으로 전체 화면을 켜고 끄고, 아래 가운데에 몇 쪽인지 보여준다.
  */
 @Composable
 private fun ScoreSheet(
@@ -403,14 +415,15 @@ private fun ScoreSheet(
     onToggleFullScreen: () -> Unit,
     hint: String?,
     onHintClick: () -> Unit,
+    bleed: Boolean,
     modifier: Modifier,
 ) {
-    val cs = MaterialTheme.colorScheme
     val currentOnZoom by rememberUpdatedState(onZoom)
     val hScroll = rememberScrollState()
+    val chrome = Color(0xD918181B)
     BoxWithConstraints(
         modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(if (bleed) RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp) else RoundedCornerShape(16.dp))
             .background(Color.White)
             // 두 손가락일 때만 가로챈다. 한 손가락은 그대로 스크롤.
             .pointerInput(Unit) {
@@ -428,14 +441,20 @@ private fun ScoreSheet(
             },
         contentAlignment = Alignment.TopCenter,
     ) {
-        val pageWidth = maxWidth * zoom
+        val side = 14.dp
+        val top = if (bleed) 24.dp else 12.dp
+        val pageWidth = (maxWidth - side * 2) * zoom
         when {
             pages == null -> CircularProgressIndicator(Modifier.padding(40.dp))
             pages.isEmpty() -> Text(
                 tr("이 파트는 악보가 없어요", "No score for this part"),
                 color = Color.Gray, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.padding(40.dp),
             )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(scroll).horizontalScroll(hScroll)) {
+            else -> Column(
+                Modifier.fillMaxSize().verticalScroll(scroll).horizontalScroll(hScroll)
+                    .padding(start = side, end = side, top = top, bottom = 56.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
                 pages.forEach { bmp ->
                     Image(
                         bitmap = bmp, contentDescription = tr("악보", "Score"),
@@ -444,26 +463,90 @@ private fun ScoreSheet(
                 }
             }
         }
+        // 위 가운데 손잡이 (종이 느낌)
+        if (bleed) {
+            Box(
+                Modifier.align(Alignment.TopCenter).padding(top = 9.dp).size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp)).background(Color(0xFFD4D4D8)),
+            )
+        }
+        // 몇 쪽인지: 스크롤 위치로 어림한다.
+        if (!pages.isNullOrEmpty() && pages.size > 1) {
+            val n = pages.size
+            val page = if (scroll.maxValue <= 0) 1
+            else (scroll.value.toFloat() / scroll.maxValue * (n - 1)).roundToInt() + 1
+            Text(
+                "$page / $n", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                    .clip(CircleShape).background(chrome).padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
         // 칩 표시(⚠️·✨)의 뜻. 악보 위에 3초 떠 있다가 사라진다 (눌러도 닫힘).
         if (hint != null) {
             Text(
                 hint, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFFF2F2F2), maxLines = 2,
-                modifier = Modifier.padding(10.dp).fillMaxWidth()
+                // 오른쪽 위 전체 화면 버튼과 겹치지 않게 비켜 둔다.
+                modifier = Modifier.padding(start = 10.dp, end = 56.dp, top = if (bleed) 20.dp else 10.dp).fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xF02A2A33))
+                    .background(Color(0xF018181B))
                     .clickable(onClick = onHintClick)
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             )
         }
-        // 전체 화면 켜기/끄기
+        // 전체 화면 켜기/끄기 (오른쪽 위 작은 버튼, 누르는 영역은 44dp)
         Box(
-            Modifier.align(Alignment.BottomEnd).padding(10.dp).size(44.dp)
-                .clip(CircleShape).background(Color(0xCC2A2A33))
+            Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp).size(44.dp)
                 .clickable(onClick = onToggleFullScreen)
                 .semantics { contentDescription = if (fullScreen) tr("전체 화면 닫기", "Exit full screen") else tr("전체 화면", "Full screen") },
             contentAlignment = Alignment.Center,
-        ) { FullScreenGlyph(exit = fullScreen, color = Color(0xFFF2F2F2)) }
+        ) {
+            Box(
+                Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(chrome),
+                contentAlignment = Alignment.Center,
+            ) { FullScreenGlyph(exit = fullScreen, color = Color.White) }
+        }
     }
+}
+
+/** 부모의 좌우 여백([side])을 넘어 화면 양옆 끝까지 그린다. */
+private fun Modifier.bleed(side: androidx.compose.ui.unit.Dp): Modifier = layout { measurable, constraints ->
+    val extra = side.roundToPx() * 2
+    val w = constraints.maxWidth + extra
+    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
+}
+
+/**
+ * 악보 그림의 위아래·양옆 빈 여백을 잘라낸다 (흰색이거나 투명한 칸은 여백으로 본다).
+ * 여백이 크면 악보가 작고 휑해 보여서, 글자·음표가 있는 곳 둘레에 조금만 남긴다.
+ */
+internal fun trimMargins(src: android.graphics.Bitmap, pad: Int = 24): android.graphics.Bitmap {
+    val w = src.width
+    val h = src.height
+    if (w < 4 || h < 4) return src
+    val px = IntArray(w * h)
+    src.getPixels(px, 0, w, 0, 0, w, h)
+    var left = w; var right = -1; var topY = h; var bottom = -1
+    for (y in 0 until h) {
+        val row = y * w
+        for (x in 0 until w) {
+            val c = px[row + x]
+            val a = c ushr 24
+            if (a < 40) continue
+            val lum = ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10
+            if (lum > 200) continue
+            if (x < left) left = x
+            if (x > right) right = x
+            if (y < topY) topY = y
+            if (y > bottom) bottom = y
+        }
+    }
+    if (right < 0) return src
+    val l = (left - pad).coerceAtLeast(0)
+    val t = (topY - pad).coerceAtLeast(0)
+    val r = (right + pad).coerceAtMost(w - 1)
+    val b = (bottom + pad).coerceAtMost(h - 1)
+    return android.graphics.Bitmap.createBitmap(src, l, t, r - l + 1, b - t + 1)
 }
 
 /** 네 모서리 꺾쇠. [exit]면 안쪽을 향한다. */
