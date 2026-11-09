@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // 무대는 화면 모드(다크/라이트)와 상관없이 늘 어두운 무대로 그린다.
-private val Orange = Color(0xFFFF7A3D)
+private val Orange = Color(0xFFFF6B2C)
 private val OnOrange = Color(0xFF1A1A1A)
 private val SpotOff = Color(0xFF24242C)
 private val SpotOffLine = Color(0xFF34343E)
@@ -110,7 +110,7 @@ fun BandStageScreen(
         Column {
             // 고른 악기 요약
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cs.surface)
+                Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs)
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -129,7 +129,7 @@ fun BandStageScreen(
                 Text(tr("개", ""), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.onSurfaceVariant)
             }
             Spacer(Modifier.height(12.dp))
-            Button(
+            Button(shape = ButtonShape,
                 onClick = onNext, enabled = lineup.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
             ) { Text(tr("다음", "Next"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }

@@ -55,6 +55,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.team3.rocky.ButtonShape
+import com.team3.rocky.card
 import com.team3.rocky.Demo
 import com.team3.rocky.EmojiRow
 import com.team3.rocky.InfoNote
@@ -85,7 +87,7 @@ fun BandListScreen(
     val bands by produceState<List<BandSummary>?>(null, user.id) { value = repo.myBands(user) }
 
     Page(tr("나의 밴드", "Bands"), onBack, modifier = modifier, bottom = {
-        Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(56.dp).testTag("band_add")) {
+        Button(shape = ButtonShape, onClick = onAdd, modifier = Modifier.fillMaxWidth().height(56.dp).testTag("band_add")) {
             Text(tr("+ 밴드 만들기 · 참여하기", "+ Create or join a band"), fontSize = 17.sp)
         }
     }) {
@@ -105,8 +107,7 @@ fun BandListScreen(
                 items(list, key = { it.band.id }) { s ->
                     Column(
                         Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(cs.surface)
+                            .card(RoundedCornerShape(18.dp), cs)
                             .clickable { onOpen(s.band.id) }
                             .padding(18.dp)
                             .testTag("band_${s.band.id}"),
@@ -154,7 +155,7 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
     }
 
     Page(if (joinMode) tr("밴드 참여하기", "Join a band") else tr("밴드 만들기", "Create a band"), onBack, bottom = {
-        Button(
+        Button(shape = ButtonShape,
             onClick = { submit() }, enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(56.dp).testTag("band_submit"),
         ) {
@@ -250,11 +251,11 @@ fun BandDetailScreen(
         }
     }, bottom = {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(
+            OutlinedButton(shape = ButtonShape,
                 onClick = onShareScore, enabled = d != null,
                 modifier = Modifier.weight(1f).height(52.dp).testTag("band_share_score"), contentPadding = TightButtonPadding,
             ) { Text(tr("악보 공유", "Share a score")) }
-            Button(
+            Button(shape = ButtonShape,
                 onClick = { d?.let { onNewScore(it.members.map { m -> m.instrument }) } },
                 enabled = d != null,
                 modifier = Modifier.weight(1f).height(52.dp).testTag("band_new_score"), contentPadding = TightButtonPadding,
@@ -321,8 +322,7 @@ fun BandDetailScreen(
                 Column(
                     Modifier.fillMaxWidth()
                         .padding(vertical = 6.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(cs.surface)
+                        .card(RoundedCornerShape(16.dp), cs)
                         .clickable { onOpenScore(s.work, myPart) }
                         .padding(16.dp)
                         .testTag("band_score_${s.id}"),
@@ -448,7 +448,7 @@ fun ShareToBandScreen(
             list.isEmpty() -> {
                 Text(tr("아직 참여한 밴드가 없어요.", "You're not in a band yet."), color = cs.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
-                OutlinedButton(onClick = onAddBand, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                OutlinedButton(shape = ButtonShape, onClick = onAddBand, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                     Text(tr("밴드 만들기 · 참여하기", "Create or join a band"))
                 }
             }
@@ -456,8 +456,7 @@ fun ShareToBandScreen(
                 items(list, key = { it.band.id }) { s ->
                     Row(
                         Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(cs.surface)
+                            .card(RoundedCornerShape(16.dp), cs)
                             .clickable {
                                 scope.launch {
                                     val added = repo.share(user, s.band.id, work)
@@ -507,8 +506,7 @@ fun PickScoreScreen(user: User, repo: BandRepository, bandId: Long, onBack: () -
             items(works, key = { it.id }) { w ->
                 Column(
                     Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(cs.surface)
+                        .card(RoundedCornerShape(16.dp), cs)
                         .clickable {
                             scope.launch {
                                 val added = repo.share(user, bandId, w)
@@ -616,7 +614,7 @@ private fun PartChip(inst: String, on: Boolean, modifier: Modifier, onClick: () 
 private fun Segmented(left: String, right: String, rightOn: Boolean, onChange: (Boolean) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cs.surface).padding(4.dp),
+        Modifier.fillMaxWidth().card(RoundedCornerShape(14.dp), cs).padding(4.dp),
     ) {
         listOf(false to left, true to right).forEach { (isRight, label) ->
             val on = isRight == rightOn

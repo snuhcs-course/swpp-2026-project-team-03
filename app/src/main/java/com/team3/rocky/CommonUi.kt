@@ -7,6 +7,13 @@ import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.material3.Typography
+import androidx.compose.material3.ColorScheme
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
@@ -17,6 +24,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.tappableElement
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -46,40 +54,68 @@ import androidx.compose.ui.unit.sp
 import java.io.File
 
 // ---------- 테마 ----------
+// 시안 A '스튜디오': 무채색 바탕 + 절제된 주황, 얇은 1px 테두리, 넉넉한 여백.
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFF7A3D),
-    onPrimary = Color(0xFF1A1A1A),
+    primary = Color(0xFFFF6B2C),
+    onPrimary = Color(0xFF111111),
     secondary = Color(0xFFFFC857),
-    onSecondary = Color(0xFF1A1A1A),
-    background = Color(0xFF111114),
-    onBackground = Color(0xFFF2F2F2),
-    surface = Color(0xFF1C1C22),
-    onSurface = Color(0xFFF2F2F2),
-    surfaceVariant = Color(0xFF2A2A33),
-    onSurfaceVariant = Color(0xFFB4B4C0),
-    surfaceContainer = Color(0xFF17171C),
-    outlineVariant = Color(0xFF2A2A33),
+    onSecondary = Color(0xFF111111),
+    background = Color(0xFF0E0E10),
+    onBackground = Color(0xFFF4F4F5),
+    surface = Color(0xFF18181B),
+    onSurface = Color(0xFFF4F4F5),
+    surfaceVariant = Color(0xFF26262B),
+    onSurfaceVariant = Color(0xFF9B9BA3),
+    surfaceContainer = Color(0xFF0E0E10),
+    outlineVariant = Color(0xFF26262B),
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFFE8601C),
+    primary = Color(0xFFF0601F),
     onPrimary = Color(0xFFFFFFFF),
     secondary = Color(0xFFB7791F),
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFF6F6F8),
-    onBackground = Color(0xFF1A1A1F),
+    background = Color(0xFFF7F7F8),
+    onBackground = Color(0xFF18181B),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF1A1A1F),
-    surfaceVariant = Color(0xFFE6E6EC),
-    onSurfaceVariant = Color(0xFF5E5E6A),
-    surfaceContainer = Color(0xFFFFFFFF),
-    outlineVariant = Color(0xFFDCDCE3),
+    onSurface = Color(0xFF18181B),
+    surfaceVariant = Color(0xFFEDEDF0),
+    onSurfaceVariant = Color(0xFF6B6B74),
+    surfaceContainer = Color(0xFFF7F7F8),
+    outlineVariant = Color(0xFFE4E4E7),
 )
+
+/** 앱 전체 글꼴. 한글이 또렷한 Pretendard(SIL OFL 1.1). */
+val Pretendard = FontFamily(
+    Font(R.font.pretendard_regular, FontWeight.Normal),
+    Font(R.font.pretendard_medium, FontWeight.Medium),
+    Font(R.font.pretendard_semibold, FontWeight.SemiBold),
+    Font(R.font.pretendard_bold, FontWeight.Bold),
+    Font(R.font.pretendard_extrabold, FontWeight.ExtraBold),
+    Font(R.font.pretendard_extrabold, FontWeight.Black),
+)
+
+/** 모든 글자 스타일에 Pretendard를 쓰고, 큰 제목은 자간을 살짝 좁힌다. */
+private val RockyTypography = Typography().let { t ->
+    fun TextStyle.p(tight: Boolean = false) =
+        copy(fontFamily = Pretendard, letterSpacing = if (tight) (-0.4).sp else letterSpacing)
+    t.copy(
+        displayLarge = t.displayLarge.p(true), displayMedium = t.displayMedium.p(true), displaySmall = t.displaySmall.p(true),
+        headlineLarge = t.headlineLarge.p(true), headlineMedium = t.headlineMedium.p(true), headlineSmall = t.headlineSmall.p(true),
+        titleLarge = t.titleLarge.p(true), titleMedium = t.titleMedium.p(), titleSmall = t.titleSmall.p(),
+        bodyLarge = t.bodyLarge.p(), bodyMedium = t.bodyMedium.p(), bodySmall = t.bodySmall.p(),
+        labelLarge = t.labelLarge.p(), labelMedium = t.labelMedium.p(), labelSmall = t.labelSmall.p(),
+    )
+}
 
 @Composable
 fun RockyTheme(dark: Boolean = AppSettings.dark, content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
+    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = RockyTypography, content = content)
 }
+
+/** 카드 바탕: 둥근 모서리 + 면 색 + 얇은 1px 테두리 (시안 A). */
+fun Modifier.card(shape: Shape, cs: ColorScheme, bg: Color = cs.surface, line: Color = cs.outlineVariant): Modifier =
+    clip(shape).background(bg).border(1.dp, line, shape)
 
 // ---------- 악기 아이콘 ----------
 /**
@@ -203,3 +239,6 @@ val TightButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
 val BottomSystemBars: WindowInsets
     get() = WindowInsets.navigationBars.union(WindowInsets.tappableElement)
         .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+
+/** 주요 버튼 모양 (시안 A): 알약 대신 살짝 둥근 사각형. */
+val ButtonShape = RoundedCornerShape(14.dp)

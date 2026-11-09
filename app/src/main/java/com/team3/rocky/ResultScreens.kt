@@ -246,7 +246,7 @@ fun ResultScreen(
         val listening = selectedPart?.let { tr("${Demo.label(it, work.instruments)}만", "${Demo.label(it, work.instruments)} only") }
             ?: tr("밴드 전체", "Full band")
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cs.surface)
+            Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs)
                 .padding(start = 8.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -502,14 +502,15 @@ private fun PartChip(
     val fg = if (selected) cs.onPrimary else if (ai) cs.secondary else cs.onSurface
     Row(
         Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                when {
+            .card(
+                CircleShape, cs,
+                bg = when {
                     selected -> cs.primary
                     warn -> cs.error.copy(alpha = 0.16f)
                     ai -> cs.secondary.copy(alpha = 0.18f)
                     else -> cs.surface
                 },
+                line = if (selected) cs.primary else cs.outlineVariant,
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -599,12 +600,12 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
 
     Page(tr("내보내기", "Export"), onBack, bottom = {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
+            OutlinedButton(shape = ButtonShape,
                 onClick = { withFiles { shareFiles(ctx, it) } },
                 enabled = count > 0 && !busy,
                 modifier = Modifier.weight(1f).height(56.dp), contentPadding = TightButtonPadding,
             ) { Text(tr("다른 앱으로 보내기", "Send"), maxLines = 1, fontSize = 15.sp) }
-            Button(
+            Button(shape = ButtonShape,
                 onClick = {
                     if (PhoneSaver.needsPermission(ctx)) permission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     else saveToPhone()
@@ -655,8 +656,7 @@ private fun ExportRow(item: ExportItem, checked: MutableMap<String, Boolean>) {
     Row(
         Modifier.fillMaxWidth()
             .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(cs.surface)
+            .card(RoundedCornerShape(14.dp), cs)
             .border(BorderStroke(1.dp, if (on) cs.primary else Color.Transparent), RoundedCornerShape(14.dp))
             .clickable { checked[item.key] = !on }
             .padding(horizontal = 8.dp, vertical = 2.dp),

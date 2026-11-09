@@ -534,24 +534,29 @@ fun HomeTab(
                 Avatar(photo, user.nickname, 36.dp)
             }
         }
-        Spacer(Modifier.height(16.dp))
-        Text("ROCKY", fontSize = 48.sp, fontWeight = FontWeight.Black, color = cs.primary)
-        Text(tr("어떤 곡이든, 우리 밴드 악보로", "Any song, scored for your band"), fontSize = 16.sp, color = cs.onSurfaceVariant)
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(20.dp))
+        Text(
+            tr("오늘은 어떤 곡을\n합주하나요?", "What are you\nplaying today?"),
+            fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp,
+        )
+        Spacer(Modifier.height(24.dp))
         BigCard(
             tr("새 악보 만들기", "Make a new score"),
             tr("곡을 올리면 파트별 악보가 나와요", "Upload a song, get every part"),
             cs.primary, cs.onPrimary, onNew,
         )
 
-        if (running > 0 || finished > 0) {
+        // 만드는 중인 곡이 있으면 진행률을 바로 보여준다.
+        val first = ScoreJobs.jobs.firstOrNull { !it.done && !it.failed }
+        if (first != null) {
+            Spacer(Modifier.height(12.dp))
+            HomeJobCard(first, more = running - 1, onClick = onProgress)
+        } else if (finished > 0) {
             Spacer(Modifier.height(12.dp))
             BigCard(
-                if (running > 0) tr("${running}곡 만드는 중", "Making $running ${plural(running, "song", "songs")}")
-                else tr("완성된 악보 ${finished}곡", "$finished ${plural(finished, "score", "scores")} ready"),
-                if (running > 0) tr("눌러서 얼마나 남았는지 보기", "Tap to see how long is left")
-                else tr("눌러서 바로 열어 보기", "Tap to open"),
-                cs.surfaceVariant, cs.onSurface, onProgress,
+                tr("완성된 악보 ${finished}곡", "$finished ${plural(finished, "score", "scores")} ready"),
+                tr("눌러서 바로 열어 보기", "Tap to open"),
+                cs.surface, cs.onSurface, onProgress,
             )
         }
 
@@ -589,16 +594,45 @@ fun HomeTab(
 @Composable
 private fun HowStep(no: String, text: String, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
-    Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(cs.surface).padding(vertical = 14.dp, horizontal = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier.size(28.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.primary.copy(alpha = 0.16f)),
-            contentAlignment = Alignment.Center,
-        ) { Text(no, fontWeight = FontWeight.Bold, color = cs.primary, fontSize = 14.sp) }
-        Spacer(Modifier.height(8.dp))
+    Column(modifier.card(RoundedCornerShape(14.dp), cs).padding(horizontal = 12.dp, vertical = 14.dp)) {
+        Text(no, fontWeight = FontWeight.ExtraBold, color = cs.primary, fontSize = 18.sp)
+        Spacer(Modifier.height(6.dp))
         Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** 홈의 '만드는 중' 카드: 곡 이름, 퍼센트, 진행 막대, 남은 시간. */
+@Composable
+private fun HomeJobCard(job: ScoreJob, more: Int, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var shown by remember(job.id) { mutableFloatStateOf(job.bar.shown) }
+    LaunchedEffect(job.id) {
+        var last = System.nanoTime()
+        while (!job.done && !job.failed) {
+            val now = System.nanoTime()
+            shown = job.bar.step(job.progress, (now - last) / 1_000_000_000f)
+            last = now
+            delay(100)
+        }
+    }
+    val p = job.progress
+    Column(
+        Modifier.fillMaxWidth().card(RoundedCornerShape(14.dp), cs).clickable(onClick = onClick).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(job.title, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text("${(shown * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = cs.primary)
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(cs.surfaceVariant)) {
+            Box(Modifier.fillMaxWidth(shown).height(6.dp).clip(RoundedCornerShape(3.dp)).background(cs.primary))
+        }
+        Spacer(Modifier.height(8.dp))
+        val stage = job.phase ?: p?.stage?.title ?: tr("준비 중", "Getting ready")
+        val tail = if (more > 0) tr(" · 외 ${more}곡", " · +$more more") else ""
+        Text("$stage · ${formatEta(p?.etaSec)}$tail", fontSize = 12.5.sp, color = cs.onSurfaceVariant,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -606,7 +640,7 @@ private fun HowStep(no: String, text: String, modifier: Modifier) {
 private fun TipCard(icon: String, title: String, body: String) {
     val cs = MaterialTheme.colorScheme
     Column(
-        Modifier.width(210.dp).clip(RoundedCornerShape(18.dp)).background(cs.surface).padding(16.dp),
+        Modifier.width(210.dp).card(RoundedCornerShape(18.dp), cs).padding(16.dp),
     ) {
         InstrumentIcon(icon, cs.primary, size = 26.dp)
         Spacer(Modifier.height(10.dp))
@@ -618,16 +652,25 @@ private fun TipCard(icon: String, title: String, body: String) {
 
 @Composable
 fun BigCard(title: String, sub: String, bg: Color, fg: Color, onClick: () -> Unit) {
-    Column(
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(18.dp)
+    Row(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(bg)
+            .card(shape, cs, bg = bg, line = if (bg == cs.primary) bg else cs.outlineVariant)
             .clickable(onClick = onClick)
-            .padding(24.dp)
+            .padding(start = 20.dp, top = 20.dp, bottom = 20.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = fg)
-        Spacer(Modifier.height(6.dp))
-        Text(sub, fontSize = 14.sp, color = fg.copy(alpha = 0.8f), lineHeight = 20.sp)
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(4.dp))
+            Text(sub, fontSize = 13.sp, color = fg.copy(alpha = 0.75f), lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(
+            Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(fg.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) { Text("→", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = fg) }
     }
 }
 
@@ -636,8 +679,7 @@ fun WorkRow(w: Work, onClick: () -> Unit, trailing: @Composable RowScope.() -> U
     val cs = MaterialTheme.colorScheme
     Row(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(cs.surface)
+            .card(RoundedCornerShape(16.dp), cs)
             .clickable(onClick = onClick)
             .padding(start = 18.dp, top = 14.dp, bottom = 14.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -666,7 +708,7 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
                 color = cs.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(20.dp))
-            OutlinedButton(onClick = onNew, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            OutlinedButton(shape = ButtonShape, onClick = onNew, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Text(tr("새 악보 만들기", "Make a new score"))
             }
         } else {
@@ -701,8 +743,7 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(cs.surface)
+            .card(RoundedCornerShape(18.dp), cs)
             .border(
                 BorderStroke(1.dp, when {
                     job.failed -> cs.error
@@ -733,10 +774,10 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             Text(err, fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { ScoreJobs.retry(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
+                Button(shape = ButtonShape, onClick = { ScoreJobs.retry(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
                     Text(tr("다시 시도", "Retry"), fontSize = 14.sp, maxLines = 1)
                 }
-                OutlinedButton(onClick = { ScoreJobs.useDemo(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
+                OutlinedButton(shape = ButtonShape, onClick = { ScoreJobs.useDemo(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
                     Text(tr("예시 결과 보기", "See a sample"), fontSize = 14.sp, maxLines = 1)
                 }
             }
@@ -898,7 +939,7 @@ fun LineupScreen(
 ) {
     val cs = MaterialTheme.colorScheme
     Page(title, onBack, bottom = {
-        Button(
+        Button(shape = ButtonShape,
             onClick = onNext, enabled = canNext,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(nextLabel, fontSize = 17.sp) }
@@ -1022,7 +1063,7 @@ fun OriginalScreen(
 ) {
     val cs = MaterialTheme.colorScheme
     Page(tr("3 / 3단계", "Step 3 of 3"), onBack, actions = { StepBars(3) }, bottom = {
-        Button(
+        Button(shape = ButtonShape,
             onClick = onNext, enabled = canNext,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(tr("악보 만들기 시작", "Make my scores"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
@@ -1030,7 +1071,7 @@ fun OriginalScreen(
         Column(Modifier.verticalScroll(rememberScrollState())) {
             // 올린 곡
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(cs.surface).padding(12.dp),
+                Modifier.fillMaxWidth().card(RoundedCornerShape(18.dp), cs).padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -1113,7 +1154,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
     val shape = RoundedCornerShape(24.dp)
     if (editServer) ServerDialog(onDismiss = { editServer = false })
     Page(tr("2 / 3단계", "Step 2 of 3"), onBack, actions = { StepBars(2) }, bottom = {
-        Button(
+        Button(shape = ButtonShape,
             onClick = { picked?.let { onNext(it, audio) } }, enabled = picked != null,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(if (picked == null) tr("곡을 먼저 골라주세요", "Pick a song first") else tr("다음", "Next"), fontSize = 17.sp) }
@@ -1125,8 +1166,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
             Spacer(Modifier.height(20.dp))
             Column(
                 Modifier.fillMaxWidth().height(170.dp)
-                    .clip(shape)
-                    .background(cs.surface)
+                    .card(shape, cs)
                     .border(BorderStroke(2.dp, if (picked == null) cs.surfaceVariant else cs.primary), shape)
                     .clickable { launcher.launch(PICK_TYPES) }
                     .padding(20.dp),
@@ -1157,7 +1197,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
                 )
             }
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(
+            OutlinedButton(shape = ButtonShape,
                 onClick = { picked = Demo.SONG_TITLE; audio = null },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
             ) {

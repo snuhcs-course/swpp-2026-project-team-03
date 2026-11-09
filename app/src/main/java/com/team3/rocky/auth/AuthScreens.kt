@@ -64,6 +64,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.team3.rocky.ButtonShape
+import com.team3.rocky.card
 import com.team3.rocky.AppSettings
 import com.team3.rocky.Avatar
 import com.team3.rocky.Demo
@@ -129,7 +131,7 @@ fun LoginScreen(auth: AuthRepository, onLoggedIn: (User) -> Unit, onSignUp: () -
             Text(error!!, color = cs.error, fontSize = 13.sp, modifier = Modifier.testTag("login_error"))
         }
         Spacer(Modifier.height(24.dp))
-        Button(
+        Button(shape = ButtonShape,
             onClick = { submit() }, enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(56.dp).testTag("login_submit"),
         ) {
@@ -137,7 +139,7 @@ fun LoginScreen(auth: AuthRepository, onLoggedIn: (User) -> Unit, onSignUp: () -
             else Text(tr("로그인", "Log in"), fontSize = 17.sp)
         }
         Spacer(Modifier.height(12.dp))
-        OutlinedButton(
+        OutlinedButton(shape = ButtonShape,
             onClick = onSignUp, enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("go_signup"),
         ) { Text(tr("이메일로 회원가입", "Sign up with email")) }
@@ -245,7 +247,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
     }
 
     Page(tr("회원가입", "Sign up"), onBack, dividers = true, bottom = {
-        Button(
+        Button(shape = ButtonShape,
             onClick = { submit() }, enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(56.dp).testTag("signup_submit"),
         ) {
@@ -441,7 +443,7 @@ fun AccountScreen(
     }
 
     Page(tr("내 정보", "Profile"), onBack, bottom = {
-        Button(
+        Button(shape = ButtonShape,
             onClick = { save() }, enabled = dirty && nicknameErr == null && !busy,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("account_save"),
         ) { Text(if (dirty) tr("변경사항 저장", "Save changes") else tr("바뀐 내용이 없어요", "No changes")) }
@@ -483,7 +485,7 @@ fun AccountScreen(
             Spacer(Modifier.height(24.dp))
             SectionLabel(tr("화면", "Display"))
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cs.surface)
+                Modifier.fillMaxWidth().card(RoundedCornerShape(14.dp), cs)
                     .clickable { AppSettings.setDark(ctx, !AppSettings.dark) }
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -537,7 +539,7 @@ fun AccountScreen(
 fun LanguageSwitch(modifier: Modifier = Modifier, fill: Boolean = false) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
-    Row(modifier.clip(RoundedCornerShape(12.dp)).background(cs.surface).padding(3.dp)) {
+    Row(modifier.card(RoundedCornerShape(12.dp), cs).padding(3.dp)) {
         Lang.entries.forEach { l ->
             val on = AppSettings.lang == l
             Box(
@@ -671,7 +673,7 @@ private fun InfoRow(label: String, value: String) {
     val cs = MaterialTheme.colorScheme
     Box(
         Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(14.dp)).background(cs.surface).padding(16.dp),
+            .card(RoundedCornerShape(14.dp), cs).padding(16.dp),
     ) {
         Column {
             Text(label, fontSize = 12.sp, color = cs.onSurfaceVariant)
