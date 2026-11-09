@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -47,6 +48,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     worker = Worker(store, runner, int(os.environ.get("ROCKY_PARALLEL", "1")))
     api_key = os.environ.get("ROCKY_API_KEY", "")
     max_bytes = int(os.environ.get("ROCKY_MAX_UPLOAD_MB", "60")) * CHUNK
+    transpose_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -149,6 +151,61 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         run = store.run_dir(job.id)
         # Only files listed in the result can be downloaded (no other paths on the volume).
         if rel not in allowed_paths(result_files(run)):
+            raise HTTPException(404, "not a result file")
+        media = {"pdf": "application/pdf", "mp3": "audio/mpeg"}.get(rel.rsplit(".", 1)[-1], "audio/midi")
+        return FileResponse(run / rel, media_type=media, filename=Path(rel).name)
+
+    def transposed_run(job_id: str, semitones: int) -> Path:
+        if not -12 <= semitones <= 12:
+            raise HTTPException(422, "semitones must be between -12 and 12")
+        job = find(job_id)
+        if job.state != "complete":
+            raise HTTPException(409, f"job is {job.state}")
+        return store.run_dir(job.id) if semitones == 0 else store.run_dir(job.id) / "transpositions" / f"{semitones:+d}"
+
+    def transposed_result(job_id: str, semitones: int) -> dict:
+        run = transposed_run(job_id, semitones)
+        try:
+            result = result_files(run)
+            paths = allowed_paths(result)
+            if any(Path(path).is_absolute() or ".." in Path(path).parts for path in paths):
+                raise ValueError("invalid result path")
+            if not all((run / path).is_file() for path in paths):
+                raise FileNotFoundError("transposition is incomplete")
+        except (OSError, ValueError, KeyError, TypeError):
+            raise HTTPException(404, "transposed score is not ready") from None
+        return {"id": job_id, "title": find(job_id).title, "semitones": semitones, **result}
+
+    @app.post("/jobs/{job_id}/transpositions/{semitones}", dependencies=[Depends(check_key)])
+    def make_transposition(job_id: str, semitones: int) -> dict:
+        run = transposed_run(job_id, semitones)
+        if semitones == 0:
+            return transposed_result(job_id, semitones)
+        with transpose_lock:
+            try:
+                return transposed_result(job_id, semitones)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+            render = getattr(runner, "run_transpose", None)
+            if not callable(render):
+                raise HTTPException(501, "transposition is not supported by this runner")
+            try:
+                render(f"{job_id}-{abs(semitones):02d}{'p' if semitones > 0 else 'm'}",
+                       store.run_dir(job_id), run, semitones, store.log(job_id))
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise HTTPException(422 if isinstance(exc, ValueError) else 500, str(exc)[:300]) from exc
+            return transposed_result(job_id, semitones)
+
+    @app.get("/jobs/{job_id}/transpositions/{semitones}/result", dependencies=[Depends(check_key)])
+    def get_transposition(job_id: str, semitones: int) -> dict:
+        return transposed_result(job_id, semitones)
+
+    @app.get("/jobs/{job_id}/transpositions/{semitones}/files/{rel:path}", dependencies=[Depends(check_key)])
+    def transposed_file(job_id: str, semitones: int, rel: str):
+        run = transposed_run(job_id, semitones)
+        result = transposed_result(job_id, semitones)
+        if rel not in allowed_paths(result):
             raise HTTPException(404, "not a result file")
         media = {"pdf": "application/pdf", "mp3": "audio/mpeg"}.get(rel.rsplit(".", 1)[-1], "audio/midi")
         return FileResponse(run / rel, media_type=media, filename=Path(rel).name)

@@ -66,6 +66,7 @@ import kotlinx.coroutines.withContext
 import com.team3.rocky.server.LocalScore
 import com.team3.rocky.server.PdfPages
 import com.team3.rocky.server.ScoreStore
+import com.team3.rocky.server.RockyApi
 import java.io.File
 
 /** "1:05"처럼 */
@@ -90,7 +91,8 @@ fun ResultScreen(
     var saved by remember { mutableStateOf(WorkStore.load(ctx).any { it.id == work.id }) }
     val ai = work.aiGenerated
     // 서버에서 만든 악보면 폰에 받아 둔 PDF·MIDI를, 아니면 데모 파일(assets/demo)을 쓴다.
-    val local = remember(work.id) { ScoreStore.load(ctx, work.id) }
+    var local by remember(work.id) { mutableStateOf(ScoreStore.load(ctx, work.id)) }
+    var changingKey by remember { mutableStateOf(false) }
     // 서버 결과는 기타 2를 따로 가질 수 있어서 파트 이름 그대로, 데모는 파일 이름(assetBase)으로.
     fun baseOf(part: String?) = part?.let { if (local != null) it else Demo.assetBase(it) } ?: Demo.BAND
     fun serverPart(base: String) = base.takeIf { it != Demo.BAND }
@@ -111,7 +113,8 @@ fun ResultScreen(
     /** 선택한 파트의 음원을 준비한다. 위치는 그대로 이어서 재생할 수 있게 [startAt]으로 옮긴다. */
     fun load(base: String, startAt: Int): Boolean {
         // 서버 결과는 악보로 합성한 MP3(없으면 MIDI)를 들려준다.
-        val path = if (local != null) local.audio(serverPart(base))?.absolutePath
+        val currentScore = local
+        val path = if (currentScore != null) currentScore.audio(serverPart(base))?.absolutePath
         else Assets.find(ctx, base, AUDIO_EXT)?.let { Assets.toCache(ctx, it).absolutePath }
         if (path == null) {
             Toast.makeText(ctx, "이 파트의 음원 파일이 없어요", Toast.LENGTH_SHORT).show()
@@ -165,11 +168,12 @@ fun ResultScreen(
     val scoreBase = baseOf(selectedPart)
     var pages by remember { mutableStateOf<List<androidx.compose.ui.graphics.ImageBitmap>?>(null) }
     val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
-    LaunchedEffect(scoreBase) {
+    LaunchedEffect(scoreBase, local?.semitones) {
         pages = null
         pages = withContext(Dispatchers.IO) {
-            if (local != null) {
-                local.pdf(serverPart(scoreBase))
+            val currentScore = local
+            if (currentScore != null) {
+                currentScore.pdf(serverPart(scoreBase))
                     ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
                     .orEmpty().map { it.asImageBitmap() }
             } else Assets.pages(ctx, scoreBase).mapNotNull { n ->
@@ -199,7 +203,8 @@ fun ResultScreen(
             OutlinedButton(onClick = onShareToBand, modifier = Modifier.weight(1f).height(52.dp)) {
                 Text("밴드 공유", maxLines = 1, fontSize = 14.sp)
             }
-            OutlinedButton(onClick = { player.pause(); playing = false; onExport() }, modifier = Modifier.weight(1f).height(52.dp)) {
+            OutlinedButton(onClick = { player.pause(); playing = false; onExport() },
+                enabled = !changingKey, modifier = Modifier.weight(1f).height(52.dp)) {
                 Text("내보내기", maxLines = 1, fontSize = 14.sp)
             }
         }
@@ -224,13 +229,59 @@ fun ResultScreen(
         if (ai.isNotEmpty()) Note("✨ AI 생성: 원곡에 없던 파트를 ROCKY가 새로 만들었어요", cs.onSurface)
         Spacer(Modifier.height(10.dp))
 
+        if (saved && local != null) {
+            Text("키 조정 · ${if (local!!.semitones == 0) "원키" else "${if (local!!.semitones > 0) "+" else ""}${local!!.semitones}반음"}",
+                fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for ((step, label) in listOf(-2 to "−한 키", -1 to "−반 키", 1 to "+반 키", 2 to "+한 키")) {
+                    OutlinedButton(
+                        onClick = {
+                            val next = local!!.semitones + step
+                            changingKey = true
+                            scope.launch {
+                                try {
+                                    val updated = withContext(Dispatchers.IO) {
+                                        if (next == 0) ScoreStore.useOriginal(ctx, work.id)
+                                        else ScoreStore.transpose(ctx, RockyApi.from(ctx), work.id, next)
+                                    }
+                                    player.reset()
+                                    playing = false
+                                    loadedBase = null
+                                    position = 0
+                                    duration = 0
+                                    local = updated
+                                } catch (e: Exception) {
+                                    Toast.makeText(ctx, "키를 바꾸지 못했어요: ${e.message}", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    changingKey = false
+                                }
+                            }
+                        },
+                        enabled = !changingKey && local!!.semitones + step in -12..12,
+                    ) { Text(label, maxLines = 1, fontSize = 12.sp) }
+                }
+            }
+            if (changingKey) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("전체·악기별 악보와 음원을 다시 만드는 중…", fontSize = 12.sp)
+                }
+            }
+            Text("낮은 개방현을 더 낮출 때는 타브의 줄 튜닝이 함께 바뀔 수 있어요.",
+                fontSize = 11.sp, color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+        }
+
         // 플레이어: 재생/일시정지 + 위치 이동
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cs.surface)
                 .padding(start = 8.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilledIconButton(onClick = { togglePlay() }, modifier = Modifier.size(44.dp), shape = CircleShape) {
+            FilledIconButton(onClick = { togglePlay() }, enabled = !changingKey,
+                modifier = Modifier.size(44.dp), shape = CircleShape) {
                 Text(if (playing) "❚❚" else "▶", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(10.dp))

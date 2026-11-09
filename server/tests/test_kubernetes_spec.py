@@ -41,6 +41,17 @@ def test_pdf_pod_has_no_gpu():
     assert pod.spec.node_selector == {"kubernetes.io/hostname": "ferrari"}
 
 
+def test_transpose_pod_is_cpu_only_and_uses_original_run():
+    pod = runner().transpose_pod("abc123abc123-01p", Path("/data/runs/source"),
+                                 Path("/data/runs/source/transpositions/+1"), 1)
+    c = pod.spec.containers[0]
+    env = {item.name: item.value for item in c.env}
+    assert pod.kind == "Pod" and "nvidia.com/gpu" not in c.resources.limits
+    assert env["ROCKY_SEMITONES"] == "1"
+    assert env["ROCKY_SOURCE_DIR"].replace("\\", "/") == "/data/runs/source"
+    assert "transpose_scores.py" in c.args[0] and "publish_scores.py" in c.args[0]
+
+
 class FakeCore:
     """Refuses the first create with the quota error, then runs the pod to Succeeded."""
 

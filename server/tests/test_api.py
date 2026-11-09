@@ -59,6 +59,23 @@ def test_only_listed_files_can_be_downloaded(setup):
         assert client.get(f"/jobs/{job_id}/files/{rel}").status_code == 404
 
 
+def test_transposition_renders_and_caches_complete_band_and_parts(setup):
+    client, store, runner, worker = setup()
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    assert client.post(f"/jobs/{job_id}/transpositions/13").status_code == 422
+    assert client.post(f"/jobs/{job_id}/transpositions/-1").status_code == 200
+    result = client.get(f"/jobs/{job_id}/transpositions/-1/result").json()
+    assert result["semitones"] == -1
+    assert set(result["instruments"]) == {"guitar", "bass", "drums", "piano"}
+    for part in [result["full_band"], *result["instruments"].values()]:
+        for kind in ("pdf", "midi", "mp3"):
+            assert client.get(f"/jobs/{job_id}/transpositions/-1/files/{part[kind]}").status_code == 200
+    assert client.get(f"/jobs/{job_id}/transpositions/-1/files/manifest.json").status_code == 404
+    assert client.post(f"/jobs/{job_id}/transpositions/-1").status_code == 200
+    assert len([c for c in runner.calls if c[0] == "transpose"]) == 1
+
+
 def test_failure_reports_pipeline_error(setup):
     client, store, _, worker = setup(FakeRunner(fail_stage="midi"))
     job_id = upload(client).json()["id"]
