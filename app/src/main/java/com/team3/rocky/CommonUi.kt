@@ -8,6 +8,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.tappableElement
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -181,3 +188,18 @@ fun Avatar(image: ImageBitmap?, nickname: String, size: Dp, modifier: Modifier =
 
 /** 밴드 이름 등에 바로 넣을 수 있는 이모티콘. 키보드에 이모티콘이 없는 폰에서도 넣을 수 있게 한다. */
 val QUICK_EMOJI = listOf("🎸", "🥁", "🎹", "🎤", "🎵", "🔥", "⭐", "🤘", "💜", "🌙")
+
+
+/**
+ * 버튼 여러 개를 한 줄에 놓을 때 쓰는 안쪽 여백. 기본값(좌우 24dp)이면 "보관함에 저장"처럼
+ * 글자가 잘려서 좌우를 줄인다.
+ */
+val TightButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+
+/**
+ * 화면 맨 아래 버튼·탭이 피해야 하는 영역: 갤럭시의 홈·뒤로 버튼 줄(내비게이션 바)과
+ * 제스처 막대처럼 눌러지는 시스템 영역. 이미 다른 곳에서 비켜 줬으면 다시 더하지 않는다.
+ */
+val BottomSystemBars: WindowInsets
+    get() = WindowInsets.navigationBars.union(WindowInsets.tappableElement)
+        .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)

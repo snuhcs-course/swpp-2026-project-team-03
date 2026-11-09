@@ -61,6 +61,7 @@ import com.team3.rocky.InfoNote
 import com.team3.rocky.InstrumentIcon
 import com.team3.rocky.Page
 import com.team3.rocky.TextInputDialog
+import com.team3.rocky.TightButtonPadding
 import com.team3.rocky.Work
 import com.team3.rocky.WorkStore
 import com.team3.rocky.tr
@@ -251,12 +252,12 @@ fun BandDetailScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(
                 onClick = onShareScore, enabled = d != null,
-                modifier = Modifier.weight(1f).height(52.dp).testTag("band_share_score"),
+                modifier = Modifier.weight(1f).height(52.dp).testTag("band_share_score"), contentPadding = TightButtonPadding,
             ) { Text(tr("악보 공유", "Share a score")) }
             Button(
                 onClick = { d?.let { onNewScore(it.members.map { m -> m.instrument }) } },
                 enabled = d != null,
-                modifier = Modifier.weight(1f).height(52.dp).testTag("band_new_score"),
+                modifier = Modifier.weight(1f).height(52.dp).testTag("band_new_score"), contentPadding = TightButtonPadding,
             ) { Text(tr("이 밴드로 새 악보", "New score for this band")) }
         }
     }) {

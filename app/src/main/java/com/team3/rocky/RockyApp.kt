@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -344,7 +345,11 @@ fun Page(
             if (bottom != null) Column {
                 if (dividers) HorizontalDivider(color = cs.outlineVariant)
                 // 갤럭시의 홈·뒤로 버튼 줄(내비게이션 바)에 버튼이 가리지 않게 그 높이만큼 띄운다.
-                Box(Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp)) { bottom() }
+                // 내비게이션 바가 0으로 오는 기기(제스처 막대를 숨긴 갤럭시 등)도 있어서 아래 여백을 넉넉히 둔다.
+                Box(
+                    Modifier.windowInsetsPadding(BottomSystemBars)
+                        .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp),
+                ) { bottom() }
             }
         },
     ) { pad ->
@@ -446,7 +451,7 @@ fun MainTabs(
         containerColor = cs.background,
         bottomBar = {
             // 하단 탭이 갤럭시 홈·뒤로 버튼 줄에 가리지 않게 그 높이만큼 위로 올린다.
-            NavigationBar(containerColor = cs.surfaceContainer, windowInsets = WindowInsets.navigationBars) {
+            NavigationBar(containerColor = cs.surfaceContainer, windowInsets = BottomSystemBars) {
                 Tab.entries.forEach { t ->
                     NavigationBarItem(
                         selected = t == tab,
@@ -740,10 +745,10 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             Text(err, fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { ScoreJobs.retry(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp)) {
+                Button(onClick = { ScoreJobs.retry(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
                     Text(tr("다시 시도", "Retry"), fontSize = 14.sp, maxLines = 1)
                 }
-                OutlinedButton(onClick = { ScoreJobs.useDemo(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp)) {
+                OutlinedButton(onClick = { ScoreJobs.useDemo(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
                     Text(tr("예시 결과 보기", "See a sample"), fontSize = 14.sp, maxLines = 1)
                 }
             }

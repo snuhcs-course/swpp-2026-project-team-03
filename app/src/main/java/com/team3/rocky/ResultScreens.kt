@@ -210,12 +210,15 @@ fun ResultScreen(
                     Toast.makeText(ctx, tr("보관함에 저장했어요", "Saved to your library"), Toast.LENGTH_SHORT).show()
                 },
                 enabled = !saved,
-                modifier = Modifier.weight(1.1f).height(52.dp),
+                modifier = Modifier.weight(1.1f).height(52.dp), contentPadding = TightButtonPadding,
             ) { Text(if (saved) tr("저장됨 ✓", "Saved ✓") else tr("보관함에 저장", "Save"), maxLines = 1, fontSize = 14.sp) }
-            OutlinedButton(onClick = onShareToBand, modifier = Modifier.weight(1f).height(52.dp)) {
+            OutlinedButton(onClick = onShareToBand, modifier = Modifier.weight(1f).height(52.dp), contentPadding = TightButtonPadding) {
                 Text(tr("밴드에 공유", "Share"), maxLines = 1, fontSize = 14.sp)
             }
-            OutlinedButton(onClick = { player.pause(); playing = false; onExport() }, modifier = Modifier.weight(1f).height(52.dp)) {
+            OutlinedButton(
+                onClick = { player.pause(); playing = false; onExport() },
+                modifier = Modifier.weight(1f).height(52.dp), contentPadding = TightButtonPadding,
+            ) {
                 Text(tr("파일 받기", "Get files"), maxLines = 1, fontSize = 14.sp)
             }
         }
@@ -472,7 +475,7 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
             OutlinedButton(
                 onClick = { withFiles { shareFiles(ctx, it) } },
                 enabled = count > 0 && !busy,
-                modifier = Modifier.weight(1f).height(56.dp),
+                modifier = Modifier.weight(1f).height(56.dp), contentPadding = TightButtonPadding,
             ) { Text(tr("다른 앱으로 보내기", "Send"), maxLines = 1, fontSize = 15.sp) }
             Button(
                 onClick = {
@@ -480,7 +483,7 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
                     else saveToPhone()
                 },
                 enabled = count > 0 && !busy,
-                modifier = Modifier.weight(1.2f).height(56.dp),
+                modifier = Modifier.weight(1.2f).height(56.dp), contentPadding = TightButtonPadding,
             ) {
                 if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = cs.onPrimary)
                 else Text(tr("휴대폰에 저장", "Save to phone"), maxLines = 1, fontSize = 15.sp)
