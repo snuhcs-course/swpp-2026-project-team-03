@@ -1254,12 +1254,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
             ) {
                 Text(tr("데모 곡으로 체험", "Try the demo song"))
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                tr("몇 분 걸려요. 데모 곡은 바로 나와요.",
-                    "Takes a few minutes. The demo is instant."),
-                fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 19.sp,
-            )
+            Spacer(Modifier.height(4.dp))
             // 시연·개발용 접속 설정. 일반 사용자에게는 눈에 띄지 않게 작게 둔다.
             TextButton(onClick = { editServer = true }, modifier = Modifier.padding(top = 4.dp)) {
                 Text(tr("연결 설정", "Connection settings"), fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1)
