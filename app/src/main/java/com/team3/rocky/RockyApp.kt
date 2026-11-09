@@ -194,10 +194,10 @@ fun RockyApp() {
             }
             Screen.Lineup -> LineupScreen(
                 title = tr("새 악보", "New score"),
-                heading = tr("우리 밴드에는\n어떤 악기가 있나요?", "What does\nyour band play?"),
+                heading = tr("우리 밴드 악기", "Your band"),
                 sub = tr(
-                    "연주할 멤버의 악기를 모두 골라주세요.\n곡에 없는 악기는 ROCKY가 새로 만들어 드려요.",
-                    "Pick every instrument in your band.\nROCKY writes parts the song doesn't have.",
+                    "연주할 악기를 모두 고르세요.\n곡에 없는 파트는 새로 만들어요.",
+                    "Pick every instrument you play.\nParts not in the song are added.",
                 ),
                 selected = lineup,
                 onToggle = { i -> lineup = Demo.toggleLineup(lineup, i) },
@@ -221,10 +221,10 @@ fun RockyApp() {
                   Demo.guitarCount(original) == 0 && Demo.guitarCount(lineup) == 2
               LineupScreen(
                 title = tr("원곡 악기", "Song's instruments"),
-                heading = tr("올린 곡에서는\n어떤 악기가 들리나요?", "What do you hear\nin the song?"),
+                heading = tr("곡에 나오는 악기", "In the song"),
                 sub = tr(
-                    "우리 밴드 말고, 곡에서 들리는 악기만 골라주세요.\n잘 모르겠으면 ROCKY가 듣고 판단해요.",
-                    "Not your band, just what plays in the song.\nNot sure? ROCKY will listen and decide.",
+                    "올린 곡에서 들리는 악기만 고르세요.",
+                    "Pick what you hear in the song.",
                 ),
                 selected = original,
                 onToggle = { i -> original = Demo.toggleLineup(original, i); originalUnknown = false },
@@ -239,17 +239,17 @@ fun RockyApp() {
                     when {
                         twoGuitarsFromNone -> InfoNote(
                             tr(
-                                "곡에 기타가 없으면 기타는 1대만 만들 수 있어요. 뒤로 가서 우리 밴드 기타를 1대로 바꿔 주세요.",
-                                "With no guitar in the song, we can add only one. Go back and choose 1 guitar.",
+                                "곡에 기타가 없으면 기타는 1대까지만 돼요. 우리 밴드 기타를 1대로 바꿔 주세요.",
+                                "With no guitar in the song, only 1 guitar can be added.",
                             ),
                             strong = true,
                         )
                         originalUnknown -> InfoNote(
-                            tr("ROCKY가 곡을 듣고 어떤 악기가 나오는지 판단해요.", "ROCKY will listen and find the instruments."),
+                            tr("곡을 분석해 악기를 찾아요.", "We'll detect the instruments."),
                         )
                         original.isNotEmpty() -> InfoNote(
-                            if (ai.isEmpty()) tr("곡에 있는 그대로 악보로 옮겨요", "We'll write down the song as it is")
-                            else tr("✨ ROCKY가 새로 만들 파트: ", "✨ ROCKY will write: ") +
+                            if (ai.isEmpty()) tr("곡 그대로 악보로 옮겨요", "Scored as in the song")
+                            else tr("새로 만들 파트: ", "Will add: ") +
                                 ai.joinToString(" · ") { Demo.label(it, lineup) },
                             strong = ai.isNotEmpty(),
                         )
@@ -552,7 +552,7 @@ fun HomeTab(
         Spacer(Modifier.height(28.dp))
         BigCard(
             tr("새 악보 만들기", "Make a new score"),
-            tr("곡 파일을 올리면 우리 밴드\n멤버 모두의 악보를 만들어 드려요", "Upload a song and get a score\nfor everyone in your band"),
+            tr("곡을 올리면 파트별 악보가 나와요", "Upload a song, get every part"),
             cs.primary, cs.onPrimary, onNew,
         )
 
@@ -579,20 +579,20 @@ fun HomeTab(
 
         // 결과가 잘 나오는 곡을 고르는 요령. 옆으로 넘겨 본다.
         Spacer(Modifier.height(28.dp))
-        Text(tr("더 정확한 악보를 받으려면", "For more accurate scores"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(tr("정확도 팁", "Tips"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(10.dp))
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            TipCard("drums", tr("밴드 악기로 연주한 곡", "Songs played by a band"),
-                tr("드럼·베이스·기타·피아노가\n나오는 곡이 가장 잘 돼요", "Drums, bass, guitar and keys\nwork best"))
-            TipCard("guitar", tr("곡에 나오는 악기 알려주기", "Tell us what plays"),
-                tr("곡의 악기를 골라 주면\n더 정확하게 옮겨요", "Choosing the song's instruments\nmakes scores more accurate"))
-            TipCard("piano", tr("음질 좋은 MP3 · WAV", "Good-quality MP3 or WAV"),
-                tr("녹음 상태가 좋을수록\n음을 정확히 찾아요", "Cleaner recordings give\nmore accurate notes"))
-            TipCard("vocal", tr("라이브·커버도 괜찮아요", "Live and covers work too"),
-                tr("관객 소리가 크면\n조금 덜 정확할 수 있어요", "Loud crowds can make\nscores less accurate"))
+            TipCard("drums", tr("밴드 곡일수록 정확해요", "Band songs work best"),
+                tr("드럼·베이스·기타·피아노 편성", "Drums, bass, guitar, keys"))
+            TipCard("guitar", tr("곡의 악기를 골라 주세요", "Pick the song's instruments"),
+                tr("고르면 더 정확해져요", "It improves accuracy"))
+            TipCard("piano", tr("MP3 · WAV만 가능", "MP3 or WAV only"),
+                tr("음질이 좋을수록 정확해요", "Better audio, better notes"))
+            TipCard("vocal", tr("라이브·커버도 돼요", "Live and covers work"),
+                tr("관객 소리가 크면 덜 정확해요", "Loud crowds lower accuracy"))
         }
         Spacer(Modifier.height(8.dp))
     }
@@ -673,8 +673,8 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
         if (jobs.isEmpty()) {
             Spacer(Modifier.height(80.dp))
             Text(
-                tr("지금 만들고 있는 악보가 없어요.\n새 악보를 만들면 여기서 얼마나 남았는지 볼 수 있어요.",
-                    "Nothing in progress.\nStart a new score to see how it's going here."),
+                tr("만들고 있는 악보가 없어요.",
+                    "Nothing in progress."),
                 color = cs.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(20.dp))
@@ -682,8 +682,8 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
                 Text(tr("새 악보 만들기", "Make a new score"))
             }
         } else {
-            InfoNote(tr("다른 화면을 봐도 계속 만들어요. 앱만 끄지 마세요.",
-                "Keeps going on other screens. Just don't close the app."))
+            InfoNote(tr("앱을 닫지 않으면 계속 만들어요",
+                "Keeps going unless you close the app"))
             Spacer(Modifier.height(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }) }
@@ -784,10 +784,10 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             text = {
                 Text(
                     when {
-                        job.failed -> tr("다시 만들려면 새 악보에서 곡을 다시 올려 주세요.", "To try again later, upload the song again.")
-                        !job.done -> tr("지금까지 만든 내용은 사라지고, 다음 곡이 바로 시작돼요.", "Progress so far will be lost.")
-                        job.saved -> tr("보관함에 저장한 악보는 그대로 남아요.", "Scores in your library stay there.")
-                        else -> tr("아직 보관함에 저장하지 않았어요. 지우면 다시 볼 수 없어요.", "Not saved yet. You won't be able to open it again.")
+                        job.failed -> tr("다시 만들려면 곡을 다시 올려 주세요.", "Upload the song again to retry.")
+                        !job.done -> tr("지금까지 만든 내용은 사라져요.", "Progress so far will be lost.")
+                        job.saved -> tr("보관함의 악보는 남아요.", "Saved scores stay in your library.")
+                        else -> tr("저장하지 않아서 다시 볼 수 없어요.", "Not saved. You can't open it again.")
                     }
                 )
             },
@@ -821,14 +821,14 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit) {
         if (works.isEmpty()) {
             Spacer(Modifier.height(80.dp))
             Text(
-                tr("아직 저장한 악보가 없어요.\n악보를 만든 뒤 '보관함에 저장'을 누르면 여기에 모여요.",
-                    "No saved scores yet.\nTap 'Save' on a finished score to keep it here."),
+                tr("저장한 악보가 없어요.",
+                    "No saved scores."),
                 color = cs.onSurfaceVariant, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
-            InfoNote(tr("악보를 열고 '파일 받기'를 누르면 휴대폰에 저장할 수 있어요.",
-                "Open a score and tap 'Get files' to save it to your phone."))
+            InfoNote(tr("악보를 열고 ⋮ › 내보내기로 휴대폰에 저장해요",
+                "Open a score, then ⋮ › Export to save it"))
             Spacer(Modifier.height(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(works, key = { it.id }) { w ->
@@ -879,7 +879,7 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit) {
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text(tr("보관함에서 삭제할까요?", "Delete this score?")) },
-            text = { Text(tr("밴드에 공유한 악보는 밴드에 그대로 남아요.", "Copies shared with your bands will stay there.")) },
+            text = { Text(tr("밴드에 공유한 악보는 남아요.", "Copies shared with bands stay.")) },
             confirmButton = {
                 TextButton(onClick = { WorkStore.remove(ctx, w.id); works = WorkStore.load(ctx); deleting = null }) {
                     Text(tr("삭제", "Delete"), color = cs.error)
@@ -1044,9 +1044,9 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
         ) { Text(if (picked == null) tr("곡을 먼저 골라주세요", "Pick a song first") else tr("다음", "Next"), fontSize = 17.sp) }
     }) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text(tr("어떤 곡으로\n만들까요?", "Which song\nshall we score?"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
+            Text(tr("곡을 골라주세요", "Pick a song"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
             Spacer(Modifier.height(8.dp))
-            Text(tr("휴대폰에 있는 MP3 · WAV 파일을 골라주세요", "Pick an MP3 or WAV file on your phone"), color = cs.onSurfaceVariant)
+            Text(tr("MP3 · WAV 파일", "MP3 or WAV file"), color = cs.onSurfaceVariant)
             Spacer(Modifier.height(20.dp))
             Column(
                 Modifier.fillMaxWidth().height(170.dp)
@@ -1061,11 +1061,11 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
                 Text(if (picked == null) "＋" else "♪", fontSize = 44.sp, color = cs.primary)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    picked ?: tr("눌러서 곡 파일 고르기", "Tap to pick a song file"),
+                    picked ?: tr("파일 선택", "Choose a file"),
                     fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     color = if (picked == null) cs.onSurfaceVariant else cs.onSurface,
                 )
-                if (picked != null) Text(tr("다시 누르면 다른 곡으로 바꿀 수 있어요", "Tap again to pick another"), fontSize = 14.sp, color = cs.onSurface)
+                if (picked != null) Text(tr("눌러서 바꾸기", "Tap to change"), fontSize = 14.sp, color = cs.onSurface)
             }
             Spacer(Modifier.height(16.dp))
             // 밴드 곡이 아니어도 올릴 수는 있다. 결과가 좋지 않을 수 있다는 것만 미리 알린다.
@@ -1073,11 +1073,11 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                     .background(cs.secondary.copy(alpha = 0.14f)).padding(16.dp),
             ) {
-                Text(tr("밴드 악기로 연주한 곡이 가장 정확해요", "Band songs give the best results"), fontWeight = FontWeight.Bold, color = cs.secondary)
+                Text(tr("밴드 곡일수록 정확해요", "Band songs work best"), fontWeight = FontWeight.Bold, color = cs.secondary)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    tr("오케스트라·어쿠스틱 독주·전자음악은 악보가 정확하지 않을 수 있어요.",
-                        "Orchestral, solo acoustic or electronic music may give less accurate scores."),
+                    tr("오케스트라·독주·전자음악은 부정확할 수 있어요.",
+                        "Orchestral, solo or electronic music may be less accurate."),
                     fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 19.sp,
                 )
             }
@@ -1086,12 +1086,12 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
                 onClick = { picked = Demo.SONG_TITLE; audio = null },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
             ) {
-                Text(tr("데모 곡으로 먼저 해보기", "Try the demo song first"))
+                Text(tr("데모 곡으로 체험", "Try the demo song"))
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                tr("곡 길이에 따라 몇 분 걸려요. 데모 곡은 바로 결과를 볼 수 있어요.",
-                    "Takes a few minutes, depending on the song. The demo is instant."),
+                tr("몇 분 걸려요. 데모 곡은 바로 나와요.",
+                    "Takes a few minutes. The demo is instant."),
                 fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 19.sp,
             )
             // 시연·개발용 접속 설정. 일반 사용자에게는 눈에 띄지 않게 작게 둔다.

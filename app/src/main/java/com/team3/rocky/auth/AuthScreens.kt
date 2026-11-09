@@ -282,7 +282,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
                 AuthField(
                     value = code, onValueChange = { code = it.filter(Char::isDigit).take(EmailVerification.CODE_LENGTH); codeError = null },
                     label = tr("인증번호 ${EmailVerification.CODE_LENGTH}자리", "${EmailVerification.CODE_LENGTH}-digit code"), keyboardType = KeyboardType.NumberPassword,
-                    tag = "signup_code", error = codeError, hint = tr("메일로 받은 번호를 입력해 주세요 (5분 안에)", "Enter the code from your email (within 5 min)"),
+                    tag = "signup_code", error = codeError, hint = tr("메일로 받은 번호 (5분 안에 입력)", "Code from your email (within 5 min)"),
                     trailing = { TextButton(onClick = { checkCode() }, enabled = code.length == EmailVerification.CODE_LENGTH) { Text(tr("확인", "OK")) } },
                     imeAction = ImeAction.Done, onDone = { checkCode() },
                 )
@@ -336,7 +336,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
             Spacer(Modifier.height(16.dp))
             Text(tr("연주하는 파트 (선택)", "Your instrument (optional)"), fontWeight = FontWeight.Bold)
             Text(
-                tr("하나만 고를 수 있어요. 새 악보를 만들 때 미리 선택돼요.", "Pick one. It's preselected when you make a new score."),
+                tr("새 악보를 만들 때 미리 선택돼요.", "Preselected when you make a new score."),
                 fontSize = 13.sp, color = cs.onSurface,
             )
             Spacer(Modifier.height(10.dp))
@@ -387,7 +387,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
                 Column {
                     Text(tr("${SignUpValidator.normalizeEmail(form.email)}로 인증번호를 보냈어요.", "We sent a code to ${SignUpValidator.normalizeEmail(form.email)}."))
                     Spacer(Modifier.height(16.dp))
-                    Text(tr("※ 시연 버전이라 메일 대신 여기에 보여드려요.", "※ Demo version: the code is shown here instead of by email."), fontSize = 12.sp, color = cs.onSurfaceVariant)
+                    Text(tr("시연 버전이라 여기에 표시해요.", "Demo version: shown here instead of email."), fontSize = 12.sp, color = cs.onSurfaceVariant)
                     Text(
                         c, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
                         letterSpacing = 6.sp, color = cs.primary, textAlign = TextAlign.Center,
@@ -476,7 +476,7 @@ fun AccountScreen(
             )
             Spacer(Modifier.height(12.dp))
             Text(tr("연주하는 파트", "Your instrument"), fontWeight = FontWeight.Bold)
-            Text(tr("하나만 고를 수 있어요. 새 악보를 만들 때 미리 선택돼요.", "Pick one. It's preselected when you make a new score."), fontSize = 13.sp, color = cs.onSurface)
+            Text(tr("새 악보를 만들 때 미리 선택돼요.", "Preselected when you make a new score."), fontSize = 13.sp, color = cs.onSurface)
             Spacer(Modifier.height(10.dp))
             PartChips(parts) { p -> parts = if (p in parts) emptySet() else setOf(p); error = null }
 
@@ -525,8 +525,8 @@ fun AccountScreen(
             dismissButton = { TextButton(onClick = { confirm = false }) { Text(tr("취소", "Cancel")) } },
             title = { Text(tr("로그아웃할까요?", "Log out?")) },
             text = {
-                Text(tr("저장한 악보는 지워지지 않아요. 다시 로그인하면 볼 수 있어요.\n만들고 있던 악보는 멈춰요.",
-                    "Saved scores stay. You'll see them when you log in again.\nScores in progress will stop."))
+                Text(tr("저장한 악보는 남고, 만들던 악보는 멈춰요.",
+                    "Saved scores stay. Scores in progress stop."))
             },
         )
     }

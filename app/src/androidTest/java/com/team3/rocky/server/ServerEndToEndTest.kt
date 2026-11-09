@@ -89,7 +89,8 @@ class ServerEndToEndTest {
             // 무엇이 보이고 있었는지 남긴다 (로딩 중 / '악보가 없어요' / 오류)
             throw AssertionError("결과 화면에 악보가 안 보임. 화면:\n" + compose.onRoot().printToString(maxDepth = 30), e)
         }
-        compose.onNodeWithText("✨ 피아노").assertIsDisplayed()
+        // 칩은 옆으로 넘겨 보는 줄이라 화면 밖에 있을 수 있어서 있는지만 본다.
+        compose.onNodeWithText("✨ 피아노").assertExists()
     }
 
     @Test fun exportListsServerFiles() {

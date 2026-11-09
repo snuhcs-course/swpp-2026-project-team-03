@@ -169,13 +169,13 @@ object ScoreJobs {
             // 서버의 note는 영어·개발 용어일 수 있어서 보여주지 않고, 사용자가 알 것만 적는다.
             job.phase = when {
                 st.state == "queued" && (st.queuePosition ?: 0) > 1 ->
-                    tr("앞에 ${st.queuePosition!! - 1}곡이 있어요. 차례를 기다리는 중", "${st.queuePosition!! - 1} song(s) ahead of yours")
+                    tr("대기 중 · 앞에 ${st.queuePosition!! - 1}곡", "Waiting · ${st.queuePosition!! - 1} ahead")
                 st.state == "queued" -> tr("곧 시작해요", "Starting soon")
                 else -> null
             }
         }, onMissed = { missed ->
             // 잠깐 끊긴 것은 실패로 보지 않고 다시 연결되기를 기다린다.
-            if (missed > 0) job.phase = tr("연결이 잠시 끊겼어요. 다시 연결하는 중", "Connection lost. Reconnecting")
+            if (missed > 0) job.phase = tr("연결 끊김 · 다시 연결 중", "Disconnected · reconnecting")
         })
         tracker.track(id).collect { p ->
             // 마지막 '완료'는 결과 파일을 다 받은 뒤에 보낸다.
@@ -241,30 +241,30 @@ object ScoreJobs {
     /** 실패 이유를 사용자가 알아들을 말로. 서버·HTTP 같은 말은 쓰지 않고, 무엇을 하면 되는지 적는다. */
     fun failureMessage(e: Exception): String = when (e) {
         is FileGoneException -> tr(
-            "고른 곡 파일을 열 수 없어요. 곡을 다시 골라 주세요.",
-            "Can't open the song file. Please pick it again.",
+            "곡 파일을 열 수 없어요. 다시 골라 주세요.",
+            "Can't open the file. Pick it again.",
         )
         is JobFailedException -> tr(
-            "이 곡은 악보로 만들지 못했어요. 다시 시도하면 처음부터 다시 만들어요.",
-            "We couldn't make scores for this song. Retry to start over.",
+            "만들지 못했어요. 다시 시도하면 처음부터 만들어요.",
+            "Failed. Retry to start over.",
         )
         is ApiException -> when (e.code) {
-            401 -> tr("ROCKY에 접속할 수 없어요. 연결 설정을 확인해 주세요.", "Can't sign in to ROCKY. Check the connection settings.")
-            413 -> tr("곡 파일이 너무 커요. 더 짧은 곡이나 MP3로 올려 주세요.", "The file is too big. Try a shorter song or an MP3.")
+            401 -> tr("접속할 수 없어요. 연결 설정을 확인해 주세요.", "Can't connect. Check the connection settings.")
+            413 -> tr("파일이 너무 커요. 짧은 곡이나 MP3로 올려 주세요.", "File too big. Try a shorter song or MP3.")
             415 -> tr("MP3나 WAV 파일만 올릴 수 있어요.", "Only MP3 or WAV files can be used.")
             422 -> tr(
                 "원곡에 기타가 없으면 기타는 1대까지만 만들 수 있어요.",
                 "If the song has no guitar, we can add only one guitar.",
             )
-            404 -> tr("이 곡을 찾을 수 없어요. 다시 시도하면 처음부터 다시 만들어요.", "We lost this song. Retry to start over.")
+            404 -> tr("곡을 찾을 수 없어요. 다시 시도하면 처음부터 만들어요.", "Song not found. Retry to start over.")
             // 오류 번호는 보여주지 않는다 (Nielsen 9: 쉬운 말로, 해결 방법과 함께).
-            else -> tr("잠시 문제가 생겼어요. 잠시 뒤에 다시 시도해 주세요.", "Something went wrong. Please retry in a moment.")
+            else -> tr("문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.", "Something went wrong. Retry in a moment.")
         }
         is IOException -> tr(
-            "인터넷에 연결할 수 없어요. 연결을 확인한 뒤 다시 시도해 주세요.",
-            "Can't connect. Check your internet and retry.",
+            "인터넷에 연결할 수 없어요. 확인 후 다시 시도해 주세요.",
+            "No connection. Check and retry.",
         )
-        else -> tr("알 수 없는 문제가 생겼어요. 다시 시도해 주세요.", "Something went wrong. Please retry.")
+        else -> tr("문제가 생겼어요. 다시 시도해 주세요.", "Something went wrong. Retry.")
     }
 }
 

@@ -95,7 +95,7 @@ fun BandListScreen(
             list.isEmpty() -> {
                 Spacer(Modifier.height(64.dp))
                 Text(
-                    tr("아직 참여한 밴드가 없어요.\n밴드를 만들고 멤버에게 초대 코드를 알려 주세요.", "You're not in a band yet.\nCreate one and send the invite code to your members."),
+                    tr("참여한 밴드가 없어요.\n밴드를 만들고 초대 코드를 보내 보세요.", "No bands yet.\nCreate one and send the invite code."),
                     color = cs.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(24.dp))
@@ -199,7 +199,7 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
             Spacer(Modifier.height(20.dp))
             Text(tr("이 밴드에서 내 파트", "Your part in this band"), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.primary)
             Spacer(Modifier.height(4.dp))
-            Text(tr("공유된 악보를 열면 내 파트 악보가 먼저 보여요. 보컬은 밴드 전체 악보를 봐요.", "Shared scores open on your part first. Vocals see the full band."), fontSize = 14.sp, color = cs.onSurface)
+            Text(tr("공유 악보를 열면 내 파트가 먼저 보여요.", "Shared scores open on your part."), fontSize = 14.sp, color = cs.onSurface)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Demo.PARTS.forEach { inst ->
@@ -282,7 +282,7 @@ fun BandDetailScreen(
                 TextButton(onClick = {
                     ctx.getSystemService(ClipboardManager::class.java)
                         .setPrimaryClip(ClipData.newPlainText(tr("ROCKY 초대 코드", "ROCKY invite code"), d.band.inviteCode))
-                    Toast.makeText(ctx, tr("초대 코드를 복사했어요. 멤버에게 붙여넣어 보내 주세요", "Invite code copied. Paste it to your members"), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, tr("초대 코드를 복사했어요", "Invite code copied"), Toast.LENGTH_SHORT).show()
                 }) { Text(tr("복사", "Copy")) }
             }
 
@@ -313,7 +313,7 @@ fun BandDetailScreen(
             SectionTitle(tr("공유된 악보", "Shared scores"), d.scores.size)
             if (d.scores.isEmpty()) {
                 Text(
-                    tr("아직 공유된 악보가 없어요.\n아래 '악보 공유'로 보관함의 악보를 올려 보세요.", "No shared scores yet.\nTap 'Share a score' below to add one from your library."),
+                    tr("공유된 악보가 없어요.", "No shared scores."),
                     color = cs.onSurfaceVariant, fontSize = 14.sp, modifier = Modifier.padding(vertical = 12.dp),
                 )
             }
@@ -414,8 +414,8 @@ fun BandDetailScreen(
             title = { Text(tr("밴드에서 나갈까요?", "Leave this band?")) },
             text = {
                 Text(
-                    if (d.members.size <= 1) tr("마지막 멤버라서 나가면 밴드와 공유된 악보가 모두 지워져요.", "You're the last member. Leaving deletes the band and its shared scores.")
-                    else tr("내가 공유한 악보는 밴드에 그대로 남아요. 초대 코드로 다시 들어올 수 있어요.", "Scores you shared stay in the band. You can rejoin with the invite code.")
+                    if (d.members.size <= 1) tr("마지막 멤버라서 밴드와 악보가 모두 지워져요.", "You're the last member. The band and its scores will be deleted.")
+                    else tr("공유한 악보는 남아요. 초대 코드로 다시 들어올 수 있어요.", "Your shared scores stay. Rejoin with the code.")
                 )
             },
         )
@@ -499,7 +499,7 @@ fun PickScoreScreen(user: User, repo: BandRepository, bandId: Long, onBack: () -
         Spacer(Modifier.height(24.dp))
         if (works.isEmpty()) {
             Text(
-                tr("보관함에 저장한 악보가 없어요.\n홈에서 새 악보를 만든 뒤 저장해 주세요.", "Your library is empty.\nMake a new score from Home and save it."),
+                tr("보관함이 비어 있어요.", "Your library is empty."),
                 color = cs.onSurfaceVariant,
             )
         }
