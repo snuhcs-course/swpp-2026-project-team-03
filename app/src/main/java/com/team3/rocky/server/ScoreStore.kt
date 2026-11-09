@@ -38,6 +38,9 @@ class LocalScore(val dir: File, val result: JobResult, val semitones: Int = 0) {
 
     val generated: Set<String> get() = result.generatedParts.toSet()
 
+    /** 소리가 거의 없어서 경고를 보여줄 파트 (서버 이름: piano, guitar, bass, drums) */
+    val faint: Set<String> get() = result.faintParts.toSet()
+
     private fun file(rel: String?): File? = rel?.let { File(dir, it) }?.takeIf { it.isFile }
 }
 
@@ -126,6 +129,7 @@ object ScoreStore {
             .put("full_band", part(r.fullBand)).put("instruments", inst)
             .put("original_parts", org.json.JSONArray(r.originalParts))
             .put("generated_parts", org.json.JSONArray(r.generatedParts))
+            .put("faint_parts", org.json.JSONArray(r.faintParts))
             .toString()
     }
 }

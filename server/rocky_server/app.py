@@ -116,7 +116,8 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def job_status(job_id: str) -> dict:
         job = find(job_id)
         body = {"id": job.id, "title": job.title, "requested": job.requested, "state": job.state,
-                "queue_position": worker.queue_position(job.id), "error": job.error, "note": job.note}
+                "queue_position": worker.queue_position(job.id), "error": job.error, "note": job.note,
+                "reason": job.reason}
         if job.state == "queued":
             body.update(stage="SEPARATE", completed=0, total=1, fraction=0.0, eta_sec=None)
         elif job.state == "complete":

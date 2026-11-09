@@ -14,8 +14,9 @@ import java.io.IOException
 import java.io.InputStream
 
 class ServerProgressTest {
-    private fun status(state: String, stage: Stage = Stage.TRANSCRIBE, done: Int = 0, error: String? = null) =
-        JobStatus("job", state, stage, done, 10, null, null, error)
+    private fun status(state: String, stage: Stage = Stage.TRANSCRIBE, done: Int = 0, error: String? = null,
+                       reason: String? = null) =
+        JobStatus("job", state, stage, done, 10, null, null, error, reason = reason)
 
     /** 정해진 순서대로 응답(또는 예외)을 돌려주는 가짜 서버 */
     private class Scripted(vararg replies: Any) : ScoreServer {
@@ -70,6 +71,16 @@ class ServerProgressTest {
             fail("expected JobFailedException")
         } catch (e: JobFailedException) {
             assertEquals("beat_this exited 1", e.message)
+        }
+    }
+
+    @Test fun rejectedInputKeepsServerMessageAndReason() {
+        try {
+            track(Scripted(status("failed", error = "밴드 곡을 올려 주세요.", reason = "not_band_audio")))
+            fail("expected JobFailedException")
+        } catch (e: JobFailedException) {
+            assertEquals("not_band_audio", e.reason)
+            assertEquals("밴드 곡을 올려 주세요.", com.team3.rocky.progress.ScoreJobs.failureMessage(e))
         }
     }
 

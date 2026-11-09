@@ -58,7 +58,17 @@ def test_result_lists_pdf_and_midi_per_part(tmp_path):
     assert r["full_band"]["mp3"] == "scores/band.mp3"
     assert r["instruments"]["piano"]["midi"] == "scores/piano.mid"
     assert r["generated_parts"] == ["piano"]
+    assert r["faint_parts"] == []  # older manifests have no faint_parts
     assert "manifest.json" not in allowed_paths(r)
+
+
+def test_result_passes_faint_parts_from_manifest(tmp_path):
+    import json
+    write_outputs(tmp_path)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["faint_parts"] = ["piano"]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert result_files(tmp_path)["faint_parts"] == ["piano"]
 
 
 def test_arrange_progress_moves_forward_and_ends_at_100(tmp_path):
@@ -106,3 +116,11 @@ def test_contract_10_batch_transcription_stage(tmp_path):
                               "guitar_tab", "bass_tab"])
     p = run_progress(tmp_path, 10)
     assert p["stage"] == "ARRANGE" and p["completed"] == 2   # batch stage is not counted as arrange work
+
+
+def test_rule_gate_stages_are_not_counted_as_arrange_steps():
+    from rocky_server.progress import arrange_steps, current_app_stage
+    completed = ["bs_roformer", "input_check", "muscriptor_batch", "note_gate",
+                 "merge_stems", "beat_this", "align", "guitar_tab"]
+    assert current_app_stage(completed[:2]) == "TRANSCRIBE"
+    assert arrange_steps({"completed": completed}) == (1, 4)

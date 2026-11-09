@@ -57,6 +57,14 @@ class FakeRunner:
 
     def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
         self.calls.append(("midi", job_id, audio.name, requested, original))
+        if self.fail_stage == "reject":
+            (run / "stems").mkdir(parents=True, exist_ok=True)
+            (run / "stems" / "vocals.wav").write_bytes(b"RIFF")
+            write_manifest(run, ["bs_roformer"], status="rejected",
+                           error="InputRejected: Band instruments are barely audible.",
+                           rejection={"code": "not_band_audio", "message": "...",
+                                      "detail": {"band_ratio": 0.02}})
+            raise RuntimeError("midi pod Failed")
         if self.fail_stage == "midi":
             write_manifest(run, ["demucs"], status="failed", error="RuntimeError: muscriptor_drums exited 1")
             raise RuntimeError("job failed")

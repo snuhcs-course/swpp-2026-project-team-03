@@ -39,6 +39,14 @@ class ApiJsonTest {
         val failed = ApiJson.status("""{"id":"x","state":"failed","stage":"TRANSCRIBE","error":"RuntimeError: boom"}""")
         assertTrue(failed.isFailed)
         assertEquals("RuntimeError: boom", failed.error)
+        assertNull(failed.reason)
+        assertTrue(!failed.isRejected)
+    }
+
+    @Test fun rejectedInputCarriesReason() {
+        val s = ApiJson.status("""{"id":"x","state":"failed","stage":"TRANSCRIBE","reason":"not_band_audio","error":"밴드 곡을 올려 주세요."}""")
+        assertTrue(s.isRejected)
+        assertEquals("not_band_audio", s.reason)
     }
 
     @Test fun unknownStageFallsBackToSeparate() {
@@ -64,5 +72,15 @@ class ApiJsonTest {
         assertEquals(setOf("guitar", "piano"), r.instruments.keys)
         assertNull(r.instruments["piano"]!!.midi)
         assertEquals(listOf("piano"), r.generatedParts)
+        assertEquals(emptyList<String>(), r.faintParts)  // older servers send no faint_parts
+    }
+
+    @Test fun resultListsFaintParts() {
+        val r = ApiJson.result(
+            """{"id":"x","title":"t","full_band":{"pdf":"scores/full_band.pdf"},
+               "instruments":{"piano":{"pdf":"scores/piano.pdf"}},
+               "original_parts":["piano"],"generated_parts":[],"faint_parts":["piano"]}"""
+        )
+        assertEquals(listOf("piano"), r.faintParts)
     }
 }
