@@ -951,9 +951,8 @@ fun LineupScreen(
 
 /**
  * 악기 칸. 누르면 켜고 끈다.
- * [onCount]가 있으면(기타) 켜졌을 때 이름 아래에 − 1대 + 버튼이 나와서 대수를 바꿀 수 있다.
- * 작은 폰에서도 잘리지 않게 이름과 대수 버튼을 다른 줄에 둔다.
- * [onBg]·[onFg]는 켜졌을 때 색. 우리 밴드는 주황, 원곡 화면은 흰색(무채색)으로 구분한다.
+ * [onCount]가 있으면(기타) 켜졌을 때 이름 옆에 − 숫자 + 버튼이 나와서 대수를 바꿀 수 있다.
+ * [onBg]·[onFg]는 켜졌을 때 색 (기본 주황).
  */
 @Composable
 fun InstrumentTile(
@@ -970,7 +969,7 @@ fun InstrumentTile(
     val shape = RoundedCornerShape(20.dp)
     val fg = if (on) onFg else cs.onSurface
     Column(
-        modifier.height(140.dp)
+        modifier.height(132.dp)
             .clip(shape)
             .background(if (on) onBg else cs.surface)
             .border(BorderStroke(2.dp, if (on) onBg else cs.surfaceVariant), shape)
@@ -983,16 +982,15 @@ fun InstrumentTile(
             Spacer(Modifier.weight(1f))
             if (onCount != null && !on) Text(tr("1~2대", "1–2"), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1)
         }
-        Column {
+        // 이름은 모든 칸에서 같은 자리. 기타는 같은 줄 오른쪽에 − 숫자 + (작은 폰에서도 잘리지 않게 숫자만).
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(Demo.kor(inst), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
+            Spacer(Modifier.weight(1f))
             if (onCount != null && on) {
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StepButton("−", enabled = count > 1, bg = onFg, fg = onBg) { onCount(count - 1) }
-                    Text(tr("${count}대", "×$count"), fontSize = 15.sp, maxLines = 1, fontWeight = FontWeight.Bold, color = fg,
-                        modifier = Modifier.padding(horizontal = 8.dp))
-                    StepButton("+", enabled = count < 2, bg = onFg, fg = onBg) { onCount(count + 1) }
-                }
+                StepButton("−", enabled = count > 1, bg = onFg, fg = onBg) { onCount(count - 1) }
+                Text("$count", fontSize = 16.sp, maxLines = 1, fontWeight = FontWeight.Bold, color = fg,
+                    modifier = Modifier.padding(horizontal = 6.dp))
+                StepButton("+", enabled = count < 2, bg = onFg, fg = onBg) { onCount(count + 1) }
             }
         }
     }
@@ -1001,21 +999,20 @@ fun InstrumentTile(
 @Composable
 private fun StepButton(text: String, enabled: Boolean, bg: Color, fg: Color, onClick: () -> Unit) {
     Box(
-        Modifier.size(32.dp)
+        Modifier.size(28.dp)
             .clip(androidx.compose.foundation.shape.CircleShape)
             .background(bg.copy(alpha = if (enabled) 1f else 0.35f))
             .clickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = if (text == "+") tr("기타 늘리기", "More guitars") else tr("기타 줄이기", "Fewer guitars") },
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = fg)
+        Text(text, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = fg)
     }
 }
 
 // ---------- 2-1. 원곡 악기 (곡을 올린 다음) ----------
 /**
- * 원곡에 나오는 악기를 고르는 화면. 우리 밴드 화면과 헷갈리지 않게
- * 맨 위에 올린 곡을 보여 주고, 선택 색을 주황 대신 흰색(무채색)으로 쓴다.
+ * 원곡에 나오는 악기를 고르는 화면. 우리 밴드 화면과 헷갈리지 않게 맨 위에 올린 곡을 보여 준다.
  */
 @Composable
 fun OriginalScreen(
@@ -1034,12 +1031,11 @@ fun OriginalScreen(
     val cs = MaterialTheme.colorScheme
     Page(tr("3 / 3단계", "Step 3 of 3"), onBack, actions = {
         Row(Modifier.padding(end = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(3) { Box(Modifier.width(22.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(cs.onSurface)) }
+            repeat(3) { Box(Modifier.width(22.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(cs.primary)) }
         }
     }, bottom = {
         Button(
             onClick = onNext, enabled = canNext,
-            colors = ButtonDefaults.buttonColors(containerColor = cs.onSurface, contentColor = cs.surface),
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(tr("악보 만들기 시작", "Make my scores"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
     }) {
@@ -1079,7 +1075,6 @@ fun OriginalScreen(
                         InstrumentTile(
                             inst, count, Modifier.weight(1f),
                             onCount = if (inst == "guitar") onGuitars else null,
-                            onBg = cs.onSurface, onFg = cs.surface,
                         ) { onToggle(inst) }
                     }
                 }
