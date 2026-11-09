@@ -2,7 +2,8 @@
 
 Track order: guitar(s) from skyline_tab.py -> bass from bass_tab.py -> other instruments of the
 beat-aligned MIDI (piano, ...) -> drums. Guitar and bass tracks of the aligned MIDI are replaced, every
-other track is copied unchanged. Tempo, time signature and resolution come from the aligned MIDI.
+other track is copied unchanged. Time signature and resolution come from the aligned MIDI.
+Only its initial tempo is used; later tempo changes are not preserved.
 Each processed guitar part gets the sound (GM program) most of its notes had in the aligned MIDI;
 nylon (24) becomes steel acoustic (25), since the TAB allows 20 frets and a classical guitar usually has 19.
 Keyboard tracks (GM 0-7, 16-23) are made playable by two hands first (piano_playable.py; --no-keyboard-limit
