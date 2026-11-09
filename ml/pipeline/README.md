@@ -215,7 +215,7 @@ one worker took 115, 67, and 117 seconds respectively; the second serial run
 checks that the gain was not just a warm-cache effect. Package installation
 time is excluded from these export timings.
 
-The frontend contract is `scores/score_outputs.json` (version 5): a full-band
+The frontend contract is `scores/score_outputs.json` (version 6): a full-band
 PDF and MP3, plus a PDF and MP3 for every present instrument family (guitar,
 bass, piano, drums). The MP3 names follow the iteration 2 demo:
 `scores/band.mp3`, `scores/guitar.mp3`, `scores/bass.mp3`,
@@ -225,7 +225,9 @@ recording or a separated stem. The stage also writes `scores/<part>.mid` for eac
 present instrument. When a second guitar is generated, `guitar.pdf` is the
 combined standard-notation score and `guitar_1.pdf` and `guitar_2.pdf` are
 separate TAB PDFs. Matching MIDI and MP3 files are also provided. When
-skyline splits two original guitars, `guitar.pdf` contains both TAB parts.
+skyline splits two original guitars, `guitar.pdf` contains both TAB parts and
+each GP5 track is also published alone as `guitar_1` and `guitar_2` (version 6;
+version 5 made these only for a generated second guitar).
 `scores/piano.pdf` contains the merged piano-stem track (or an AI-generated
 piano part when the original lacks a keyboard). TAB PDFs for guitar and bass come from their
 processed GP5 files through `gp5_to_pdf/convert.js` (local alphaTab). When MIDI-GPT

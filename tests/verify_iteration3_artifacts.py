@@ -68,7 +68,7 @@ def verify_run(run: Path, pdfinfo: str) -> dict[str, int]:
     manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
     contract = json.loads((run / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "complete", run
-    assert contract["version"] in (4, 5), run
+    assert contract["version"] in (4, 5, 6), run
     source = relative_file(run, contract["full_score_midi"])
     assert sha256(source) == contract["full_score_midi_sha256"], source
     score = pretty_midi.PrettyMIDI(str(source))

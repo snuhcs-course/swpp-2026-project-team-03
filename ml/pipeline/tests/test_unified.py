@@ -35,7 +35,7 @@ def fake_score_export(cmd):
         target.write_bytes((b"ID3" if target.suffix == ".mp3" else b"%PDF-1.7\n") + b"\0" * 1100)
 
 
-def fake_gp5_score(source, target, parts, *, force=False):
+def fake_gp5_score(source, target, parts, *, force=False, keep_track=None):
     shutil.copyfile(source, target)
 
 
@@ -276,7 +276,7 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 5
+    assert contract["version"] == 6
     assert contract["audio"]["full_band"]["mp3"] == "scores/band.mp3"
     assert set(contract["audio"]["instruments"]) == {"guitar", "bass", "piano", "drums"}
     assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar_audio.mscx"
@@ -427,7 +427,7 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 5
+    assert contract["version"] == 6
     assert set(contract["instruments"]) == {"guitar", "guitar_1", "guitar_2"}
     assert contract["instruments"]["guitar"]["converter"] == "musescore-score"
     assert contract["instruments"]["guitar_1"]["converter"] == "gp5-alphatab"
