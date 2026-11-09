@@ -83,6 +83,8 @@ class ServerEndToEndTest {
         // 결과 화면: 서버 PDF가 그림으로 보인다
         val work = job.toWork()
         compose.setContent { RockyTheme { ResultScreen(work, onBack = {}, onSaved = {}, onExport = {}, onShareToBand = {}) } }
+        // Advance the Compose clock so ResultScreen's LaunchedEffect starts PDF rendering.
+        compose.waitForIdle()
         try {
             compose.waitUntil(60_000) { compose.onAllNodesWithContentDescription("악보").fetchSemanticsNodes().isNotEmpty() }
         } catch (e: Throwable) {
