@@ -130,8 +130,9 @@ async function renderAllTracks({ scale, width }) {
     [43, 38, 33, 28],         // four-string bass
     [43, 38, 33, 28, 23],     // five-string bass
   ];
-  const isHalfStepDown = (tuning) => standardTunings.some((standard) =>
-    tuning.length === standard.length && standard.every((pitch, i) => tuning[i] === pitch - 1));
+  const isCommonDownTuning = (tuning) => standardTunings.some((standard) =>
+    tuning.length === standard.length && [1, 2, 3, 4].some((semitones) =>
+      standard.every((pitch, i) => tuning[i] === pitch - semitones)));
 
   for (let index = 0; index < score.tracks.length; index += 1) {
     const holder = document.createElement('div');
@@ -145,7 +146,7 @@ async function renderAllTracks({ scale, width }) {
       const label = document.createElement('p');
       label.className = 'tuning';
       const pitches = Array.from(tuning);
-      const preferFlats = isHalfStepDown(pitches);
+      const preferFlats = isCommonDownTuning(pitches);
       label.textContent = `String tuning (top to bottom): ${pitches.map((pitch) => pitchName(pitch, preferFlats)).join(' · ')}`;
       document.body.appendChild(label);
     }

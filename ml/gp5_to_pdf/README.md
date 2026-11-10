@@ -34,8 +34,9 @@ names off beside the staff, so that label is hidden and the heading is used
 instead. For a string instrument, the first page also states the imported GP5
 string tuning from top TAB line to bottom, including octave numbers. Check this
 line when a key change retunes an open low string; it is part of the playable
-score, not merely metadata. Common half-step-down guitar and bass tunings use
-flat note names (for example, Eb · Bb · Gb · Db · Ab · Eb from top to bottom).
+score, not merely metadata. Common guitar and bass down-tunings from Eb to C
+standard use flat note names where needed (for example, Eb · Bb · Gb · Db · Ab · Eb
+from top to bottom). Up-tuned strings retain sharp note names where needed.
 If a numeric tempo mark is drawn on top of a tempo name, the converter
 removes only the overlapping copy; the tempo name and the second mark remain.
 Converting the 18 reference GP5 files below takes about 10 seconds in total.
