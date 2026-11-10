@@ -123,7 +123,7 @@ async function renderAllTracks({ scale, width }) {
     const names = preferFlats
       ? ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
       : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    return `${names[((pitch % 12) + 12) % 12]}${Math.floor(pitch / 12) - 1}`;
+    return names[((pitch % 12) + 12) % 12];
   };
   const standardTunings = [
     [64, 59, 55, 50, 45, 40], // six-string guitar, top TAB line first
