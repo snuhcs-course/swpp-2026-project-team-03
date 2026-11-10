@@ -119,10 +119,19 @@ async function renderAllTracks({ scale, width }) {
   // alphaTab cuts long track names off beside the staff, so the name is printed as a heading instead.
   score.stylesheet.singleTrackTrackNamePolicy = at.model.TrackNamePolicy.Hidden;
   const songTitle = [score.title, score.artist].map((t) => (t || '').trim()).filter(Boolean).join(' - ');
-  const pitchName = (pitch) => {
-    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const pitchName = (pitch, preferFlats) => {
+    const names = preferFlats
+      ? ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+      : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     return `${names[((pitch % 12) + 12) % 12]}${Math.floor(pitch / 12) - 1}`;
   };
+  const standardTunings = [
+    [64, 59, 55, 50, 45, 40], // six-string guitar, top TAB line first
+    [43, 38, 33, 28],         // four-string bass
+    [43, 38, 33, 28, 23],     // five-string bass
+  ];
+  const isHalfStepDown = (tuning) => standardTunings.some((standard) =>
+    tuning.length === standard.length && standard.every((pitch, i) => tuning[i] === pitch - 1));
 
   for (let index = 0; index < score.tracks.length; index += 1) {
     const holder = document.createElement('div');
@@ -135,7 +144,9 @@ async function renderAllTracks({ scale, width }) {
     if (tuning?.length) {
       const label = document.createElement('p');
       label.className = 'tuning';
-      label.textContent = `String tuning (top to bottom): ${Array.from(tuning, pitchName).join(' · ')}`;
+      const pitches = Array.from(tuning);
+      const preferFlats = isHalfStepDown(pitches);
+      label.textContent = `String tuning (top to bottom): ${pitches.map((pitch) => pitchName(pitch, preferFlats)).join(' · ')}`;
       document.body.appendChild(label);
     }
     document.body.appendChild(holder);
