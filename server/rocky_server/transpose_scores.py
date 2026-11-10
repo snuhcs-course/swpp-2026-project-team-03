@@ -53,9 +53,13 @@ def transpose_gp5(source: Path, target: Path, semitones: int) -> None:
         except ValueError:
             # Retune only the part that cannot use shifted frets. Keep the
             # original fret numbers, including tied notes, for this track.
-            shifted.tracks[index] = copy.deepcopy(song.tracks[index])
-            for string in shifted.tracks[index].strings:
+            retuned = copy.deepcopy(song.tracks[index])
+            retuned.song = shifted
+            for measure, header in zip(retuned.measures, shifted.measureHeaders):
+                measure.header = header
+            for string in retuned.strings:
                 string.value += semitones
+            shifted.tracks[index] = retuned
     def shifted_key(key):
         fifths, minor = key.value
         pitch = (fifths * 7 + (9 if minor else 0) + semitones) % 12
