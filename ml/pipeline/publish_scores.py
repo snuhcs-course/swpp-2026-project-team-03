@@ -120,6 +120,31 @@ def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force
     stamp.write_text(config + "\n", encoding="ascii")
 
 
+SKYLINE_ROLES = ("(lead)", "(rhythm)")
+
+
+def skyline_role(name: str) -> str | None:
+    low = name.lower()
+    return next((role for role in SKYLINE_ROLES if role in low), None)
+
+
+def skyline_track_order(gp5_names: list[str], midi_names: list[str]) -> list[int]:
+    """0-based GP5 track for each MIDI guitar of a two-track skyline GP5.
+
+    skyline_tab names both its MIDI and GP5 tracks "Guitar 1 (lead)" and
+    "Guitar 2 (rhythm)", so the tracks are paired by those names; guitar_1.pdf
+    then shows the same part as guitar_1.mid and guitar_1.mp3 even if the
+    assembled score lists the guitars in another order. Without those names,
+    the tracks are paired by position.
+    """
+    gp5_roles = [skyline_role(name) for name in gp5_names]
+    midi_roles = [skyline_role(name) for name in midi_names]
+    if (None in gp5_roles or len(set(gp5_roles)) != len(gp5_roles)
+            or sorted(midi_roles, key=str) != sorted(gp5_roles, key=str)):
+        return list(range(len(midi_names)))
+    return [gp5_roles.index(role) for role in midi_roles]
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -440,7 +465,10 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                      "source_gp5_sha256": sha256(gp5)}])
             if part == "guitar" and split_guitars:
                 # Skyline wrote both guitars into one GP5: publish each track alone.
-                for index, key in enumerate(("guitar_1", "guitar_2")):
+                import guitarpro
+                order = skyline_track_order([t.name for t in guitarpro.parse(str(gp5)).tracks],
+                                            [str(t.name) for t in guitars])
+                for key, index in zip(("guitar_1", "guitar_2"), order):
                     single_guitar_pdf(key, gp5, index)
 
     band_audio = out / "band.mid"
