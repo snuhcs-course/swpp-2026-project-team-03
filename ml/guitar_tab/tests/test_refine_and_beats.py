@@ -101,17 +101,24 @@ def test_chord_note_never_breaks_the_chord_shape():
     assert max(fretted) - min(fretted) <= st.MAX_SPAN
 
 
-def test_tab_refine_flag_changes_the_text_tab(tmp_path):
+def test_tab_runs_refine_only_when_asked(tmp_path, monkeypatch):
+    """tab(refine=...) wiring. tuttut 0.0.6 put E3 on the 12th fret here and 0.0.7 already plays it
+    in first position, so the test checks the call and the result rather than a raw/fixed difference."""
+    pytest.importorskip("tuttut")
     pm = pretty_midi.PrettyMIDI(initial_tempo=120)
     inst = pretty_midi.Instrument(29)
     for k, p in enumerate([52, 50, 45, 50, 45, 50, 47, 48]):
         inst.notes.append(pretty_midi.Note(100, p, k * 0.25, k * 0.25 + 0.25))
     pm.instruments.append(inst)
-    raw, _ = st.tab(pm, "raw", "standard", tmp_path, refine=False)
-    fixed, t = st.tab(pm, "fixed", "standard", tmp_path, refine=True)
-    assert raw.read_text() != fixed.read_text()
+    calls = []
+    real = st.refine_positions
+    monkeypatch.setattr(st, "refine_positions", lambda tab, strings: calls.append(1) or real(tab, strings))
+    st.tab(pm, "raw", "standard", tmp_path, refine=False)
+    assert calls == []
+    _, t = st.tab(pm, "fixed", "standard", tmp_path, refine=True)
+    assert calls == [1]
     frets = [n["fret"] for m in t.tab["measures"] for e in m["events"] for n in e.get("notes", [])]
-    assert max(frets) <= 5          # tuttut's E3 on the 12th fret came back to first position
+    assert max(frets) <= 5          # first position, whichever tuttut version chose the raw fingering
 
 
 # ----------------------------------------------------------------------

@@ -1,10 +1,7 @@
 pretty_midi>=0.2.10
 numpy
 PyGuitarPro
-# tuttut pins numpy 1.23 / matplotlib 3.5, which do not build on Python 3.12+.
-# Install it without its pins:  pip install --no-deps tuttut==0.0.6
-networkx
-matplotlib
+tuttut==0.0.7   # fingering (HMM + Viterbi); see README for the 0.0.6 -> 0.0.7 comparison
 # tests
 pytest
 pytest-cov
