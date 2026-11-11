@@ -17,7 +17,8 @@ class MeasureTest {
         return ScoreLayout.systems(px, img.width, img.height)
     }
 
-    private fun demo(name: String) = File("src/main/assets/demo/$name")
+    /** 예전 시연 곡(Immigrant Song)의 악보 그림·MIDI. 앱에서는 11/11에 뺐고, 시험용으로만 여기에 둔다. */
+    private fun demo(name: String) = resource("demo-$name")
     private fun resource(name: String) = File(javaClass.classLoader!!.getResource("score/$name")!!.toURI())
 
     // ----- 악보 그림 → 줄과 마디 -----

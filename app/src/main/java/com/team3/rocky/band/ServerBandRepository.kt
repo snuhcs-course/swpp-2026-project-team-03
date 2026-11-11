@@ -121,9 +121,11 @@ class ServerBandRepository(
         try {
             BandResult.Success(band(JSONObject(block())))
         } catch (e: MemberApiException) {
-            BandResult.Failure(e.message ?: "요청을 처리하지 못했어요")
+            BandResult.Failure(e.message ?: com.team3.rocky.tr("요청을 처리하지 못했어요", "Couldn't do that"))
         } catch (e: IOException) {
-            BandResult.Failure("서버에 연결하지 못했어요. 인터넷이나 서버 설정을 확인해 주세요")
+            BandResult.Failure(
+                com.team3.rocky.tr("서버에 연결하지 못했어요. 인터넷이나 연결 설정을 확인해 주세요", "Can't reach the server. Check the internet or connection settings"),
+            )
         }
     }
 }

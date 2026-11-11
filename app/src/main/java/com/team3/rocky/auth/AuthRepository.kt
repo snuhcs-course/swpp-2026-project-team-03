@@ -3,6 +3,7 @@ package com.team3.rocky.auth
 
 import android.content.Context
 import com.team3.rocky.server.Backend
+import com.team3.rocky.tr
 import com.team3.rocky.server.MemberApiException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,7 +41,8 @@ class AuthRepository(
             AuthResult.Success(s.user)
         } catch (e: UserDatabase.DuplicateException) {
             val field = if (e.column == UserDatabase.C_NICKNAME) SignUpValidator.Field.NICKNAME else SignUpValidator.Field.EMAIL
-            val message = if (field == SignUpValidator.Field.NICKNAME) "이미 사용 중인 닉네임이에요" else "이미 가입된 이메일이에요"
+            val message = if (field == SignUpValidator.Field.NICKNAME) tr("이미 사용 중인 닉네임이에요", "This nickname is taken")
+                else tr("이미 가입된 이메일이에요", "This email is already registered")
             AuthResult.Invalid(mapOf(field to message))
         } catch (e: MemberApiException) {
             AuthResult.Failure(e.message ?: OFFLINE)
@@ -52,7 +54,7 @@ class AuthRepository(
     suspend fun login(email: String, password: String): AuthResult = withContext(Dispatchers.IO) {
         val normalized = SignUpValidator.normalizeEmail(email)
         if (normalized.isEmpty() || password.isEmpty()) {
-            return@withContext AuthResult.Failure("이메일과 비밀번호를 입력해 주세요")
+            return@withContext AuthResult.Failure(tr("이메일과 비밀번호를 입력해 주세요", "Enter your email and password"))
         }
         // 없는 이메일인지 틀린 비밀번호인지 알려주지 않는다 (가입 여부를 알아내는 것을 막기 위해).
         val s = try {
@@ -87,7 +89,7 @@ class AuthRepository(
                 startSession(Session(updated, me.token))
                 Result.success(updated)
             } catch (e: UserDatabase.DuplicateException) {
-                Result.failure(IllegalArgumentException("이미 사용 중인 닉네임이에요"))
+                Result.failure(IllegalArgumentException(tr("이미 사용 중인 닉네임이에요", "This nickname is taken")))
             } catch (e: MemberApiException) {
                 Result.failure(IllegalArgumentException(e.message ?: OFFLINE))
             } catch (e: IOException) {
@@ -120,8 +122,11 @@ class AuthRepository(
     }
 
     companion object {
-        const val WRONG_CREDENTIALS = "이메일 또는 비밀번호가 맞지 않아요"
-        const val OFFLINE = "서버에 연결하지 못했어요. 인터넷이나 서버 설정을 확인해 주세요"
+        val WRONG_CREDENTIALS get() = tr("이메일 또는 비밀번호가 맞지 않아요", "Wrong email or password")
+        val OFFLINE get() = tr(
+            "서버에 연결하지 못했어요. 인터넷이나 연결 설정을 확인해 주세요",
+            "Can't reach the server. Check the internet or connection settings",
+        )
         private const val PREF = "rocky_session"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_TOKEN = "token"

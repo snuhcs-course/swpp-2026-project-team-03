@@ -1,3 +1,5 @@
+import json
+
 from rocky_server.progress import (allowed_paths, current_app_stage, overall_fraction, result_files,
                                   run_progress)
 
@@ -69,6 +71,17 @@ def test_result_passes_faint_parts_from_manifest(tmp_path):
     manifest["faint_parts"] = ["piano"]
     (tmp_path / "manifest.json").write_text(json.dumps(manifest))
     assert result_files(tmp_path)["faint_parts"] == ["piano"]
+
+
+
+def test_result_passes_undeclared_parts_to_the_app(tmp_path):
+    import json
+    write_outputs(tmp_path)
+    assert result_files(tmp_path)["undeclared_parts"] == []  # older manifests have none
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["undeclared_parts"] = ["guitar"]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert result_files(tmp_path)["undeclared_parts"] == ["guitar"]
 
 
 def test_arrange_progress_moves_forward_and_ends_at_100(tmp_path):

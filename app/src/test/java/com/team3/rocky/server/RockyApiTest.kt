@@ -61,8 +61,18 @@ class RockyApiTest {
         assertTrue(lastBody.contains("name=\"title\"\r\n\r\n밤을 달리다\r\n"))
         assertTrue(lastBody.contains("name=\"original\"\r\n\r\nguitar\r\n"))
         assertTrue(lastBody.contains("name=\"lineup\"\r\n\r\npiano,guitar,guitar2\r\n"))
-        assertTrue(lastBody.contains("filename=\" .mp3\""))
+        // 한글뿐인 이름은 영문 부분이 비므로 song.mp3로 보낸다 (" .mp3"는 서버가 확장자 없는 파일로 보고 거절했다).
+        assertTrue(lastBody.contains("filename=\"song.mp3\""))
+        assertTrue(lastBody.contains("filename*=UTF-8''%EB%B0%A4"))
         assertTrue(lastBody.contains("RIFFdata"))
+    }
+
+    @Test fun asciiFileNameKeepsTheExtension() {
+        assertEquals("song.mp3", RockyApi.asciiFileName("노래.mp3"))
+        assertEquals("song.wav", RockyApi.asciiFileName("밤을 달리다.WAV").lowercase())
+        assertEquals("My song.mp3", RockyApi.asciiFileName("My song.mp3"))
+        assertEquals("live.mp3", RockyApi.asciiFileName("live 라이브.mp3"))
+        assertEquals("song", RockyApi.asciiFileName("노래"))
     }
 
     @Test fun statusIsParsed() {

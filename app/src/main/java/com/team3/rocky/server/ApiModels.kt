@@ -47,10 +47,16 @@ data class JobResult(
     /** 원곡에 없어서 MIDI-GPT가 새로 만든 악기 → 결과 화면에 'AI 생성' 표시 */
     val generatedParts: List<String>,
     /**
-     * 사용자가 원곡에 있다고 골랐지만 그 악기 소리가 거의 들리지 않은 파트 (piano, guitar, bass, drums).
-     * 악보는 만들어졌지만 비어 있거나 부정확할 수 있다 → 결과 화면에 경고 표시용.
+     * 사용자가 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 악기 (파이프라인 manifest의 faint_parts).
+     * 악보는 만들어지지만 음이 아주 적을 수 있어서 결과 화면에 ⚠️를 붙인다.
      */
     val faintParts: List<String> = emptyList(),
+    /**
+     * 사용자가 원곡에 없다고 했지만(고르지 않았지만) 원곡에서 소리가 뚜렷한 악기 (manifest의 undeclared_parts).
+     * faintParts의 반대 경우. '원곡 악기를 다르게 고른 것 같아요' 안내에 쓴다.
+     * 파이프라인이 아직 이 값을 만들지 않으면 비어 있다.
+     */
+    val undeclaredParts: List<String> = emptyList(),
 )
 
 object ApiJson {
@@ -81,6 +87,7 @@ object ApiJson {
             originalParts = o.strings("original_parts"),
             generatedParts = o.strings("generated_parts"),
             faintParts = o.strings("faint_parts"),
+            undeclaredParts = o.strings("undeclared_parts"),
         )
     }
 

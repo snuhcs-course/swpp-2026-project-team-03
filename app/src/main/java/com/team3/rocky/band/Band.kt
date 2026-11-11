@@ -1,6 +1,8 @@
 // AI-generated with Claude Code, 2026-10-31
 package com.team3.rocky.band
 
+import com.team3.rocky.tr
+
 import com.team3.rocky.Work
 import kotlin.random.Random
 
@@ -73,8 +75,8 @@ object BandRules {
     fun validateName(raw: String): String? {
         val name = raw.trim()
         return when {
-            name.isEmpty() -> "밴드 이름을 입력해 주세요"
-            length(name) > NAME_MAX -> "밴드 이름은 ${NAME_MAX}자까지 쓸 수 있어요"
+            name.isEmpty() -> tr("밴드 이름을 입력해 주세요", "Please enter a band name")
+            length(name) > NAME_MAX -> tr("밴드 이름은 ${NAME_MAX}자까지 쓸 수 있어요", "Band names can be up to $NAME_MAX characters")
             else -> null
         }
     }
@@ -86,8 +88,8 @@ object BandRules {
     fun validateCode(raw: String): String? {
         val code = normalizeCode(raw)
         return when {
-            code.isEmpty() -> "초대 코드를 입력해 주세요"
-            code.length != CODE_LENGTH || code.any { it !in CODE_CHARS } -> "초대 코드는 영문·숫자 ${CODE_LENGTH}자리예요"
+            code.isEmpty() -> tr("초대 코드를 입력해 주세요", "Please enter an invite code")
+            code.length != CODE_LENGTH || code.any { it !in CODE_CHARS } -> tr("초대 코드는 영문·숫자 ${CODE_LENGTH}자리예요", "Invite codes are $CODE_LENGTH letters or numbers")
             else -> null
         }
     }

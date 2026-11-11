@@ -27,7 +27,7 @@ BAND_PARTS = ("piano", "drums", "bass", "guitar", "guitar2", "vocal")
 CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
 CODE_LENGTH = 6
 NAME_MAX = 20
-DEMO_CODE = "BAND33"
+OLD_DEMO_CODE = "BAND33"  # the removed demo band; see Accounts._remove_old_demo
 ITERATIONS = 120_000
 
 # Same rules as the app's SignUpValidator.
@@ -143,6 +143,17 @@ CREATE TABLE IF NOT EXISTS shared_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_members_user ON band_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_scores_job ON shared_scores(job_id);
+-- Star ratings (1-5) the app collects under each score, to see which results need work.
+-- One row per score and rater; rater 0 is someone who was not logged in. Kept after the job is deleted.
+CREATE TABLE IF NOT EXISTS ratings (
+    job_id      TEXT    NOT NULL,
+    rater       INTEGER NOT NULL DEFAULT 0,
+    stars       INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+    title       TEXT    NOT NULL DEFAULT '',
+    instruments TEXT    NOT NULL DEFAULT '',
+    rated_at    INTEGER NOT NULL,
+    PRIMARY KEY (job_id, rater)
+);
 """
 
 
@@ -160,8 +171,7 @@ class Accounts:
         self.clock = clock
         with self.lock:
             self.db.executescript(SCHEMA)
-            if self.db.execute("SELECT 1 FROM bands WHERE invite_code = ?", (DEMO_CODE,)).fetchone() is None:
-                self._seed_demo()
+            self._remove_old_demo()
 
     # ---------- helpers ----------
 
@@ -404,28 +414,44 @@ class Accounts:
         """Band members open a shared score from the server, so its job must not be deleted."""
         return self._one("SELECT 1 FROM shared_scores WHERE job_id = ?", job_id) is not None
 
-    # ---------- demo ----------
+    # ---------- ratings ----------
 
-    def _seed_demo(self) -> None:
-        """The band behind invite code BAND33, so a demo has members and a song to open.
-        Its members cannot log in (no password). The song is the app's built-in demo (work 1, no job)."""
-        t = 1_793_350_000_000
+    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=()) -> dict:
+        """Save (or change) one rater's stars for a score."""
+        if isinstance(stars, bool) or not isinstance(stars, int) or not 1 <= stars <= 5:
+            raise AccountError(422, "별점은 1에서 5 사이예요", "stars")
+        parts = [i for i in instruments if i in BAND_PARTS] if isinstance(instruments, list) else []
         with self._tx():
-            ids = []
-            for i, (nick, inst) in enumerate([("지민", "guitar"), ("수빈", "drums"), ("하늘", "piano")]):
-                cur = self.db.execute(
-                    "INSERT INTO users (email, nickname, instruments, terms_agreed_at, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)", (f"demo{i + 1}@rocky.invalid", nick, inst, t, t))
-                ids.append((cur.lastrowid, inst))
-            band = self.db.execute("INSERT INTO bands (name, invite_code, owner_id, created_at) VALUES (?, ?, ?, ?)",
-                                   ("소개원실 밴드", DEMO_CODE, ids[0][0], t)).lastrowid
-            for i, (uid, inst) in enumerate(ids):
-                self.db.execute("INSERT INTO band_members VALUES (?, ?, ?, ?)", (band, uid, inst, t + i))
             self.db.execute(
-                """INSERT INTO shared_scores (band_id, work_id, job_id, title, instruments, work_date, original,
-                   shared_by, shared_at) VALUES (?, 1, NULL, ?, ?, ?, ?, ?, ?)""",
-                (band, "데모 곡 (Immigrant Song - Led Zeppelin)", "piano,drums,bass,guitar", "2026.10.30 21:10", "drums,bass,guitar",
-                 ids[0][0], t + 10))
+                """INSERT INTO ratings (job_id, rater, stars, title, instruments, rated_at) VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (job_id, rater) DO UPDATE SET stars = excluded.stars, title = excluded.title,
+                   instruments = excluded.instruments, rated_at = excluded.rated_at""",
+                (job_id, rater.id if rater else 0, stars, str(title)[:200], ",".join(parts), self.clock()))
+        return {"job_id": job_id, "stars": stars}
+
+    def ratings(self) -> dict:
+        """Every rating, newest first, with the count and average (for the team)."""
+        rows = self.db.execute("SELECT * FROM ratings ORDER BY rated_at DESC").fetchall()
+        items = [{"job_id": r["job_id"], "stars": r["stars"], "title": r["title"],
+                  "instruments": [i for i in r["instruments"].split(",") if i], "rated_at": r["rated_at"],
+                  "logged_in": r["rater"] != 0} for r in rows]
+        average = round(sum(i["stars"] for i in items) / len(items), 2) if items else None
+        histogram = {str(n): sum(1 for i in items if i["stars"] == n) for n in range(1, 6)}
+        return {"count": len(items), "average": average, "histogram": histogram, "ratings": items}
+
+    # ---------- old demo data ----------
+
+    def _remove_old_demo(self) -> None:
+        """Earlier versions seeded a demo band (invite code BAND33) with three members who could not
+        log in and a demo song that only existed inside the app. The demo was removed on 2026-11-11, so
+        delete that band and those placeholder members if an older database still has them."""
+        with self._tx():
+            self.db.execute("DELETE FROM shared_scores WHERE shared_by IN"
+                            " (SELECT id FROM users WHERE email LIKE 'demo_@rocky.invalid' AND password_hash IS NULL)")
+            self.db.execute("DELETE FROM bands WHERE invite_code = ? AND owner_id IN"
+                            " (SELECT id FROM users WHERE email LIKE 'demo_@rocky.invalid' AND password_hash IS NULL)",
+                            (OLD_DEMO_CODE,))
+            self.db.execute("DELETE FROM users WHERE email LIKE 'demo_@rocky.invalid' AND password_hash IS NULL")
 
 
 class _Tx:

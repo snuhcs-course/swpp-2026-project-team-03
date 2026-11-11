@@ -90,7 +90,7 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
             field("lineup", lineup.joinToString(","))
             field("title", title)
             // 한글 파일 이름도 깨지지 않게 filename*(RFC 5987)도 같이 보낸다.
-            val ascii = fileName.filter { it.code in 32..126 && it != '"' }.ifBlank { "song" + extension(fileName) }
+            val ascii = asciiFileName(fileName)
             text("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$ascii\"; " +
                 "filename*=UTF-8''${URLEncoder.encode(fileName, "UTF-8").replace("+", "%20")}\r\n" +
                 "Content-Type: application/octet-stream\r\n\r\n")
@@ -126,6 +126,21 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
         if (!tmp.renameTo(dest)) throw IOException("could not save $dest")
     }
 
+    /**
+     * 악보 별점(1~5)을 보낸다. 로그인했으면 [token]으로 누가 매겼는지 남긴다 (한 사람이 다시 매기면 바뀐다).
+     * 서버에서 곡이 이미 지워졌으면(404) 보낼 곳이 없으므로 그냥 끝낸다.
+     */
+    fun rate(jobId: String, stars: Int, title: String, instruments: List<String>, token: String? = null) {
+        val c = open("/jobs/$jobId/rating", "PUT")
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        if (!token.isNullOrBlank()) c.setRequestProperty("Authorization", "Bearer $token")
+        val body = org.json.JSONObject().put("stars", stars).put("title", title)
+            .put("instruments", org.json.JSONArray(instruments)).toString()
+        c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        if (c.responseCode == 404) c.disconnect() else c.body()
+    }
+
     override fun delete(jobId: String) {
         val c = open("/jobs/$jobId", "DELETE")
         if (c.responseCode == 404) c.disconnect() else c.body()  // 404 = 이미 지워짐
@@ -135,6 +150,17 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
         fun from(ctx: Context) = RockyApi(ServerSettings.url(ctx), ServerSettings.key(ctx))
 
         private fun extension(name: String) = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+
+        /**
+         * filename에 넣을 영문 이름. "노래.mp3"처럼 이름이 한글뿐이면 글자를 빼면 ".mp3"만 남는데,
+         * 서버는 이것을 확장자 없는 파일로 보고 거절한다. 그래서 이름 부분이 비면 song.mp3로 보낸다.
+         */
+        fun asciiFileName(fileName: String): String {
+            val ext = extension(fileName).filter { it.code in 33..126 && it != '"' }
+            val stem = fileName.removeSuffix(extension(fileName))
+                .filter { it.code in 32..126 && it != '"' && it != '\\' && it != '/' }.trim().trim('.')
+            return stem.ifBlank { "song" } + ext
+        }
     }
 }
 

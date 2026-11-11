@@ -11,7 +11,7 @@ import java.io.File
 /**
  * 서버에서 받은 결과를 폰에 저장해 둔 것. 폴더는 filesDir/scores/<작업 id>/.
  * 작업 id(Work.id)로 찾는다. 다른 밴드원이 공유한 악보는 처음 열 때 서버에서 받아 여기에 둔다.
- * 폴더가 없는 작업은 데모 결과(assets/demo)로 보여준다.
+ * 폴더가 없는 작업은 악보 파일이 없는 것으로 본다.
  */
 class LocalScore(val dir: File, val result: JobResult, val semitones: Int = 0) {
     /**

@@ -184,6 +184,9 @@ def result_files(run: Path) -> dict:
         # parts the user said are in the song but whose stem barely sounds (contract 11);
         # the app warns that these scores may be empty or inaccurate
         "faint_parts": manifest.get("faint_parts", []),
+        # The opposite case: parts the user did not declare but that clearly sound in the song;
+        # the app suggests picking the song's instruments again (see the pipeline's undeclared_parts)
+        "undeclared_parts": manifest.get("undeclared_parts", []),
     }
 
 
