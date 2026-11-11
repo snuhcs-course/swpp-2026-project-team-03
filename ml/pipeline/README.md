@@ -21,6 +21,12 @@ filter its audio. `vocals.wav` and `other.wav` are never transcribed or merged.
 Drum sync runs before alignment to Beat This!
 beats. Original instruments omitted from the requested output remain in the
 MIDI-GPT context but are removed from the final score.
+MuScriptor may label notes in the piano stem as acoustic piano, electric piano,
+or organ. During `merge_stems`, these keyboard tracks become one `piano: piano`
+track (GM program 0) before beat alignment and MIDI-GPT. Same-pitch onsets in
+different tracks within 50 ms are kept once with the later end and stronger
+velocity; later same-pitch onsets cut an overlapping earlier note. A non-keyboard
+track mistakenly assigned to the piano stem is still excluded.
 
 The app sends an original lineup (`--original unknown` for the entire song, or
 selected `keyboard,bass,guitar1/guitar2,drums`) and a required output lineup
@@ -90,7 +96,7 @@ can be changed with the two `--bsroformer-*` options. The sample command uses
 `--no-publish` because the GPU image may lack the PDF/MP3 tools;
 omit it once those tools are available to produce all deliverables.
 
-The Beat This! input rule raised the manifest contract to version 8. Start a **new**
+The piano-stem merge raised the manifest contract to version 9. Start a **new**
 output directory; older `manifest.json` files cannot be resumed with this code.
 
 `--requested` is required. The output directory must be new, or contain a
@@ -107,7 +113,7 @@ completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
 ## Automatic score and playback publication
 
 `unified.py` calls `publish_scores.py` after assembling `full_score.mid`.
-This stage needs MuseScore, Poppler `pdfinfo`, Node.js, the `gp5_to_pdf`
+This stage needs MuseScore, Poppler `pdfinfo`, Node.js, `pyguitarpro`, the `gp5_to_pdf`
 module with Playwright/Chromium, and access to Tabtify for guitar/bass GP5
 PDF export. That converter uploads the GP5 to Tabtify, so the caller must
 approve that service for the input score. Set `--musescore`, `--pdfinfo`,
@@ -120,20 +126,23 @@ CPU Job is archived under `sgs/legacy/`. The active
 after transcription and TAB processing. When the PDF/MP3 tools are installed
 in the GPU Pod, omitting `--no-publish` also lets `unified.py` run this stage
 automatically inside that Pod.
+For a standalone local publication with system Chrome, pass
+`--chrome /path/to/chrome` to `publish_scores.py`; the SGS Playwright Pod uses
+its packaged browser and needs no such option.
 
-The frontend contract is `scores/score_outputs.json` (version 3): a full-band
+The frontend contract is `scores/score_outputs.json` (version 4): a full-band
 PDF and MP3, plus a PDF and MP3 for every present instrument family (guitar,
 bass, piano, drums). The MP3 names follow the iteration 2 demo:
 `scores/band.mp3`, `scores/guitar.mp3`, `scores/bass.mp3`,
 `scores/piano.mp3`, and `scores/drums.mp3`. All playback audio is synthesized
-from `full_score.mid` or an instrument-only copy; it is not the original
+from program-preserving copies of `full_score.mid`; it is not the original
 recording or a separated stem. The stage also writes `scores/<part>.mid` for each
 present instrument. When a second guitar is generated, `guitar.pdf` is the
 combined standard-notation score and `guitar_1.pdf` and `guitar_2.pdf` are
 separate TAB PDFs. Matching MIDI and MP3 files are also provided. When
 skyline splits two original guitars, `guitar.pdf` contains both TAB parts.
-`scores/piano.pdf` contains acoustic piano, electric piano and organ tracks
-from the piano stem together. TAB PDFs for guitar and bass come from their
+`scores/piano.pdf` contains the merged piano-stem track (or an AI-generated
+piano part when the original lacks a keyboard). TAB PDFs for guitar and bass come from their
 processed GP5 files through `gp5_to_pdf/convert.js` (Tabtify). When MIDI-GPT
 adds a second guitar, the combined `guitar.pdf` uses MIDI notation while
 `guitar_1.pdf` and `guitar_2.pdf` carry the separate TABs. Full-band, piano and drums
@@ -141,7 +150,14 @@ PDFs come from the assembled MIDI through MuseScore. The full-band PDF uses
 standard notation; guitar and bass part PDFs include TAB. MuseScore 3 omits
 GM drum pitches 39 (clap), 70 (maracas) and 82 (shaker) on import, so
 render-only MIDI copies map them to visible surrogate drum symbols. The
-original `full_score.mid` and `scores/drums.mid` keep their pitches; the
+original `full_score.mid` and `scores/drums.mid` keep their pitches. Before PDF
+export, the imported MuseScore score receives explicit staff names such as
+`Electric Guitar`, `Electric Bass`, `Piano`, and `Drum Set`. This avoids
+MuseScore 3 showing the GM patch subtypes `Jazz Guitar` and `Fingered Bass`
+as if they were different instrument families. GP5 PDF inputs are publication
+copies with matching track names and programs; the processed source GP5s stay
+unchanged. MP3 inputs preserve the final assembled MIDI programs and notes,
+including each song's acoustic or electric guitar choice. The
 JSON records the exact mapping and affected note counts. The JSON also records
 PDF and MP3 source paths, converter, bytes and SHA-256, plus PDF page counts.
 `manifest.json` points to that file through `score_outputs`, and
