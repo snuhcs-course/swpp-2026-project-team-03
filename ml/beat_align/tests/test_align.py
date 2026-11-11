@@ -77,6 +77,21 @@ def test_meter_ignores_occasional_wrong_downbeats():
     assert estimate_beats_per_bar(beats, beats[idx]) == 4
 
 
+def test_meter_half_bars_mixed_with_full_bars_is_four():
+    """21 Guns: 4/4 마디 절반쯤에 중간 다운비트가 찍혀 2박 간격이 근소하게 많아도 4로 본다"""
+    beats = np.arange(0, 400, 0.5)
+    idx, k = [0], 0
+    for bar in range(130):
+        k += 4
+        if bar % 2:              # 마디 하나 걸러 중간에 다운비트가 하나 더 찍힘 (2+2)
+            idx += [k - 2, k]
+        else:
+            idx.append(k)
+    gaps = np.diff(idx)
+    assert (gaps == 2).sum() > (gaps == 4).sum()
+    assert estimate_beats_per_bar(beats, beats[idx]) == 4
+
+
 def test_meter_tie_prefers_four():
     beats = np.arange(0, 30, 0.5)
     idx = [0, 3, 6, 10, 14]                        # 3,3,4,4
@@ -548,6 +563,22 @@ def test_auto_compound_end_to_end():
     assert not r.compound and r.meter == "4/4"
 
 
+def test_fix_beats_counts_bar_on_recounted_beats():
+    # 12/8, 점4분음표 = 1.0 s, 마디 = 4 s. 0~40 s는 점4분음표, 40~100 s는 8분음표 2개(2/3 s)로 찍힘.
+    # 원래 박으로 세면 뒤쪽 마디가 6박이라 다수가 되어 18/8이 나왔다 (2026-11-11 리뷰).
+    beats = np.concatenate([np.arange(0, 40, 1.0), 40 + np.arange(0, 60, 2 / 3)])
+    downbeats = np.arange(0, 100, 4.0)
+    new, down = fix_beats(beats, downbeats, 60)
+    assert np.allclose(np.diff(new), 1.0, atol=1e-6)
+    assert np.allclose(np.diff(down), 4.0, atol=1e-6)
+
+
+def test_auto_compound_mostly_eighth_pairs_is_twelve_eight():
+    beats = np.concatenate([np.arange(0, 40, 1.0), 40 + np.arange(0, 60, 2 / 3)])
+    onsets = np.arange(0, 99, 1 / 3)                     # 셋잇단 8분음표
+    _, r = align_pretty_midi(make_midi([(60, t, t + 0.3) for t in onsets]), beats, np.arange(0, 100, 4.0))
+    assert r.compound and r.meter == "12/8"
+
 def test_cli_no_auto_meter(tmp_path, capsys):
     from align import main, save_beats
     beats = list(np.arange(0, 33) * 0.5)
@@ -584,3 +615,59 @@ def test_align_midi_runs_drum_sync_by_default(tmp_path, capsys):
     args = ["--midi", str(tmp_path / "in.mid"), "--beats", str(tmp_path / "b.json"), "--out", str(tmp_path / "o3.mid")]
     assert main(args) == 0 and "drum sync 32 notes" in capsys.readouterr().out
     assert main(args + ["--no-drum-sync"]) == 0 and "drum sync" not in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------
+# snap_to_reference: MIDI-GPT 생성 파트를 정렬된 MIDI 칸에 맞춤
+# ----------------------------------------------------------------------
+from align import snap_to_reference  # noqa: E402
+
+
+def _ref(bpm=150.0, bars=8):
+    ref = pretty_midi.PrettyMIDI(initial_tempo=bpm, resolution=480)
+    ref.time_signature_changes.append(pretty_midi.TimeSignature(4, 4, 0))
+    d = pretty_midi.Instrument(0, is_drum=True)
+    beat = 60 / bpm
+    d.notes = [pretty_midi.Note(100, 36, k * beat, k * beat + 0.05) for k in range(bars * 4)]
+    ref.instruments.append(d)
+    return ref
+
+
+def test_snap_moves_off_grid_generated_notes_onto_16ths():
+    ref = _ref(150)
+    cell = 60 / 150 / 4
+    gen = pretty_midi.PrettyMIDI(initial_tempo=150)
+    p = pretty_midi.Instrument(0)
+    p.notes = [pretty_midi.Note(90, 60, k * 4 * cell + 0.03, k * 4 * cell + 0.03 + 2 * cell) for k in range(16)]
+    gen.instruments.append(p)
+    out, st = snap_to_reference(gen, ref)
+    assert st["mode"] == "seconds" and st["mean_offgrid_16ths_before"] > 0.1
+    for n in out.instruments[0].notes:
+        assert abs(n.start / cell - round(n.start / cell)) < 1e-6
+        assert n.end - n.start >= cell - 1e-9
+    assert out.get_tempo_changes()[1][0] == pytest.approx(150)
+
+
+def test_snap_reads_beats_when_generated_file_kept_a_default_tempo():
+    # MIDI-GPT wrote the right beats but left 120 BPM: seconds would stretch the part, beats fit the song
+    ref = _ref(150, bars=8)                     # 32 beats = 12.8 s
+    gen = pretty_midi.PrettyMIDI(initial_tempo=120)
+    p = pretty_midi.Instrument(0)
+    beat120 = 0.5
+    p.notes = [pretty_midi.Note(90, 60, k * beat120, (k + 1) * beat120) for k in range(32)]
+    gen.instruments.append(p)
+    out, st = snap_to_reference(gen, ref)
+    assert st["mode"] == "beats"
+    starts = [n.start for n in out.instruments[0].notes]
+    assert starts[:3] == pytest.approx([0.0, 0.4, 0.8])
+
+
+def test_snap_merges_two_notes_that_land_in_one_cell():
+    ref = _ref(120)
+    gen = pretty_midi.PrettyMIDI(initial_tempo=120)
+    p = pretty_midi.Instrument(0)
+    p.notes = [pretty_midi.Note(90, 60, 0.01, 0.2), pretty_midi.Note(90, 60, 0.04, 0.5)]
+    gen.instruments.append(p)
+    out, st = snap_to_reference(gen, ref)
+    assert len(out.instruments[0].notes) == 1 and st["same_cell_merged"] == 1
+    assert out.instruments[0].notes[0].end == pytest.approx(0.5)

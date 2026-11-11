@@ -10,7 +10,7 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from drum_sync import MAX_CORRECTION, drum_sync, local_lag, main  # noqa: E402
+from drum_sync import MAX_CORRECTION, drum_sync, grid_error, local_lag, main  # noqa: E402
 
 
 def song(drum_times, guitar_times, guitar_len=0.2):
@@ -83,3 +83,54 @@ def test_cli(tmp_path, capsys):
     assert "moved 20 notes" in capsys.readouterr().out
     out = pretty_midi.PrettyMIDI(str(tmp_path / "out.mid"))
     assert np.allclose([n.start for n in out.instruments[1].notes], drums, atol=0.002)
+
+
+# ----------------------------------------------------------------------
+# grid guard (2026-11 interview: 간주 엇박 연결이 정박으로 들어감)
+# ----------------------------------------------------------------------
+def _band(bpm, offset16, drift=0.0, n_beats=48):
+    """kick/snare on every beat, hi-hat on the 8ths; bass every 2 beats at offset16 16ths from the beat."""
+    b = 60 / bpm
+    s16 = b / 4
+    pm = pretty_midi.PrettyMIDI()
+    d = pretty_midi.Instrument(0, is_drum=True)
+    bass = pretty_midi.Instrument(33)
+    for k in range(n_beats):
+        d.notes.append(pretty_midi.Note(100, 36 if k % 2 == 0 else 38, k * b, k * b + 0.05))
+        d.notes.append(pretty_midi.Note(80, 42, k * b + b / 2, k * b + b / 2 + 0.05))
+    for k in range(2, n_beats, 2):
+        t = k * b + offset16 * s16 + drift
+        bass.notes.append(pretty_midi.Note(100, 40, t, t + s16))
+    pm.instruments += [d, bass]
+    return pm, [k * b for k in range(n_beats)]
+
+
+def test_fast_syncopation_is_pulled_onto_the_beat_without_beats():
+    # 172 BPM: a 16th (87 ms) is inside MATCH_TOLERANCE, so the old rule reads the anticipation as lag
+    pm, _ = _band(172, -1)
+    r = drum_sync(pm)
+    assert r.moved_notes > len(pm.instruments[1].notes) // 2
+
+
+def test_grid_guard_keeps_fast_syncopation():
+    pm, beats = _band(172, -1)
+    before = [n.start for n in pm.instruments[1].notes]
+    r = drum_sync(pm, beats=beats)
+    after = [n.start for n in pm.instruments[1].notes]
+    assert r.grid_kept > 0
+    assert sum(abs(a - b) > 0.02 for a, b in zip(after, before)) <= 1
+
+
+def test_grid_guard_still_fixes_muscriptor_lag():
+    # 125 BPM, every bass note 80 ms late (off the 16th grid): still corrected
+    pm, beats = _band(125, 0, drift=0.08)
+    r = drum_sync(pm, beats=beats)
+    assert r.moved_notes == len(pm.instruments[1].notes)
+    assert all(abs(n.start - round(n.start / (60 / 125 / 4)) * (60 / 125 / 4)) < 0.01 for n in pm.instruments[1].notes)
+
+
+def test_grid_error_counts_triplet_cells_as_on_grid():
+    beats = [0.0, 0.5, 1.0, 1.5]
+    assert grid_error([0.5 + 0.5 / 3], beats)[0] < 1e-9     # triplet 8th
+    assert grid_error([0.5 + 0.125], beats)[0] < 1e-9       # 16th
+    assert grid_error([0.5 + 0.0625], beats)[0] > 0.05      # 32nd: off grid
