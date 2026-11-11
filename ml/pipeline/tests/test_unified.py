@@ -3,6 +3,8 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
@@ -12,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, merge_stem_midis, merge_tracks, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
-from publish_scores import publication_ready  # noqa: E402
+from publish_scores import publication_ready, publish  # noqa: E402
 
 
 def instrument(program, name, *, drum=False):
@@ -208,18 +210,20 @@ def test_stage_failure_is_recorded_and_resume_checks_same_input(tmp_path):
                            tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
                            bsroformer_lib_dir=tmp_path / "pylib")
     runner = Runner(args)
-    assert runner.config["pipeline_contract"] == 9
+    assert runner.config["pipeline_contract"] == 10
     assert runner.config["beat_mix_stems"] == ["drums", "bass", "guitar", "piano", "other"]
     assert runner.config["separator"].endswith("BS-RoFormer-SW-6stem")
     output = runner.out / "result.mid"
     with pytest.raises(RuntimeError, match="missing, empty, or invalid"):
         runner.stage("broken", [output], lambda: None)
     assert runner.manifest["status"] == "failed"
+    assert runner.manifest["stage_seconds"]["broken"] >= 0
     assert "broken" not in runner.manifest["completed"]
     args.resume = True
     resumed = Runner(args)
     resumed.stage("broken", [output], lambda: output.write_bytes(b"midi"))
     assert "broken" in resumed.manifest["completed"]
+    assert resumed.manifest["stage_seconds"]["broken"] >= 0
     args.seed = 1
     with pytest.raises(ValueError, match="configuration differs"):
         Runner(args)
@@ -272,11 +276,13 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 4
+    assert contract["version"] == 5
     assert contract["audio"]["full_band"]["mp3"] == "scores/band.mp3"
     assert set(contract["audio"]["instruments"]) == {"guitar", "bass", "piano", "drums"}
-    assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar.mid"
-    assert contract["audio"]["full_band"]["source"] == "scores/band.mid"
+    assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar_audio.mscx"
+    assert contract["audio"]["instruments"]["guitar"]["midi_source"] == "scores/guitar.mid"
+    assert contract["audio"]["full_band"]["source"] == "scores/band_audio.mscx"
+    assert contract["audio"]["full_band"]["midi_source"] == "scores/band.mid"
     assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "guitar.mid")).instruments] == [26]
     assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "bass.mid")).instruments] == [33]
     assert [track.program for track in pretty_midi.PrettyMIDI(str(runner.out / "scores" / "band.mid")).instruments] == [26, 33, 0, 2, 16, 0]
@@ -289,6 +295,8 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     assert len([cmd for cmd in calls if cmd[0] == "node"]) == 2
     assert len([cmd for cmd in calls if cmd[0] == "musescore3" and cmd[2].endswith(".pdf")]) == 3
     assert len([cmd for cmd in calls if cmd[0] == "musescore3" and cmd[2].endswith(".mp3")]) == 5
+    assert all(cmd[3].endswith(".mscx") for cmd in calls
+               if cmd[0] == "musescore3" and cmd[2].endswith(".mp3"))
     assert publication_ready(runner.out)
     assert runner.manifest["status"] == runner.manifest["score_publication"] == "complete"
 
@@ -318,6 +326,58 @@ def test_auto_publication_checks_tools_before_creating_run(tmp_path):
         cli([str(audio), str(output), "--requested", "keyboard",
              "--musescore", "missing-rocky-musescore-executable"])
     assert not output.exists()
+
+
+def test_publication_uses_bounded_parallel_exports(tmp_path, monkeypatch):
+    run = tmp_path / "run"
+    run.mkdir()
+    score = pretty_midi.PrettyMIDI()
+    score.instruments.append(instrument(0, "piano: piano"))
+    score.write(str(run / "full_score.mid"))
+    (run / "manifest.json").write_text(json.dumps({"status": "complete"}), encoding="utf-8")
+    active = peak = 0
+    lock = threading.Lock()
+
+    def converter(cmd, **kwargs):
+        nonlocal active, peak
+        if cmd[0] == "pdfinfo":
+            return subprocess.CompletedProcess(cmd, 0, stdout="Pages: 1\n")
+        target = Path(cmd[2])
+        if target.suffix in {".pdf", ".mp3"}:
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.03)
+        try:
+            fake_score_export(cmd)
+        finally:
+            if target.suffix in {".pdf", ".mp3"}:
+                with lock:
+                    active -= 1
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("publish_scores.subprocess.run", converter)
+    monkeypatch.setattr("publish_scores.shutil.which", lambda executable: executable)
+    result = publish(run, "musescore3", "node", tmp_path / "unused.js", "pdfinfo",
+                     force=False, render_workers=2)
+    assert peak == 2
+    assert set(result["instruments"]) == {"piano"}
+    assert publication_ready(run)
+    serial = publish(run, "musescore3", "node", tmp_path / "unused.js", "pdfinfo",
+                     force=True, render_workers=1)
+    assert result == serial
+    real_ready = publication_ready
+    readiness_checks = []
+
+    def delayed_ready(path):
+        readiness_checks.append(path)
+        return len(readiness_checks) > 2 and real_ready(path)
+
+    monkeypatch.setattr("publish_scores.publication_ready", delayed_ready)
+    monkeypatch.setattr("publish_scores.time.sleep", lambda _: None)
+    assert publish(run, "musescore3", "node", tmp_path / "unused.js", "pdfinfo",
+                   force=False, render_workers=2) == result
+    assert len(readiness_checks) == 3
 
 
 def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, monkeypatch):
@@ -356,7 +416,7 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 4
+    assert contract["version"] == 5
     assert set(contract["instruments"]) == {"guitar", "guitar_1", "guitar_2"}
     assert contract["instruments"]["guitar"]["converter"] == "musescore-score"
     assert contract["instruments"]["guitar_1"]["converter"] == "gp5-to-pdf"
