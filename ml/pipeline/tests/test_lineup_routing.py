@@ -12,6 +12,7 @@ import pytest
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import unified  # noqa: E402
 from unified import Runner, STEMS  # noqa: E402
 
 
@@ -24,15 +25,17 @@ def one_track(part, start=0.0):
     return score
 
 
-@pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers", [
-    ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1),
-    ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1),
-    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1),
-    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2),
-    ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1),
+@pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers,stereo_two", [
+    ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1, False),
+    ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1, False),
+    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1, False),
+    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2, False),
+    ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1, False),
+    # two guitars panned apart: the stereo check forces a split, no MIDI-GPT guitar
+    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, False, 1, True),
 ])
 def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, auto_split,
-                                    expected_stems, expected_guitars, generated, workers):
+                                    expected_stems, expected_guitars, generated, workers, stereo_two):
     audio = tmp_path / "song.wav"
     sf.write(str(audio), np.zeros((16000, 2), dtype="float32"), 8000, subtype="FLOAT")
     args = SimpleNamespace(audio=audio, output_dir=tmp_path / "run", original=original,
@@ -42,7 +45,9 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
                            tab_python=Path(sys.executable), no_publish=True,
                            bsroformer_models_dir=tmp_path / "models",
                            bsroformer_lib_dir=tmp_path / "pylib",
-                           transcription_workers=workers)
+                           transcription_workers=workers,
+                           # one fixture note per stem would count as a sparse stem
+                           min_notes_per_minute=0.0)
 
     def save_beats(path, beats, downbeats):
         Path(path).write_text(json.dumps({"beats": beats, "downbeats": downbeats}), encoding="utf-8")
@@ -63,7 +68,8 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
 
     monkeypatch.setitem(sys.modules, "align", SimpleNamespace(
         detect_beats=detect_beats,
-        save_beats=save_beats, load_beats=load_beats, align_midi=align_midi))
+        save_beats=save_beats, load_beats=load_beats, align_midi=align_midi,
+        snap_to_reference=lambda generated, reference: (generated, {"mode": "stub"})))
 
     def guitar_tracks(directory):
         directory = Path(directory)
@@ -77,6 +83,7 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
         return output
 
     monkeypatch.setitem(sys.modules, "full_score", SimpleNamespace(guitar_tracks=guitar_tracks, build=build))
+    monkeypatch.setattr(unified, "guitar_stereo", lambda path, cfg: {"two_guitars": stereo_two})
     runner = Runner(args)
     commands = []
 
@@ -84,8 +91,9 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
         commands.append((stage, command))
         if stage == "bs_roformer":
             directory = Path(command[3])
+            # audible stems longer than the input check's minimum, so the song is accepted
             for stem in (*STEMS, "no_vocals"):
-                sf.write(str(directory / f"{stem}.wav"), np.zeros((128, 2), dtype="float32"),
+                sf.write(str(directory / f"{stem}.wav"), np.full((8000 * 40, 2), 0.1, dtype="float32"),
                          8000, subtype="FLOAT")
         elif stage == "muscriptor_batch":
             jobs = json.loads(Path(command[command.index("--jobs-file") + 1]).read_text(encoding="utf-8"))
@@ -136,11 +144,17 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     assert beat_inputs == [runner.out / "stems" / "no_vocals.wav"]
     assert runner.manifest["beat_mix_stems"] == ["drums", "bass", "guitar", "piano", "other"]
     assert runner.manifest["generated_targets"] == (["guitar"] if generated else [])
+    assert runner.manifest["faint_parts"] == []  # every fixture stem is audible
     if original == "unknown" and requested == "guitar1":
         assert "--split" not in next(command for stage, command in commands if stage == "guitar_tab")
         assert "--split" in next(command for stage, command in commands if stage == "guitar_compressed")
     if original == "unknown" and requested == "guitar2":
-        assert "--split" not in next(command for stage, command in commands if stage == "guitar_tab")
+        command = next(command for stage, command in commands if stage == "guitar_tab")
+        if stereo_two:
+            assert command[command.index("--split") + 1] == "always"
+            assert runner.manifest["guitar_stereo"] == {"two_guitars": True}
+        else:
+            assert "--split" not in command
     if original == "keyboard,drums":
         assert "guitar" not in {track.name.split(":")[0] for track in
                                 pretty_midi.PrettyMIDI(str(runner.out / "aligned.mid")).instruments}

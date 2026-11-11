@@ -35,7 +35,7 @@ def fake_score_export(cmd):
         target.write_bytes((b"ID3" if target.suffix == ".mp3" else b"%PDF-1.7\n") + b"\0" * 1100)
 
 
-def fake_gp5_score(source, target, parts, *, force=False):
+def fake_gp5_score(source, target, parts, *, force=False, keep_track=None):
     shutil.copyfile(source, target)
 
 
@@ -210,7 +210,7 @@ def test_stage_failure_is_recorded_and_resume_checks_same_input(tmp_path):
                            tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
                            bsroformer_lib_dir=tmp_path / "pylib")
     runner = Runner(args)
-    assert runner.config["pipeline_contract"] == 10
+    assert runner.config["pipeline_contract"] == 13
     assert runner.config["beat_mix_stems"] == ["drums", "bass", "guitar", "piano", "other"]
     assert runner.config["separator"].endswith("BS-RoFormer-SW-6stem")
     output = runner.out / "result.mid"
@@ -276,7 +276,7 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 5
+    assert contract["version"] == 6
     assert contract["audio"]["full_band"]["mp3"] == "scores/band.mp3"
     assert set(contract["audio"]["instruments"]) == {"guitar", "bass", "piano", "drums"}
     assert contract["audio"]["instruments"]["guitar"]["source"] == "scores/guitar_audio.mscx"
@@ -427,7 +427,7 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
     monkeypatch.setattr("publish_scores.gp5_score", fake_gp5_score)
     runner.publish_outputs()
     contract = json.loads((runner.out / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-    assert contract["version"] == 5
+    assert contract["version"] == 6
     assert set(contract["instruments"]) == {"guitar", "guitar_1", "guitar_2"}
     assert contract["instruments"]["guitar"]["converter"] == "musescore-score"
     assert contract["instruments"]["guitar_1"]["converter"] == "gp5-alphatab"

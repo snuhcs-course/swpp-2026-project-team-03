@@ -86,11 +86,17 @@ def musescore_score(source: Path, target: Path, musescore: str, *, force: bool =
     stamp.write_text(source_hash + "\n", encoding="ascii")
 
 
-def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force: bool = False) -> None:
-    """Change only the publication copy of a TAB's title and playback patch."""
+def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force: bool = False,
+              keep_track: int | None = None) -> None:
+    """Change only the publication copy of a TAB's title and playback patch.
+
+    ``keep_track`` (0-based) keeps one track of a multi-track GP5, so the two
+    skyline guitars of one TAB file can be published as separate PDFs.
+    """
     source_hash = sha256(source)
     stamp = target.with_suffix(target.suffix + ".source_sha256")
-    config = json.dumps({"source_sha256": source_hash, "parts": parts}, sort_keys=True)
+    config = json.dumps({"source_sha256": source_hash, "parts": parts, "keep_track": keep_track},
+                        sort_keys=True)
     if not force and target.is_file() and stamp.is_file() and stamp.read_text().strip() == config:
         return
     try:
@@ -98,6 +104,12 @@ def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force
     except ImportError as exc:
         raise ImportError("pyguitarpro is required to label GP5 score PDFs") from exc
     song = guitarpro.parse(str(source))
+    if keep_track is not None:
+        if not 0 <= keep_track < len(song.tracks):
+            raise ValueError(f"GP5 has no track {keep_track + 1}: {source}")
+        track = song.tracks[keep_track]
+        track.number = 1
+        song.tracks = [track]
     if len(song.tracks) != len(parts):
         raise ValueError(f"GP5 has {len(song.tracks)} tracks for {len(parts)} final-score parts: {source}")
     song.title = parts[0][0] if len(parts) == 1 else " / ".join(name for name, _ in parts)
@@ -106,6 +118,31 @@ def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force
         track.channel.instrument = program
     guitarpro.write(song, str(target))
     stamp.write_text(config + "\n", encoding="ascii")
+
+
+SKYLINE_ROLES = ("(lead)", "(rhythm)")
+
+
+def skyline_role(name: str) -> str | None:
+    low = name.lower()
+    return next((role for role in SKYLINE_ROLES if role in low), None)
+
+
+def skyline_track_order(gp5_names: list[str], midi_names: list[str]) -> list[int]:
+    """0-based GP5 track for each MIDI guitar of a two-track skyline GP5.
+
+    skyline_tab names both its MIDI and GP5 tracks "Guitar 1 (lead)" and
+    "Guitar 2 (rhythm)", so the tracks are paired by those names; guitar_1.pdf
+    then shows the same part as guitar_1.mid and guitar_1.mp3 even if the
+    assembled score lists the guitars in another order. Without those names,
+    the tracks are paired by position.
+    """
+    gp5_roles = [skyline_role(name) for name in gp5_names]
+    midi_roles = [skyline_role(name) for name in midi_names]
+    if (None in gp5_roles or len(set(gp5_roles)) != len(gp5_roles)
+            or sorted(midi_roles, key=str) != sorted(gp5_roles, key=str)):
+        return list(range(len(midi_names)))
+    return [gp5_roles.index(role) for role in midi_roles]
 
 
 def sha256(path: Path) -> str:
@@ -170,12 +207,13 @@ def publication_ready(run: Path) -> bool:
     """Validate the full publication contract before --resume skips the stage."""
     try:
         contract = json.loads((run / "scores" / "score_outputs.json").read_text(encoding="utf-8"))
-        if contract.get("version") != 5 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
+        if contract.get("version") != 6 or sha256(run / "full_score.mid") != contract["full_score_midi_sha256"]:
             return False
-        families = {family(track) for track in pretty_midi.PrettyMIDI(str(run / "full_score.mid")).instruments
-                    if track.notes}
-        manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
-        expected = families | ({"guitar_1", "guitar_2"} if manifest.get("guitar_extra_dir") else set())
+        tracks = [track for track in pretty_midi.PrettyMIDI(str(run / "full_score.mid")).instruments
+                  if track.notes]
+        families = {family(track) for track in tracks}
+        split = sum(family(track) == "guitar" for track in tracks) == 2
+        expected = families | ({"guitar_1", "guitar_2"} if split else set())
         if set(contract["instruments"]) != expected or set(contract["audio"]["instruments"]) != expected:
             return False
         pdfs = [contract["full_band"], *contract["instruments"].values()]
@@ -349,10 +387,14 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         if part in families:
             part_midis[part] = out / f"{part}.mid"
             part_tracks[part] = export_part_midi(score, part, part_midis[part])
-    if guitar_extra_dir is not None:
-        guitars = [track for track in score.instruments if track.notes and family(track) == "guitar"]
-        if len(guitars) != 2:
-            raise ValueError(f"Expected two guitar tracks for separate TAB PDFs, got {len(guitars)}")
+    # Two guitars (skyline lead/rhythm split, or one transcribed + one
+    # MIDI-GPT guitar) also get guitar_1/guitar_2 so the app can show each
+    # player's part on its own page. guitar.pdf still holds both.
+    guitars = [track for track in score.instruments if track.notes and family(track) == "guitar"]
+    if guitar_extra_dir is not None and len(guitars) != 2:
+        raise ValueError(f"Expected two guitar tracks for separate TAB PDFs, got {len(guitars)}")
+    split_guitars = len(guitars) == 2
+    if split_guitars:
         for index, track in enumerate(guitars, start=1):
             key = f"guitar_{index}"
             one = copy.deepcopy(score)
@@ -381,6 +423,20 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         musescore_score(render_midi, notation, musescore, force=force)
         render(part, notation, "musescore-score",
                [musescore, "-o", str(out / f"{part}.pdf"), str(notation)], tracks)
+    def single_guitar_pdf(key: str, gp5: Path, keep_track: int | None) -> None:
+        guitar = pretty_midi.PrettyMIDI(str(part_midis[key])).instruments[0]
+        label, _ = score_part_name(guitar, int(key[-1]))
+        prepared_gp5 = out / f"{key}_render.gp5"
+        gp5_score(gp5, prepared_gp5, [(label, int(guitar.program))], force=force,
+                  keep_track=keep_track)
+        command = [node, str(gp5_converter), str(prepared_gp5), str(out / f"{key}.pdf"),
+                   "--timeout-ms", "180000"]
+        if chrome is not None:
+            command.extend(("--chrome", str(chrome)))
+        render(key, prepared_gp5, GP5_PDF_CONVERTER, command,
+               [{"name": key, "source_gp5": gp5.relative_to(run).as_posix(),
+                 "source_gp5_sha256": sha256(gp5)}])
+
     for part in ("guitar", "bass"):
         if part not in families:
             continue
@@ -391,18 +447,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                    [musescore, "-o", str(out / "guitar.pdf"), str(notation)],
                    part_tracks["guitar"])
             for key, directory in (("guitar_1", guitar_dir), ("guitar_2", guitar_extra_dir)):
-                gp5 = choose_gp5(directory, key)
-                guitar = pretty_midi.PrettyMIDI(str(part_midis[key])).instruments[0]
-                label, _ = score_part_name(guitar, int(key[-1]))
-                prepared_gp5 = out / f"{key}_render.gp5"
-                gp5_score(gp5, prepared_gp5, [(label, int(guitar.program))], force=force)
-                command = [node, str(gp5_converter), str(prepared_gp5), str(out / f"{key}.pdf"),
-                           "--timeout-ms", "180000"]
-                if chrome is not None:
-                    command.extend(("--chrome", str(chrome)))
-                render(key, prepared_gp5, GP5_PDF_CONVERTER, command,
-                       [{"name": key, "source_gp5": gp5.relative_to(run).as_posix(),
-                         "source_gp5_sha256": sha256(gp5)}])
+                single_guitar_pdf(key, choose_gp5(directory, key), None)
         else:
             directory = guitar_dir if part == "guitar" else run / "bass"
             gp5 = choose_gp5(directory, part)
@@ -418,6 +463,13 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
             render(part, prepared_gp5, GP5_PDF_CONVERTER, command,
                    [{"name": part, "source_gp5": gp5.relative_to(run).as_posix(),
                      "source_gp5_sha256": sha256(gp5)}])
+            if part == "guitar" and split_guitars:
+                # Skyline wrote both guitars into one GP5: publish each track alone.
+                import guitarpro
+                order = skyline_track_order([t.name for t in guitarpro.parse(str(gp5)).tracks],
+                                            [str(t.name) for t in guitars])
+                for key, index in zip(("guitar_1", "guitar_2"), order):
+                    single_guitar_pdf(key, gp5, index)
 
     band_audio = out / "band.mid"
     score.write(str(band_audio))
@@ -427,7 +479,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     for part in ("guitar", "bass", "piano", "drums"):
         if part in families:
             render_audio(part, part_midis[part], part_tracks[part])
-    if guitar_extra_dir is not None:
+    if split_guitars:
         for key in ("guitar_1", "guitar_2"):
             render_audio(key, part_midis[key], part_tracks[key])
 
@@ -442,8 +494,8 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
             for future in futures:
                 future.result()
 
-    extra_keys = ("guitar_1", "guitar_2") if guitar_extra_dir is not None else ()
-    contract = {"version": 5, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
+    extra_keys = ("guitar_1", "guitar_2") if split_guitars else ()
+    contract = {"version": 6, "full_score_midi": final.relative_to(run).as_posix(), "full_score_midi_sha256": source_hash,
                 "drum_notation_map": {str(k): v for k, v in DRUM_NOTATION_MAP.items()},
                 "drum_notation_mapped_counts": {str(k): v for k, v in drum_mapping_counts.items()},
                 "full_band": outputs["full_band"],
