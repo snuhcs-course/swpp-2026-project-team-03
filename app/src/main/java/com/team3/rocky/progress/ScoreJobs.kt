@@ -168,7 +168,7 @@ object ScoreJobs {
         }
         job.phase = "완성된 악보를 받는 중"
         val local = withContext(Dispatchers.IO) { ScoreStore.download(app, server, id, job.id) }
-        job.original = originalFromServer(job.lineup, local.result.originalParts)
+        job.original = originalFromServer(job.lineup, local.result.originalParts, local.result.generatedParts)
         job.phase = null
         job.progress = JobProgress(Stage.ARRANGE, 1, 1, 0, done = true)
     }
@@ -276,10 +276,15 @@ object ScoreJobs {
             .filter { it in Demo.INSTRUMENTS }
             .distinct()
 
-    /** 서버가 판단한 원곡 구성을 앱의 파트 이름으로. 원곡에 기타가 있으면 기타 2도 원곡 파트로 본다. */
-    fun originalFromServer(lineup: List<String>, serverOriginal: List<String>): List<String> {
+    /**
+     * 서버가 판단한 원곡 구성을 앱의 파트 이름으로.
+     * 원곡에 기타가 있으면 기타 2도 원곡 파트로 본다. 단 서버가 기타를 새로 만들었으면
+     * (generated_parts에 guitar, 원곡 기타 1대 → 우리 밴드 2대) 기타 2는 AI 생성 파트다.
+     */
+    fun originalFromServer(lineup: List<String>, serverOriginal: List<String>,
+                           generated: List<String> = emptyList()): List<String> {
         val set = serverOriginal.filter { it in Demo.INSTRUMENTS }.toMutableSet()
-        if ("guitar" in set && Demo.GUITAR2 in lineup) set += Demo.GUITAR2
+        if ("guitar" in set && Demo.GUITAR2 in lineup && "guitar" !in generated) set += Demo.GUITAR2
         return Demo.ordered(set)
     }
 
