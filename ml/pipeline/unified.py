@@ -21,7 +21,7 @@ import time
 from typing import Callable
 
 import pretty_midi
-from rule_gates import GateConfig, InputRejected, check_input, gate_stem, guitar_stereo
+from rule_gates import GateConfig, InputRejected, check_input, gate_stem, guitar_stereo, undeclared_parts
 from separate_bs_roformer import (CHECKPOINT_SHA256, CONFIG_SHA256, NONVOCAL_STEMS,
                                   PACKAGE_VERSION, STEMS, valid_stems)
 
@@ -394,6 +394,15 @@ class Runner:
         self.manifest["status"] = "complete"
         atomic_json(self.manifest_path, self.manifest)
 
+    def record_undeclared(self, input_report: Path) -> None:
+        """Rule 3: write the parts the user left out of a known original lineup but whose stem
+        clearly sounds (manifest `undeclared_parts`, read by the server for the app)."""
+        if self.original_unknown or not input_report.is_file():
+            return
+        report = json.loads(input_report.read_text(encoding="utf-8"))
+        self.manifest["undeclared_parts"] = undeclared_parts(report, self.original_parts, self.gates)
+        atomic_json(self.manifest_path, self.manifest)
+
     def run(self) -> Path:
         stems_dir = self.out / "stems"
         stem_files = [stems_dir / f"{s}.wav" for s in STEMS]
@@ -420,6 +429,7 @@ class Runner:
             finally:
                 atomic_json(input_report, report)
         self.stage("input_check", [input_report], input_check)
+        self.record_undeclared(input_report)
 
         midi_dir = self.out / "stem_midi"
         midi_dir.mkdir(exist_ok=True)

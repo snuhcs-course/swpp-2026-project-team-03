@@ -17,6 +17,11 @@ Two rules run inside unified.py:
    When the original lineup is unknown, a stem left with very few notes is
    then treated as absent. A declared instrument is never removed this way;
    it is reported as "faint" instead, so the app can warn about that part.
+3. Undeclared parts (right after the input check, original lineup known only).
+   The opposite of "faint": a band stem the user did NOT pick as part of the
+   original song, but which holds a clear share of the separated sound. It is
+   only reported (manifest `undeclared_parts`); nothing in the output changes.
+   The app then suggests picking the song's instruments again.
 
 The thresholds were chosen from 14 band songs and 45 non-band files on
 2026-11-09; see benchmarks/2026-11-09-rule-gates.md. Re-measure them with
@@ -60,6 +65,10 @@ class GateConfig:
     # two-guitar stereo check, original lineup unknown only: two guitars panned apart
     stereo_max_corr: float = 0.2        # median left/right correlation of 1 s windows below this ...
     stereo_max_balance: float = 0.17    # ... and median |L-R| energy balance below this -> two guitars
+    # undeclared-part report, original lineup known only: share of all six stems' energy.
+    # Provisional (2026-11-11, not yet measured on the band14 set): a stem that is only separation
+    # leakage should stay well below this. Re-measure with measure_gates.py (stem_share column).
+    undeclared_min_share: float = 0.10
     hop: int = 1024
 
     def as_dict(self) -> dict:
@@ -129,6 +138,17 @@ def check_input(stems_dir: Path, cfg: GateConfig) -> dict:
                             "Band instruments (drums, bass, guitar, keyboard) are barely audible.",
                             report)
     return report
+
+
+def undeclared_parts(input_report: dict, declared, cfg: GateConfig) -> list[str]:
+    """Band stems the user did not declare in the original lineup but that clearly sound.
+
+    `input_report` is check_input()'s result (its `stem_share`). Only a report: the
+    pipeline still treats these parts as absent, as the user asked.
+    """
+    share = input_report.get("stem_share") or {}
+    return sorted(stem for stem in BAND_STEMS
+                  if stem not in declared and float(share.get(stem, 0.0)) >= cfg.undeclared_min_share)
 
 
 def note_levels(notes: list[pretty_midi.Note], power: np.ndarray, rate: int, cfg: GateConfig,

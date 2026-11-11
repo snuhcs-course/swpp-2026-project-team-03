@@ -10,7 +10,8 @@ import pytest
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rule_gates import GateConfig, InputRejected, STEMS, check_input, gate_stem, guitar_stereo  # noqa: E402
+from rule_gates import (GateConfig, InputRejected, STEMS, check_input, gate_stem, guitar_stereo,  # noqa: E402
+                        undeclared_parts)
 from unified import Runner, family  # noqa: E402
 
 RATE = 8000
@@ -171,3 +172,42 @@ def test_rejection_is_recorded_in_manifest(tmp_path):
     assert runner.manifest["status"] == "rejected"
     assert runner.manifest["rejection"]["code"] == "not_band_audio"
     assert "input_check" not in runner.manifest["completed"]
+
+
+def test_undeclared_part_that_sounds_is_reported(tmp_path):
+    # the user said the song has drums and bass, but the guitar stem is loud and the piano stem is only leakage
+    write_stems(tmp_path, {"vocals": 0.3, "drums": 0.3, "bass": 0.2, "guitar": 0.25, "piano": 0.02, "other": 0.05})
+    report = check_input(tmp_path, GateConfig())
+    assert undeclared_parts(report, {"drums", "bass"}, GateConfig()) == ["guitar"]
+    # declared parts are never reported, and the threshold comes from the config
+    assert undeclared_parts(report, {"drums", "bass", "guitar"}, GateConfig()) == []
+    assert undeclared_parts(report, {"drums", "bass"}, GateConfig(undeclared_min_share=0.0)) == ["guitar", "piano"]
+
+
+def test_undeclared_parts_are_written_only_for_a_known_original(tmp_path):
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"fixture")
+    stems = tmp_path / "stems"
+    write_stems(stems, {"vocals": 0.3, "drums": 0.3, "bass": 0.2, "guitar": 0.25, "piano": 0.02, "other": 0.05})
+    report = tmp_path / "input_check.json"
+    import json
+    report.write_text(json.dumps(check_input(stems, GateConfig())))
+
+    def runner(original):
+        args = SimpleNamespace(audio=audio, output_dir=tmp_path / f"out-{original}", requested=["drums", "bass", "guitar"],
+                               original=original, model="model", midigpt_model="yellow_medium", device="cpu",
+                               beat_checkpoint="checkpoint", seed=0, resume=False,
+                               modules_root=tmp_path, model_python=Path(sys.executable),
+                               tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
+                               bsroformer_lib_dir=tmp_path / "pylib")
+        return Runner(args)
+
+    known = runner("drums,bass")
+    known.record_undeclared(report)
+    assert known.manifest["undeclared_parts"] == ["guitar"]
+    assert json.loads(known.manifest_path.read_text())["undeclared_parts"] == ["guitar"]
+
+    unknown = runner("unknown")  # the pipeline found the lineup itself: nothing to suggest
+    unknown.record_undeclared(report)
+    assert "undeclared_parts" not in unknown.manifest
+
