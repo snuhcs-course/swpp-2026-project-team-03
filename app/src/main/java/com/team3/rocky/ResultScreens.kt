@@ -3,7 +3,6 @@ package com.team3.rocky
 import kotlin.math.roundToInt
 import androidx.compose.ui.layout.layout
 import android.Manifest
-import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -129,10 +128,10 @@ fun ResultScreen(
     fun warnText(inst: String) = Demo.label(inst, work.instruments).let { name ->
         tr("⚠️ 원곡에서 $name 소리가 거의 들리지 않았어요", "⚠️ The $name is barely audible in the song")
     }
-    // 서버에서 만든 악보면 폰에 받아 둔 PDF·MIDI를, 아니면 데모 파일(assets/demo)을 쓴다.
+    // 서버에서 만들어 폰에 받아 둔 PDF·MIDI·MP3를 쓴다. 받아 둔 파일이 없으면 악보가 없다고 알려 준다.
     val local = remember(work.id) { ScoreStore.load(ctx, work.id) }
-    // 서버 결과는 기타 2를 따로 가질 수 있어서 파트 이름 그대로, 데모는 파일 이름(assetBase)으로.
-    fun baseOf(part: String?) = part?.let { if (local != null) it else Demo.assetBase(it) } ?: Demo.BAND
+    // 서버 결과는 기타 2를 따로 가질 수 있어서 파트 이름 그대로 쓴다.
+    fun baseOf(part: String?) = part ?: Demo.BAND
     fun serverPart(base: String) = base.takeIf { it != Demo.BAND }
     // 밴드에서 열면 내 파트를 먼저 골라 둔다. 보컬처럼 악보가 없는 파트는 밴드 전체 악보를 보여준다.
     val bandPart = myPart?.takeIf { it in work.instruments }
@@ -151,8 +150,7 @@ fun ResultScreen(
     /** 선택한 파트의 음원을 준비한다. 위치는 그대로 이어서 재생할 수 있게 [startAt]으로 옮긴다. */
     fun load(base: String, startAt: Int): Boolean {
         // 서버 결과는 악보로 합성한 MP3(없으면 MIDI)를 들려준다.
-        val path = if (local != null) local.audio(serverPart(base))?.absolutePath
-        else Assets.find(ctx, base, AUDIO_EXT)?.let { Assets.toCache(ctx, it).absolutePath }
+        val path = local?.audio(serverPart(base))?.absolutePath
         if (path == null) {
             Toast.makeText(ctx, tr("이 파트는 소리가 없어요", "No audio for this part"), Toast.LENGTH_SHORT).show()
             return false
@@ -208,13 +206,9 @@ fun ResultScreen(
     LaunchedEffect(scoreBase) {
         pages = null
         pages = withContext(Dispatchers.IO) {
-            if (local != null) {
-                local.pdf(serverPart(scoreBase))
-                    ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
-                    .orEmpty().map { trimMargins(it).asImageBitmap() }
-            } else Assets.pages(ctx, scoreBase).mapNotNull { n ->
-                ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) }?.let { trimMargins(it).asImageBitmap() }
-            }
+            local?.pdf(serverPart(scoreBase))
+                ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
+                .orEmpty().map { trimMargins(it).asImageBitmap() }
         }
     }
     val scoreScroll = rememberScrollState()
@@ -665,37 +659,14 @@ fun ExportScreen(work: Work, onBack: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val title = safeFileName(work.title)
-    val all = remember { Assets.list(ctx) }
     val local = remember(work.id) { ScoreStore.load(ctx, work.id) }
 
-    val bandItems = remember {
-        if (local != null) return@remember serverBandItems(ctx, local, title)
-        val band = bandName()
-        listOfNotNull(
-            ExportItem("band.pdf", scoreLabel(), "PDF") { Assets.toCache(ctx, "band.pdf", "${title}_$band.pdf") }
-                .takeIf { "band.pdf" in all },
-            ExportItem("band.mid", "MIDI", "MID") { Assets.toCache(ctx, "band.mid", "${title}_$band.mid") }
-                .takeIf { "band.mid" in all },
-            ExportItem("band.mp3", audioLabel(), "MP3") { Assets.toCache(ctx, "band.mp3", "${title}_$band.mp3") }
-                .takeIf { "band.mp3" in all },
-        )
-    }
-    val partItems = remember {
-        if (local != null) return@remember serverPartItems(ctx, local, work, title)
-        work.instruments.associateWith { inst ->
-            val base = Demo.assetBase(inst)
-            val name = Demo.label(inst, work.instruments)
-            listOfNotNull(
-                ExportItem("$inst.pdf", scoreLabel(), "PDF") { Assets.pagesToPdf(ctx, base, "${title}_$name.pdf") }
-                    .takeIf { Assets.pages(ctx, base).isNotEmpty() },
-                ExportItem("$inst.mp3", audioLabel(), "MP3") { Assets.toCache(ctx, "$base.mp3", "${title}_$name.mp3") }
-                    .takeIf { "$base.mp3" in all },
-            )
-        }.filterValues { it.isNotEmpty() }
-    }
+    // 폰에 받아 둔 파일이 없으면 내보낼 것도 없다.
+    val bandItems = remember { local?.let { serverBandItems(ctx, it, title) }.orEmpty() }
+    val partItems = remember { local?.let { serverPartItems(ctx, it, work, title) }.orEmpty() }
     val checked = remember { mutableStateMapOf<String, Boolean>().apply { put("band.pdf", true) } }
     var busy by remember { mutableStateOf(false) }
-    val count = checked.count { it.value }
+    val count = (bandItems + partItems.values.flatten()).count { checked[it.key] == true }
 
     /** 고른 파일을 만든 뒤 [use]에 넘긴다 (휴대폰 저장 또는 공유). */
     fun withFiles(use: suspend (List<File>) -> Unit) {

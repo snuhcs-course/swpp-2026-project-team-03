@@ -181,6 +181,9 @@ def result_files(run: Path) -> dict:
         "generated_parts": manifest.get("generated_targets", []),
         # Declared parts whose stem barely sounds (note gate "faint"); the app marks them with a warning.
         "faint_parts": manifest.get("faint_parts", []),
+        # The opposite case: parts the user did not declare but that clearly sound in the song.
+        # The pipeline does not write this yet; until it does the list is empty.
+        "undeclared_parts": manifest.get("undeclared_parts", []),
     }
 
 

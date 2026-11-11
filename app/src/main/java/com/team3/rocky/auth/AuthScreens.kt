@@ -55,7 +55,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -178,15 +177,6 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
         if (SignUpValidator.nicknameError(form.nickname) == null) { delay(300); nicknameTaken = auth.isNicknameTaken(form.nickname) }
     }
 
-    // 이메일 인증 (시연: 번호를 화면에 보여준다)
-    val verification = remember { EmailVerification() }
-    var codeSent by remember { mutableStateOf(false) }
-    var code by remember { mutableStateOf("") }
-    var verifiedEmail by remember { mutableStateOf<String?>(null) }
-    var codeError by remember { mutableStateOf<String?>(null) }
-    var shownCode by remember { mutableStateOf<String?>(null) }
-    val verified = verifiedEmail != null && verifiedEmail == SignUpValidator.normalizeEmail(form.email)
-
     // 프로필 사진 (선택)
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var photo by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -212,26 +202,12 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
         failure = null
     }
 
-    fun sendCode() {
-        if (SignUpValidator.emailError(form.email) != null || emailTaken) return
-        shownCode = verification.send(form.email)
-        codeSent = true
-        code = ""
-        codeError = null
-    }
-
-    fun checkCode() {
-        codeError = verification.check(form.email, code)
-        if (codeError == null) { verifiedEmail = SignUpValidator.normalizeEmail(form.email); focus.clearFocus() }
-    }
-
     fun submit() {
         if (busy) return
         focus.clearFocus()
         submitted = true
         val local = SignUpValidator.validate(form)
         if (local.isNotEmpty() || emailTaken || nicknameTaken) return
-        if (!verified) { codeError = tr("이메일 인증을 완료해 주세요", "Please verify your email"); return }
         busy = true
         scope.launch {
             when (val r = auth.signUp(form)) {
@@ -263,34 +239,13 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
             SectionLabel(tr("계정", "Account"))
             AuthField(
                 value = form.email,
-                onValueChange = { v -> edit { it.copy(email = v) }; codeError = null },
+                onValueChange = { v -> edit { it.copy(email = v) } },
                 label = tr("이메일", "Email"), keyboardType = KeyboardType.Email, tag = "signup_email",
                 error = emailErr,
-                hint = when {
-                    verified -> tr("✓ 인증 완료", "✓ Verified")
-                    form.email.isNotEmpty() -> tr("✓ 사용할 수 있는 이메일이에요", "✓ This email works")
-                    else -> tr("로그인할 때 아이디로 써요", "You'll use this to log in")
-                },
-                trailing = {
-                    TextButton(
-                        onClick = { sendCode() },
-                        enabled = !verified && SignUpValidator.emailError(form.email) == null && !emailTaken,
-                    ) { Text(if (verified) tr("인증됨", "Verified") else if (codeSent) tr("다시 받기", "Resend") else tr("인증번호 받기", "Get code"), fontSize = 12.sp) }
-                },
+                hint = if (form.email.isNotEmpty()) tr("✓ 사용할 수 있는 이메일이에요", "✓ This email works")
+                else tr("로그인할 때 아이디로 써요", "You'll use this to log in"),
                 onNext = { focus.moveFocus(FocusDirection.Down) },
             )
-            if (codeSent && !verified) {
-                Spacer(Modifier.height(8.dp))
-                AuthField(
-                    value = code, onValueChange = { code = it.filter(Char::isDigit).take(EmailVerification.CODE_LENGTH); codeError = null },
-                    label = tr("인증번호 ${EmailVerification.CODE_LENGTH}자리", "${EmailVerification.CODE_LENGTH}-digit code"), keyboardType = KeyboardType.NumberPassword,
-                    tag = "signup_code", error = codeError, hint = tr("메일로 받은 번호 (5분 안에 입력)", "Code from your email (within 5 min)"),
-                    trailing = { TextButton(onClick = { checkCode() }, enabled = code.length == EmailVerification.CODE_LENGTH) { Text(tr("확인", "OK")) } },
-                    imeAction = ImeAction.Done, onDone = { checkCode() },
-                )
-            } else if (!codeSent && codeError != null) {
-                Text(codeError!!, color = cs.error, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp))
-            }
             Spacer(Modifier.height(8.dp))
             PasswordField(
                 value = form.password, onValueChange = { v -> edit { it.copy(password = v) } },
@@ -377,26 +332,6 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
             confirmButton = { TextButton(onClick = { termsDialog = null }) { Text(tr("닫기", "Close")) } },
             title = { Text(title) },
             text = { Text(body, fontSize = 14.sp, modifier = Modifier.verticalScroll(rememberScrollState())) },
-        )
-    }
-
-    shownCode?.let { c ->
-        AlertDialog(
-            onDismissRequest = { shownCode = null },
-            confirmButton = { TextButton(onClick = { shownCode = null }) { Text(tr("확인", "OK")) } },
-            title = { Text(tr("인증번호를 보냈어요", "Code sent")) },
-            text = {
-                Column {
-                    Text(tr("${SignUpValidator.normalizeEmail(form.email)}로 인증번호를 보냈어요.", "We sent a code to ${SignUpValidator.normalizeEmail(form.email)}."))
-                    Spacer(Modifier.height(16.dp))
-                    Text(tr("시연 버전이라 여기에 표시해요.", "Demo version: shown here instead of email."), fontSize = 12.sp, color = cs.onSurfaceVariant)
-                    Text(
-                        c, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
-                        letterSpacing = 6.sp, color = cs.primary, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
-                }
-            },
         )
     }
 }

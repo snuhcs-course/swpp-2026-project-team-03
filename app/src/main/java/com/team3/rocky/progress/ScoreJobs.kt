@@ -29,7 +29,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** 사용자가 고른 음원 파일. 데모 곡이면 없음(null). */
+/** 사용자가 고른 음원 파일. */
 data class AudioFile(val uri: Uri, val fileName: String)
 
 /** 백그라운드에서 만들고 있는 악보 한 곡. */
@@ -38,8 +38,7 @@ class ScoreJob(
     val title: String,
     val lineup: List<String>,
     original: List<String>,
-    /** null이면 데모 곡: 서버 없이 미리 준비한 결과를 보여준다. */
-    val audio: AudioFile? = null,
+    val audio: AudioFile,
 ) {
     var progress by mutableStateOf<JobProgress?>(null)
         internal set
@@ -59,6 +58,11 @@ class ScoreJob(
     /** 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트 (⚠️) */
     var unrecognized by mutableStateOf<List<String>>(emptyList())
         internal set
+    /** 원곡에 없다고 했지만(고르지 않았지만) 원곡에서 소리가 뚜렷했던 파트 */
+    var overlooked by mutableStateOf<List<String>>(emptyList())
+        internal set
+    /** 원곡 악기를 실제와 다르게 고른 것 같은지. 그러면 '악기 다시 선택'을 권한다. */
+    val instrumentDoubt get() = unrecognized.isNotEmpty() || overlooked.isNotEmpty()
     /** 서버 작업 번호. 업로드가 끝나면 생긴다 */
     internal var serverId: String? = null
     internal var runner: Job? = null
@@ -67,7 +71,6 @@ class ScoreJob(
 
     val done get() = progress?.done == true
     val failed get() = error != null
-    val isServer get() = audio != null
 
     /** 완성되면 결과 화면에서 쓰는 작업 정보 (id가 같아서 저장 여부·서버 결과 파일을 맞출 수 있다). */
     fun toWork() = Work(
@@ -80,20 +83,24 @@ class ScoreJob(
 
 /**
  * 악보 만들기 작업 목록. 화면을 옮겨 다녀도 계속 돌아가도록 화면 밖(앱 전체)에서 관리한다.
- * 음원을 고른 곡은 ROCKY 서버에서 만들고(업로드 → 진행 상태 → 결과 받기),
- * 데모 곡은 [DemoProgress]로 흉내 낸다. 앱을 완전히 끄면 목록은 사라진다.
+ * 고른 곡을 ROCKY 서버에서 만든다(업로드 → 진행 상태 → 결과 받기). 앱을 완전히 끄면 목록은 사라진다.
  */
 object ScoreJobs {
     val jobs = mutableStateListOf<ScoreJob>()
-    var demoSource: ProgressSource = DemoProgress
     /** 테스트에서 가짜 서버로 바꿀 수 있게 */
     var serverFactory: (Context) -> ScoreServer = { RockyApi.from(it) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /** 앱 화면이 보이는 중인지 (MainActivity가 알려 준다). 안 보일 때 멈추면 휴대폰 알림을 보낸다. */
+    @Volatile var appVisible = false
+
+    /** 방금 멈춘 곡. 앱 안에서 팝업으로 한 번 알리고, 닫으면 null로 돌린다. */
+    var stopped by mutableStateOf<ScoreJob?>(null)
+
     val runningCount get() = jobs.count { !it.done && !it.failed }
 
     fun start(
-        ctx: Context, title: String, lineup: List<String>, original: List<String>, audio: AudioFile? = null,
+        ctx: Context, title: String, lineup: List<String>, original: List<String>, audio: AudioFile,
     ): ScoreJob {
         val job = ScoreJob(System.currentTimeMillis(), title, lineup, original, audio)
         jobs.add(0, job)
@@ -109,31 +116,17 @@ object ScoreJobs {
     fun retry(ctx: Context, job: ScoreJob) {
         job.runner?.cancel()
         job.error = null
+        if (stopped === job) stopped = null
+        JobNotifier.clear(ctx.applicationContext, job)
         // 처음부터 다시 만들면 진행 막대도 0%부터 다시 시작한다.
         if (job.serverId == null) { job.progress = null; job.bar.reset() }
         launch(ctx.applicationContext, job)
     }
 
-    /** 서버로 만들지 못한 곡을 데모 결과로 바꿔 보여준다 (시연에서 서버가 안 될 때). */
-    fun useDemo(ctx: Context, job: ScoreJob): ScoreJob {
-        remove(job)
-        return start(ctx, job.title, job.lineup, Demo.DEMO_ORIGINAL)
-    }
-
     private fun launch(app: Context, job: ScoreJob) {
         job.runner = scope.launch {
             try {
-                if (job.audio == null) {
-                    job.bar.started()
-                    demoSource.track(job.id.toString()).collect { job.progress = it }
-                    // 데모 곡은 서버가 없으니, 실제 원곡(드럼·베이스·기타)에 없는 악기를 '있다'고 고르면
-                    // 소리가 거의 없는 파트로 보고 ⚠️를 붙인다 (예: 피아노). 화면 확인용.
-                    job.unrecognized = Demo.faintParts(
-                        job.lineup, job.claimed, job.claimed.filter { it !in Demo.DEMO_ORIGINAL },
-                    )
-                } else {
-                    runOnServer(app, job, job.audio)
-                }
+                runOnServer(app, job, job.audio)
                 Toast.makeText(
                     app, tr("'${job.title}' 악보가 완성됐어요", "'${job.title}' is ready"), Toast.LENGTH_LONG,
                 ).show()
@@ -143,7 +136,11 @@ object ScoreJobs {
                 job.phase = null
                 // 서버에서 실패했거나 서버가 작업을 잃어버렸으면, 다시 시도할 때 새로 올린다.
                 if (e is JobFailedException || (e is ApiException && e.code == 404)) job.serverId = null
-                job.error = failureMessage(e)
+                val reason = failureMessage(e)
+                job.error = reason
+                // 멈춘 것을 알린다: 앱 안에서는 팝업, 앱을 안 보고 있으면 휴대폰 알림도.
+                stopped = job
+                if (!appVisible) JobNotifier.stopped(app, job, reason)
             }
         }
     }
@@ -189,6 +186,7 @@ object ScoreJobs {
         val faint = Demo.faintParts(job.lineup, job.claimed, local.result.faintParts)
             .filter { it !in local.result.generatedParts }
         job.unrecognized = faint
+        job.overlooked = Demo.overlookedParts(job.lineup, job.claimed, local.result.undeclaredParts)
         // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮긴 파트이므로 ✨ 대상에서 뺀다.
         job.original = Demo.ordered(
             originalFromServer(
@@ -209,12 +207,14 @@ object ScoreJobs {
     fun remove(job: ScoreJob) {
         job.runner?.cancel()
         jobs.remove(job)
+        if (stopped === job) stopped = null
     }
 
     /** 로그아웃하면 다른 회원에게 보이지 않게 비운다. */
     fun clear() {
         jobs.forEach { it.runner?.cancel() }
         jobs.clear()
+        stopped = null
     }
 
     /** 앱의 파트 이름 → 서버(unified.py --requested)의 악기 이름. 기타 2대도 guitar 하나로 보낸다. */

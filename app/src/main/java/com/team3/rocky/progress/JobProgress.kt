@@ -2,9 +2,7 @@
 package com.team3.rocky.progress
 
 import com.team3.rocky.tr
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -76,40 +74,7 @@ fun formatEta(sec: Int?): String = when {
 
 private fun roundTo(value: Int, step: Int) = ((value.toFloat() / step).roundToInt() * step).coerceAtLeast(step)
 
-/** 진행 상태를 받아오는 곳. 서버가 생기면 GET /jobs/{id}를 2초마다 부르는 구현으로 바꾼다. */
+/** 진행 상태를 받아오는 곳. 실제 구현은 서버의 GET /jobs/{id}를 2초마다 부르는 ServerProgress. */
 interface ProgressSource {
     fun track(jobId: String): Flow<JobProgress>
-}
-
-/**
- * 시연용: 서버 없이 진행 상태를 흉내 낸다.
- * 실제 데모 곡처럼 채보를 30개 구간으로 나눠 보내되, 시간은 10초 남짓으로 줄였다.
- */
-object DemoProgress : ProgressSource {
-    private data class Step(val stage: Stage, val units: Int, val msPerUnit: Long)
-
-    private val plan = listOf(
-        Step(Stage.SEPARATE, 4, 300),
-        Step(Stage.TRANSCRIBE, 30, 250),
-        Step(Stage.BEATS, 1, 600),
-        Step(Stage.ARRANGE, 2, 500),
-    )
-
-    override fun track(jobId: String): Flow<JobProgress> = flow {
-        val totalMs = plan.sumOf { it.units * it.msPerUnit }
-        var elapsed = 0L
-        for (step in plan) {
-            for (i in 0..step.units) {
-                // 실제 채보처럼 첫 구간이 끝나기 전에는 남은 시간을 모른다.
-                val eta = if (step.stage == Stage.TRANSCRIBE && i == 0) null
-                else ceil((totalMs - elapsed) / 1000.0).toInt()
-                emit(JobProgress(step.stage, i, step.units, eta))
-                if (i < step.units) {
-                    delay(step.msPerUnit)
-                    elapsed += step.msPerUnit
-                }
-            }
-        }
-        emit(JobProgress(Stage.ARRANGE, 1, 1, 0, done = true))
-    }
 }

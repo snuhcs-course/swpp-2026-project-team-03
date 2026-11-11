@@ -6,7 +6,6 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import com.team3.rocky.Demo
 import com.team3.rocky.Work
 
 /**
@@ -14,7 +13,7 @@ import com.team3.rocky.Work
  * 지금은 같은 폰 안에서만 밴드를 공유한다. 서버가 생기면 같은 표 구조를 서버로 옮기고
  * [BandRepository]의 서버 구현으로 바꾼다.
  */
-class BandDatabase(context: Context, name: String? = DB_NAME, private val seedDemo: Boolean = true) :
+class BandDatabase(context: Context, name: String? = DB_NAME) :
     SQLiteOpenHelper(context.applicationContext, name, null, VERSION) {
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -63,7 +62,13 @@ class BandDatabase(context: Context, name: String? = DB_NAME, private val seedDe
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_members_user ON band_members(user_id)")
-        if (seedDemo) seed(db)
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        // 예전 버전이 넣어 둔 시연용 예시 밴드(초대 코드 BAND33, 가짜 멤버)를 지운다.
+        // 예시 밴드의 악보는 앱에 들어 있던 시연용 파일을 썼는데, 그 파일을 11/11에 뺐다.
+        if (!db.isReadOnly) db.delete("bands", "invite_code = ? AND owner_id = ?", arrayOf("BAND33", "-1"))
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -231,34 +236,8 @@ class BandDatabase(context: Context, name: String? = DB_NAME, private val seedDe
     private fun Cursor.long(col: String): Long = getLong(getColumnIndexOrThrow(col))
     private fun Cursor.int(col: String): Int = getInt(getColumnIndexOrThrow(col))
 
-    /**
-     * 시연용 예시 밴드. 서버가 없어서 다른 폰의 친구를 데려올 수 없으니,
-     * 초대 코드 [DEMO_CODE]로 들어가면 멤버 셋과 공유된 악보 하나가 있는 밴드를 볼 수 있게 한다.
-     * 가짜 멤버는 실제 회원 id와 겹치지 않게 음수 id를 쓴다.
-     */
-    private fun seed(db: SQLiteDatabase) {
-        val t = 1_793_350_000_000L   // 2026.10.30 무렵. 순서만 맞으면 된다.
-        val bandId = db.insertOrThrow("bands", null, ContentValues().apply {
-            put("name", "소개원실 밴드"); put("invite_code", DEMO_CODE); put("owner_id", -1L); put("created_at", t)
-        })
-        listOf(Triple(-1L, "지민", "guitar"), Triple(-2L, "수빈", "drums"), Triple(-3L, "하늘", "piano"))
-            .forEachIndexed { i, (id, nick, inst) ->
-                db.insertOrThrow("band_members", null, ContentValues().apply {
-                    put("band_id", bandId); put("user_id", id); put("nickname", nick)
-                    put("instrument", inst); put("joined_at", t + i)
-                })
-            }
-        db.insertOrThrow("shared_scores", null, ContentValues().apply {
-            put("band_id", bandId); put("work_id", 1L); put("title", Demo.SONG_TITLE)
-            put("instruments", Demo.INSTRUMENTS.joinToString(",")); put("work_date", "2026.10.30 21:10")
-            put("original", Demo.DEMO_ORIGINAL.joinToString(","))
-            put("shared_by", -1L); put("shared_by_name", "지민"); put("shared_at", t + 10)
-        })
-    }
-
     companion object {
         const val DB_NAME = "rocky_bands.db"
-        const val DEMO_CODE = "BAND33"
         private const val VERSION = 2
     }
 }

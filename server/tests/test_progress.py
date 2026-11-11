@@ -72,6 +72,15 @@ def test_result_passes_faint_parts_to_the_app(tmp_path):
     assert result_files(tmp_path)["faint_parts"] == ["bass"]
 
 
+def test_result_passes_undeclared_parts_to_the_app(tmp_path):
+    write_outputs(tmp_path)
+    assert result_files(tmp_path)["undeclared_parts"] == []
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["undeclared_parts"] = ["guitar"]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert result_files(tmp_path)["undeclared_parts"] == ["guitar"]
+
+
 def test_arrange_progress_moves_forward_and_ends_at_100(tmp_path):
     from rocky_server.progress import arrange_steps
     base = ["bs_roformer", *[f"muscriptor_{s}" for s in STEMS], "merge_stems", "beat_this", "align"]

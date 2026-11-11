@@ -100,8 +100,6 @@ fun BandListScreen(
                     tr("참여한 밴드가 없어요.\n밴드를 만들고 초대 코드를 보내 보세요.", "No bands yet.\nCreate one and send the invite code."),
                     color = cs.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(24.dp))
-                DemoHint()
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(list, key = { it.band.id }) { s ->
@@ -119,7 +117,7 @@ fun BandListScreen(
                         PartBadge(s.myInstrument)
                     }
                 }
-                item { Spacer(Modifier.height(8.dp)); DemoHint() }
+                item { Spacer(Modifier.height(8.dp)) }
             }
         }
     }
@@ -175,7 +173,7 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
                     // 입력 중에 글자를 바꾸면 키보드 입력이 꼬여서 글자가 빠진다. 대문자 변환은 참여할 때 한다.
                     onValueChange = { code = it.take(12); error = null },
                     label = { Text(tr("초대 코드", "Invite code")) },
-                    placeholder = { Text(tr("예: ${BandDatabase.DEMO_CODE}", "e.g. ${BandDatabase.DEMO_CODE}")) },
+                    placeholder = { Text(tr("예: ROCK26", "e.g. ROCK26")) },
                     singleLine = true, isError = error != null,
                     supportingText = { Text(tr("멤버에게 받은 영문·숫자 ${BandRules.CODE_LENGTH}자리", "The ${BandRules.CODE_LENGTH}-character code from a member")) },
                     keyboardOptions = KeyboardOptions(
@@ -213,7 +211,7 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
             }
             if (joinMode) {
                 Spacer(Modifier.height(24.dp))
-                DemoHint()
+                InfoNote(tr("지금은 같은 휴대폰 안에서만 공유돼요", "For now, sharing works only on this phone"))
             }
         }
     }
@@ -538,17 +536,6 @@ private fun Loading() {
     Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator()
     }
-}
-
-/** 서버가 없어서 친구를 초대할 수 없으니, 미리 넣어둔 예시 밴드로 들어가는 방법을 알려준다. */
-@Composable
-private fun DemoHint() {
-    InfoNote(
-        tr(
-            "체험해 보기: 초대 코드 ${BandDatabase.DEMO_CODE}로 예시 밴드에 들어가 볼 수 있어요. 지금은 같은 휴대폰 안에서만 공유돼요.",
-            "Try it: join a sample band with code ${BandDatabase.DEMO_CODE}. For now, sharing works only on this phone.",
-        ),
-    )
 }
 
 @Composable

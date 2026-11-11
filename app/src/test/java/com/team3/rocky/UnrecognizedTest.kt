@@ -31,4 +31,21 @@ class UnrecognizedTest {
         val w = Work(1, "t", band, "d", original = band, unrecognized = listOf("piano"))
         assertTrue(w.aiGenerated.isEmpty())
     }
+
+    // ----- 반대 경우: 원곡에 없다고 했는데 소리가 뚜렷한 악기 -----
+
+    @Test fun partTheUserLeftOutButIsInTheSongIsOverlooked() {
+        assertEquals(listOf("guitar"), Demo.overlookedParts(band, claimed = listOf("drums", "bass"), undeclared = listOf("guitar")))
+    }
+
+    @Test fun notSureMeansNothingIsOverlooked() {
+        assertEquals(emptyList<String>(), Demo.overlookedParts(band, claimed = emptyList(), undeclared = listOf("guitar")))
+    }
+
+    @Test fun onlyInstrumentsOurBandPlaysCount() {
+        // 우리 밴드에 없는 악기는 악보를 만들지 않으니 알리지 않는다
+        assertEquals(emptyList<String>(), Demo.overlookedParts(listOf("drums", "bass"), claimed = listOf("drums"), undeclared = listOf("piano")))
+        // 이미 원곡에 있다고 고른 악기도 해당 없음
+        assertEquals(emptyList<String>(), Demo.overlookedParts(band, claimed = band, undeclared = listOf("piano")))
+    }
 }

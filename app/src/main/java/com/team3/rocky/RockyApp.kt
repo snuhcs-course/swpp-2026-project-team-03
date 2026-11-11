@@ -105,6 +105,7 @@ import com.team3.rocky.band.PickScoreScreen
 import com.team3.rocky.band.ShareToBandScreen
 import com.team3.rocky.progress.AudioFile
 import com.team3.rocky.progress.ScoreJob
+import com.team3.rocky.progress.JobNotifier
 import com.team3.rocky.progress.ScoreJobs
 import com.team3.rocky.progress.Stage
 import com.team3.rocky.progress.formatEta
@@ -123,7 +124,8 @@ sealed class Screen {
     object Main : Screen()                                        // 1. 하단 탭 (새 악보 / 진행상황 / 보관함 / 나의 밴드)
     object Lineup : Screen()                                      // 2. 우리 밴드 구성
     object Upload : Screen()                                      // 3. 음원 업로드
-    class Original(val title: String, val audio: AudioFile?) : Screen() // 3-1. 원곡 밴드 구성 (audio null = 데모 곡)
+    // 3-1. 원곡 밴드 구성. redo가 있으면 '악기 다시 선택': 이미 만든 곡(redo)의 원곡 악기만 다시 골라 새로 만든다.
+    class Original(val title: String, val audio: AudioFile, val redo: Long? = null) : Screen()
     // 5. 결과. 밴드에서 열면 myPart(이 밴드에서 내 파트) 악보를 먼저 보여준다.
     class Result(val work: Work, val myPart: String? = null, val jobId: Long? = null) : Screen()
     class Export(val work: Work) : Screen()                       // 6. 내보내기
@@ -162,11 +164,48 @@ fun RockyApp() {
     fun restart(s: Screen) { stack.clear(); stack.add(s) }
     fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main) }
     fun newScore(preset: Set<String>) { lineup = preset; go(Screen.Lineup) }
+    // '악기 다시 선택': 우리 밴드·곡은 그대로 두고 원곡 악기 고르는 화면(3단계)부터 다시 한다.
+    fun reselect(job: ScoreJob) {
+        lineup = job.lineup.toSet()
+        original = job.claimed.toSet()
+        originalUnknown = false
+        go(Screen.Original(job.title, job.audio, redo = job.id))
+    }
+    // 안드로이드 13 이상: 앱을 안 보는 동안 멈추면 알림으로 알리려면 허용이 필요하다. 악보를 만들기 시작할 때 묻는다.
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun openTab(t: Tab) { tab = t; restart(Screen.Main) }
 
     // 탭 화면에서 뒤로가기를 누르면 먼저 '새 악보' 탭으로 돌아간다.
     BackHandler(enabled = stack.size > 1 || (stack.last() == Screen.Main && tab != Tab.NEW)) {
         if (stack.size > 1) back() else tab = Tab.NEW
+    }
+
+    // 악보 만들기가 중간에 멈추면 어느 화면에 있든 팝업으로 알린다.
+    // (앱을 안 보고 있었다면 휴대폰 알림도 갔고, 돌아왔을 때 이 팝업이 보인다.)
+    val stoppedJob = ScoreJobs.stopped
+    if (stoppedJob != null && user != null) {
+        AlertDialog(
+            onDismissRequest = { ScoreJobs.stopped = null },
+            title = { Text(tr("악보 만들기가 멈췄어요", "Score making stopped")) },
+            text = {
+                Column {
+                    Text("'${stoppedJob.title}'", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(6.dp))
+                    Text(stoppedJob.error ?: tr("문제가 생겼어요.", "Something went wrong."))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { val j = stoppedJob; ScoreJobs.stopped = null; ScoreJobs.retry(ctx, j) }) {
+                    Text(tr("다시 시도", "Retry"))
+                }
+            },
+            dismissButton = {
+                // 닫아도 '만드는 중' 탭의 그 곡 카드에 이유와 '다시 시도'가 남아 있다.
+                TextButton(onClick = { ScoreJobs.stopped = null }) {
+                    Text(tr("닫기", "Close"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+        )
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -193,6 +232,7 @@ fun RockyApp() {
                     // 회원 정보에 적은 악기를 새 악보의 기본 구성으로 쓴다.
                     onNew = { newScore(Demo.lineupOf(u.instruments)) },
                     onOpenJob = { job -> go(Screen.Result(job.toWork(), jobId = job.id)) },
+                    onReselect = ::reselect,
                     onOpenWork = { go(Screen.Result(it)) },
                     onOpenBand = { go(Screen.BandDetail(it)) },
                     onAddBand = { go(Screen.BandJoin) },
@@ -207,8 +247,7 @@ fun RockyApp() {
             Screen.Upload -> UploadScreen(
                 onBack = { back() },
                 onNext = { title, audio ->
-                    // 데모 곡은 원곡 구성을 미리 채워 둔다.
-                    original = if (audio == null) Demo.DEMO_ORIGINAL.toSet() else emptySet()
+                    original = emptySet()
                     originalUnknown = false
                     go(Screen.Original(title, audio))
                 },
@@ -219,7 +258,7 @@ fun RockyApp() {
                   Demo.guitarCount(original) == 0 && Demo.guitarCount(lineup) == 2
               OriginalScreen(
                 songTitle = s.title,
-                songSub = s.audio?.fileName ?: tr("데모 곡", "Demo song"),
+                songSub = s.audio.fileName,
                 selected = original,
                 onToggle = { i -> original = Demo.toggleLineup(original, i); originalUnknown = false },
                 onGuitars = { n -> original = Demo.setGuitarCount(original, n); originalUnknown = false },
@@ -229,6 +268,17 @@ fun RockyApp() {
                 onUnknown = { originalUnknown = !originalUnknown; if (originalUnknown) original = emptySet() },
                 footer = {
                     val ai = Demo.ordered(Demo.aiGenerated(Demo.ordered(lineup), Demo.ordered(original)))
+                    // '악기 다시 선택'으로 왔으면 무엇이 달라 보였는지 먼저 알려 준다.
+                    s.redo?.let { ScoreJobs.find(it) }?.let { old ->
+                        val names = { parts: List<String> -> parts.joinToString(" · ") { Demo.label(it, old.lineup) } }
+                        if (old.unrecognized.isNotEmpty()) InfoNote(
+                            tr("거의 안 들린 악기: ${names(old.unrecognized)}", "Barely audible: ${names(old.unrecognized)}"), strong = true,
+                        )
+                        if (old.overlooked.isNotEmpty()) InfoNote(
+                            tr("고르지 않았지만 들린 악기: ${names(old.overlooked)}", "Audible but not picked: ${names(old.overlooked)}"), strong = true,
+                        )
+                        if (old.instrumentDoubt) Spacer(Modifier.height(8.dp))
+                    }
                     when {
                         twoGuitarsFromNone -> InfoNote(
                             tr(
@@ -247,11 +297,14 @@ fun RockyApp() {
                     }
                 },
                 onNext = {
+                    // 다시 고른 것이면 예전 결과는 목록에서 빼고 새로 만든다 (보관함에 저장한 악보는 남는다).
+                    s.redo?.let { ScoreJobs.find(it) }?.let { ScoreJobs.remove(it) }
                     ScoreJobs.start(
                         ctx, s.title, Demo.ordered(lineup),
                         if (originalUnknown) emptyList() else Demo.ordered(original),
                         audio = s.audio,
                     )
+                    if (JobNotifier.needsPermission(ctx)) askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     openTab(Tab.PROGRESS)
                 },
               )
@@ -433,6 +486,7 @@ fun MainTabs(
     onAccount: () -> Unit,
     onNew: () -> Unit,
     onOpenJob: (ScoreJob) -> Unit,
+    onReselect: (ScoreJob) -> Unit,
     onOpenWork: (Work) -> Unit,
     onOpenBand: (Long) -> Unit,
     onAddBand: () -> Unit,
@@ -467,7 +521,7 @@ fun MainTabs(
         val inner = Modifier.padding(pad).consumeWindowInsets(pad)
         when (tab) {
             Tab.NEW -> HomeTab(user, photoVersion, inner, onAccount, onNew, onProgress = { onTab(Tab.PROGRESS) })
-            Tab.PROGRESS -> ProgressTab(inner, onOpenJob, onNew)
+            Tab.PROGRESS -> ProgressTab(inner, onOpenJob, onNew, onReselect)
             Tab.STORAGE -> StorageTab(inner, onOpenWork)
             Tab.BANDS -> BandListScreen(user, bands, onBack = null, onOpen = onOpenBand, onAdd = onAddBand, modifier = inner)
         }
@@ -568,7 +622,7 @@ fun HomeTab(
         Text(tr("이렇게 만들어요", "How it works"), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(10.dp))
         // 네 단계를 위에서 아래로 선으로 이어 순서가 한눈에 보이게 한다.
-        Column(Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs).padding(horizontal = 16.dp, vertical = 18.dp)) {
+        Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
             HowStep("1", tr("우리 밴드 악기 고르기", "Pick your band's instruments"),
                 tr("우리 밴드에 있는 악기를 골라요", "Choose the instruments your band plays"))
             HowStep("2", tr("곡 올리기", "Upload a song"),
@@ -658,15 +712,10 @@ private fun HomeJobCard(job: ScoreJob, more: Int, onClick: () -> Unit) {
 @Composable
 private fun TipCard(title: String, body: String) {
     val cs = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().card(RoundedCornerShape(14.dp), cs).padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(cs.primary.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) { BulbIcon(cs.primary, 20.dp) }
-        Spacer(Modifier.width(12.dp))
+    // 배경 상자 없이 전구 아이콘과 글자만 둔다.
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) { BulbIcon(cs.primary, 22.dp) }
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
@@ -747,7 +796,7 @@ fun WorkRow(w: Work, onClick: () -> Unit, trailing: @Composable RowScope.() -> U
 
 // ---------- 1-2. 만드는 중 ----------
 @Composable
-fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Unit) {
+fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Unit, onReselect: (ScoreJob) -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val jobs = ScoreJobs.jobs
     Page(tr("만드는 중", "In progress"), onBack = null, modifier = modifier) {
@@ -767,7 +816,7 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
                 "Keeps going unless you close the app"))
             Spacer(Modifier.height(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }) }
+                items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }, onReselect = { onReselect(job) }) }
                 item { Spacer(Modifier.height(12.dp)) }
             }
         }
@@ -775,7 +824,7 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
 }
 
 @Composable
-private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
+private fun JobCard(job: ScoreJob, onOpen: () -> Unit, onReselect: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val p = job.progress
@@ -828,10 +877,34 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
                 Button(shape = ButtonShape, onClick = { ScoreJobs.retry(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
                     Text(tr("다시 시도", "Retry"), fontSize = 14.sp, maxLines = 1)
                 }
-                OutlinedButton(shape = ButtonShape, onClick = { ScoreJobs.useDemo(ctx, job) }, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
-                    Text(tr("예시 결과 보기", "See a sample"), fontSize = 14.sp, maxLines = 1)
+            }
+        }
+        // 완성은 됐지만 원곡 악기를 실제와 다르게 고른 것 같을 때: 이유를 알려 주고 다시 고르게 한다.
+        if (err == null && job.done && job.instrumentDoubt) {
+            Text(tr("원곡 악기를 다르게 고른 것 같아요", "The song's instruments may be off"), fontWeight = FontWeight.Bold, color = cs.secondary, fontSize = 14.sp)
+            Spacer(Modifier.height(2.dp))
+            job.unrecognized.forEach { i ->
+                Text(
+                    tr("${Demo.label(i, job.lineup)}: 있다고 골랐는데 거의 안 들려요", "${Demo.label(i, job.lineup)}: picked, but barely audible"),
+                    fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            job.overlooked.forEach { i ->
+                Text(
+                    tr("${Demo.label(i, job.lineup)}: 없다고 골랐는데 소리가 들려요", "${Demo.label(i, job.lineup)}: not picked, but audible"),
+                    fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(shape = ButtonShape, onClick = onReselect, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
+                    Text(tr("악기 다시 선택", "Pick again"), fontSize = 14.sp, maxLines = 1)
+                }
+                OutlinedButton(shape = ButtonShape, onClick = onOpen, modifier = Modifier.weight(1f).height(44.dp), contentPadding = TightButtonPadding) {
+                    Text(tr("악보 보기", "Open scores"), fontSize = 14.sp, maxLines = 1)
                 }
             }
+            Spacer(Modifier.height(4.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -1182,11 +1255,11 @@ fun OriginalScreen(
 private val PICK_TYPES = arrayOf("audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave")
 
 @Composable
-fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) -> Unit) {
+fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile) -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var picked by remember { mutableStateOf<String?>(null) }
-    // 고른 음원 파일. 데모 곡이면 null.
+    // 고른 음원 파일.
     var audio by remember { mutableStateOf<AudioFile?>(null) }
     var editServer by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -1206,7 +1279,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
     if (editServer) ServerDialog(onDismiss = { editServer = false })
     Page(tr("2 / 3단계", "Step 2 of 3"), onBack, actions = { StepBars(2) }, bottom = {
         Button(shape = ButtonShape,
-            onClick = { picked?.let { onNext(it, audio) } }, enabled = picked != null,
+            onClick = { val a = audio; val t = picked; if (a != null && t != null) onNext(t, a) }, enabled = picked != null,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(if (picked == null) tr("곡을 먼저 골라주세요", "Pick a song first") else tr("다음", "Next"), fontSize = 17.sp) }
     }) {
@@ -1247,14 +1320,7 @@ fun UploadScreen(onBack: () -> Unit, onNext: (title: String, audio: AudioFile?) 
                     fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 19.sp,
                 )
             }
-            Spacer(Modifier.height(16.dp))
-            OutlinedButton(shape = ButtonShape,
-                onClick = { picked = Demo.SONG_TITLE; audio = null },
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-            ) {
-                Text(tr("데모 곡으로 체험", "Try the demo song"))
-            }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(8.dp))
             // 시연·개발용 접속 설정. 일반 사용자에게는 눈에 띄지 않게 작게 둔다.
             TextButton(onClick = { editServer = true }, modifier = Modifier.padding(top = 4.dp)) {
                 Text(tr("연결 설정", "Connection settings"), fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1)

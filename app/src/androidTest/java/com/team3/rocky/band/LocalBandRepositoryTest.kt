@@ -32,7 +32,7 @@ class LocalBandRepositoryTest {
         User(id, "u$id@snu.ac.kr", nick, listOf(inst), AuthProvider.EMAIL, 0)
 
     @Before fun setUp() {
-        db = BandDatabase(ctx, name = null)   // in-memory, with the demo band
+        db = BandDatabase(ctx, name = null)   // in-memory
         repo = LocalBandRepository(ctx, db) { now++ }
     }
 
@@ -68,11 +68,10 @@ class LocalBandRepositoryTest {
         assertTrue(detail.members.first { it.userId == me.id }.isOwner)
     }
 
-    @Test fun demoBandCanBeJoined() = runBlocking {
-        val band = (repo.join(me, BandDatabase.DEMO_CODE, "bass") as BandResult.Success).band
-        val detail = repo.detail(band.id)!!
-        assertEquals(4, detail.members.size)
-        assertEquals(1, detail.scores.size)
+    /** 시연용 예시 밴드(BAND33)는 11/11에 뺐다: 새로 만든 DB에는 없고 그 코드로 들어갈 수 없다. */
+    @Test fun thereIsNoSampleBandAnymore() = runBlocking {
+        assertTrue(repo.join(me, "BAND33", "bass") is BandResult.Failure)
+        assertTrue(repo.myBands(me).isEmpty())
     }
 
     @Test fun sharingTheSameScoreTwiceKeepsOne() = runBlocking {

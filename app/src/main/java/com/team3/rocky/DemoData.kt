@@ -2,9 +2,6 @@ package com.team3.rocky
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
-import android.graphics.Rect
-import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
@@ -15,18 +12,13 @@ import com.team3.rocky.auth.AuthRepository
 import java.io.File
 
 /*
- * ROCKY 시연 설정
- * - 실제 모델 연결 없이, app/src/main/assets/demo/ 에 넣어둔 결과 파일을 보여줍니다.
- * - 파일 이름 규칙: <악기>.png(악보 이미지, 여러 장이면 <악기>-1.png …), <악기>.mp3(악기 음원),
- *   band.mid / band.pdf / band.mp3(밴드 전체)
- *   악기 이름: piano, drums, bass, guitar
+ * 악기 이름·밴드 구성 규칙.
+ * 악기 이름: piano, drums, bass, guitar (+ 기타 2대면 guitar2, 사람 파트로는 vocal)
+ * (이름 Demo는 처음에 시연용 데이터에서 시작해서 남은 것. 시연용 곡·파일은 11/11에 모두 뺐다.)
  */
 object Demo {
-    const val DIR = "demo"
-
-    // 결과 화면 파일 이름: band.png(또는 band-1.png, band-2.png …), band.mp3, band.pdf, band.mid
+    /** 결과 화면에서 '밴드 전체'를 가리키는 이름. */
     const val BAND = "band"
-    val SONG_TITLE get() = tr("데모 곡 (Immigrant Song - Led Zeppelin)", "Demo song (Immigrant Song - Led Zeppelin)")
 
     const val GUITAR2 = "guitar2"
     const val VOCAL = "vocal"
@@ -39,9 +31,6 @@ object Demo {
 
     /** 사람이 맡을 수 있는 파트 (회원 정보, 밴드의 내 파트). 보컬은 악보 없이 밴드 전체 악보를 본다. */
     val PARTS = listOf("piano", "drums", "bass", "guitar", VOCAL)
-
-    /** 데모 곡(Immigrant Song)의 원곡 구성. 피아노가 없어서 피아노를 AI가 만든다. */
-    val DEMO_ORIGINAL = listOf("drums", "bass", "guitar")
 
     // 원곡 구성을 모르는 예전 작업에서 'AI 생성'으로 표시할 악기
     private val LEGACY_AI_GENERATED = setOf("piano")
@@ -59,7 +48,7 @@ object Demo {
     /** 악기 목록을 '피아노 · 드럼 · 기타 1 · 기타 2'처럼 이어 쓴다. */
     fun labels(all: List<String>) = all.joinToString(" · ") { label(it, all) }
 
-    /** 결과 파일 이름. 기타 2는 아직 따로 만든 파일이 없어서 기타 파일을 함께 쓴다. */
+    /** 아이콘 등에 쓰는 기본 악기 이름. 기타 2는 기타와 같은 것으로 본다. */
     fun assetBase(i: String) = if (i == GUITAR2) "guitar" else i
 
     /** 밴드 구성에서 악기 칸을 누를 때: 켜기/끄기. 기타는 켜면 1대, 끄면 2대였어도 모두 뺀다. */
@@ -87,7 +76,6 @@ object Demo {
         return set
     }
 
-    /** 원곡에 없어서 AI가 새로 만드는 파트. 원곡 구성을 모르면 데모 곡 기준으로 본다. */
     /**
      * ⚠️ 표시할 파트: 사용자가 '원곡에 있다'고 골랐는데 원곡에서 소리가 거의 들리지 않은 악기.
      * 서버(파이프라인 note gate)가 [faint]로 알려 준다. 악보는 나오지만 음이 아주 적을 수 있다.
@@ -101,6 +89,17 @@ object Demo {
         return ordered(set.filter { it in lineup && it in claimed })
     }
 
+    /**
+     * [faintParts]의 반대: 사용자가 '원곡에 없다'고 했는데(고르지 않았는데) 원곡에서 소리가 뚜렷한 악기.
+     * 서버가 [undeclared]로 알려 준다. 우리 밴드에 있는 악기만 본다 (그 파트를 원곡에서 옮기지 않고 새로 만들었기 때문).
+     * '잘 모르겠어요'([claimed]가 비어 있음)면 서버가 직접 판단했으므로 해당 없음.
+     */
+    fun overlookedParts(lineup: List<String>, claimed: List<String>, undeclared: List<String>): List<String> {
+        if (claimed.isEmpty()) return emptyList()
+        return ordered(undeclared.filter { it in INSTRUMENTS && it in lineup && it !in claimed })
+    }
+
+    /** 원곡에 없어서 AI가 새로 만드는 파트. 원곡 구성을 모르는 예전 작업은 피아노만 그렇게 본다. */
     fun aiGenerated(lineup: List<String>, original: List<String>): Set<String> =
         if (original.isEmpty()) lineup.filter { it in LEGACY_AI_GENERATED }.toSet()
         else lineup.filter { it !in original }.toSet()
@@ -195,67 +194,6 @@ object WorkStore {
         }
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(key(ctx), raw).apply()
     }
-}
-
-// ---------- 데모 파일 ----------
-object Assets {
-    fun list(ctx: Context): List<String> = ctx.assets.list(Demo.DIR)?.toList() ?: emptyList()
-
-    fun find(ctx: Context, base: String, exts: List<String>): String? {
-        val files = list(ctx)
-        for (e in exts) {
-            val n = "$base.$e"
-            if (n in files) return n
-        }
-        return null
-    }
-
-    /** 악보 이미지 파일 이름을 쪽 순서대로. base.png 또는 base-1.png, base-2.png … */
-    fun pages(ctx: Context, base: String): List<String> {
-        val pageNo = Regex("^${Regex.escape(base)}(-(\\d+))?\\.(png|jpg|jpeg|webp)$")
-        return list(ctx)
-            .mapNotNull { n -> pageNo.find(n)?.let { m -> (m.groupValues[2].toIntOrNull() ?: 0) to n } }
-            .sortedBy { it.first }
-            .map { it.second }
-    }
-
-    /** assets 안의 파일을 캐시 폴더로 복사 (재생·공유용). [outName]을 주면 그 이름으로 저장한다. */
-    fun toCache(ctx: Context, name: String, outName: String = name): File {
-        val out = File(shareDir(ctx), outName)
-        ctx.assets.open("${Demo.DIR}/$name").use { input ->
-            out.outputStream().use { input.copyTo(it) }
-        }
-        return out
-    }
-
-    /** 악보 이미지들을 한 PDF로 묶는다 (A4, 쪽마다 이미지 한 장). */
-    fun pagesToPdf(ctx: Context, base: String, outName: String): File? {
-        val names = pages(ctx, base)
-        if (names.isEmpty()) return null
-        val doc = PdfDocument()
-        try {
-            names.forEachIndexed { i, n ->
-                val bmp = ctx.assets.open("${Demo.DIR}/$n").use { BitmapFactory.decodeStream(it) } ?: return@forEachIndexed
-                val w = 595
-                val h = 842
-                val page = doc.startPage(PdfDocument.PageInfo.Builder(w, h, i + 1).create())
-                val scale = minOf(w.toFloat() / bmp.width, h.toFloat() / bmp.height)
-                val dw = (bmp.width * scale).toInt()
-                val dh = (bmp.height * scale).toInt()
-                page.canvas.drawColor(android.graphics.Color.WHITE)
-                page.canvas.drawBitmap(bmp, null, Rect((w - dw) / 2, 0, (w + dw) / 2, dh), null)
-                doc.finishPage(page)
-                bmp.recycle()
-            }
-            val out = File(shareDir(ctx), outName)
-            out.outputStream().use { doc.writeTo(it) }
-            return out
-        } finally {
-            doc.close()
-        }
-    }
-
-    private fun shareDir(ctx: Context) = File(ctx.cacheDir, "share").apply { mkdirs() }
 }
 
 fun displayName(ctx: Context, uri: Uri): String {
