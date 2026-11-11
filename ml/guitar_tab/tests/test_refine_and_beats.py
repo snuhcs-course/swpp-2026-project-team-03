@@ -126,6 +126,10 @@ def test_tab_refine_flag_changes_the_text_tab(tmp_path):
     (2, 4, 4, 16, [2, 2]),           # off-beat quarter -> eighth + eighth across the beat
     (6, 12, 6, 24, [6, 6]),          # 12/8: dotted half from beat 2 -> two dotted quarters
     (0, 12, 6, 24, [12]),            # 12/8: dotted half on beat 1
+    (0, 12, 6, 12, [12]),            # 6/8: whole bar is one dotted half
+    (0, 18, 6, 18, [12, 6]),         # 9/8: whole bar -> dotted half + dotted quarter, cut at beat 3
+    (0, 24, 6, 24, [12, 12]),        # 12/8: whole bar -> two dotted halves, cut at beat 3
+    (0, 12, 4, 12, [12]),            # 3/4: whole bar is one dotted half
 ])
 def test_beat_pieces(pos, length, beat16, bar16, expected):
     pieces = beat_pieces(pos, length, beat16, bar16)
@@ -153,6 +157,18 @@ def test_gp5_off_beat_half_note_is_written_tied(tmp_path):
                for b in beats]
     assert lengths == [1, 3, 4, 1, 3, 4]       # 16th rest, dotted 8th, quarter (tie), 16th (tie), rests
     assert [b.notes[0].type for b in beats[1:4]] == [gp.NoteType.normal, gp.NoteType.tie, gp.NoteType.tie]
+
+
+@pytest.mark.parametrize("num,expected", [(9, [6, 3]), (12, [6, 6])])
+def test_gp5_compound_whole_bar_note_is_cut_at_a_beat(tmp_path, num, expected):
+    """A note filling a 9/8 or 12/8 bar is tied at the dotted-quarter beat, not after 16 16ths."""
+    path = tmp_path / "c.gp5"
+    write_gp5(path, "t", 120, num, "standard", [("g", [(0, num * 2, [(1, 3)])])], 8)
+    beats = gp.parse(str(path)).tracks[0].measures[0].voices[0].beats
+    eighths = [{1: 8, 2: 4, 4: 2, 8: 1}[b.duration.value] * (1.5 if b.duration.isDotted else 1)
+               for b in beats]
+    assert eighths == expected
+    assert [b.notes[0].type for b in beats] == [gp.NoteType.normal, gp.NoteType.tie]
 
 
 def test_open_strings_in_first_position_stay():

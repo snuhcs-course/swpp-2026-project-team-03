@@ -320,13 +320,15 @@ def jump_stats(tab_path):
 # ----------------------------------------------------------------------
 GP_LENGTHS = [(16, 1, False), (12, 2, True), (8, 2, False), (6, 4, True),
               (4, 4, False), (3, 8, True), (2, 8, False), (1, 16, False)]  # (16ths, value, dotted)
+GP_SINGLE = {L for L, _, _ in GP_LENGTHS}  # lengths one GP5 note value can show
 
 
 def beat_pieces(pos, length, beat16, bar16):
     """Cut a note or rest that starts pos 16ths into the bar into pieces that do not hide a beat.
 
     The first piece runs only to the next beat. From a beat, whole beats are kept together only as a
-    half bar (from beat 1 or the middle of a 4-beat bar), a whole bar, or a dotted half from beat 1;
+    half bar (from beat 1 or the middle of a 4-beat bar), a whole bar that one note value can show
+    (not 9/8 or 12/8: those are kept as dotted halves from odd beats), or a dotted half from beat 1;
     everything else is tied beat by beat. Within a beat split_len picks the values.
     Players read the beat from where each note starts (user interview 2026-11: write it beat by beat).
     Returns [(16ths, value, dotted)] like split_len.
@@ -343,7 +345,7 @@ def beat_pieces(pos, length, beat16, bar16):
                 take = length
             else:
                 n = 1
-                if bi == 0 and whole >= beats_in_bar and beats_in_bar in (2, 3, 4):
+                if bi == 0 and whole >= beats_in_bar and beats_in_bar in (2, 3, 4) and bar16 in GP_SINGLE:
                     n = beats_in_bar
                 elif bi == 0 and whole >= 3 and beats_in_bar == 4 and beat16 == 4:
                     n = 3
