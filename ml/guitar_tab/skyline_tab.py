@@ -52,6 +52,7 @@ OPEN_COST = 3.0       # an open string costs like a fret this far from the hand 
 OPEN_POSITION = 4     # ... but is free while the hand is at or below this fret (first-position playing)
 STRING_COST = 0.5     # per string crossed from the previous single note
 MIN_GAIN = 1.0        # move a note only when its cost drops by at least this much
+BASS_OPEN_COST = 1.5  # bass: an open string costs this much even in first position (see bass_tab)
 
 
 def guitar_notes(pm):
@@ -197,12 +198,12 @@ def part_midi(pm_like, notes, name, program=29):
     return out
 
 
-def tab(midi, name, tuning, out_dir, refine=True):
+def tab(midi, name, tuning, out_dir, refine=True, open_low=0.0):
     from tuttut.logic.tab import Tab
     from tuttut.logic.theory import Tuning
     t = Tab(name, Tuning(NAMES[tuning]), midi, output_dir=str(out_dir), weights=TB_WEIGHTS)
     if refine:
-        st = refine_positions(t.tab, TUNINGS[tuning])
+        st = refine_positions(t.tab, TUNINGS[tuning], open_low=open_low)
         print(f"  refine {name}: {st['open_moved']} open-string notes and {st['jump_moved']} far notes "
               f"moved to the hand position")
     t.to_ascii()
@@ -224,15 +225,15 @@ def _hand(frets_by_event, times, i):
     return float(np.median(near)) if near else None
 
 
-def _cost(string, fret, hand, prev_string):
+def _cost(string, fret, hand, prev_string, open_low=0.0):
     if fret == 0:
-        c = 0.0 if hand <= OPEN_POSITION else OPEN_COST
+        c = open_low if hand <= OPEN_POSITION else OPEN_COST
     else:
         c = max(0.0, abs(fret - hand) - HAND_REACH)
     return c + (STRING_COST * abs(string - prev_string) if prev_string is not None else 0.0)
 
 
-def refine_positions(tab_dict, strings, passes=3):
+def refine_positions(tab_dict, strings, passes=3, open_low=0.0):
     """Move notes to a fretted spot near the hand, in place on tuttut's tab dict.
 
     tuttut scores an open string as free (it has no height and does not change the hand), so it picks
@@ -244,6 +245,9 @@ def refine_positions(tab_dict, strings, passes=3):
     single note. The note moves to the cheapest spot of the same pitch when that saves MIN_GAIN.
     Chord notes may only move to a free string and only if the chord's fretted notes stay within MAX_SPAN.
     No fretted neighbour (an open-string riff on its own) -> left as tuttut wrote it.
+    open_low: cost of an open string in first position. 0 for guitar; bass_tab passes BASS_OPEN_COST
+    because both bass players in the 2026-11 interviews asked for fretted notes over open strings
+    (D-open <-> A-open back and forth is hard to mute; 'use the 5th fret rather than open strings').
     Runs up to `passes` times, because a moved note changes its neighbours' hand position.
     strings: the tuning, thin -> thick (tuttut string 0 = thinnest).
     """
@@ -253,13 +257,13 @@ def refine_positions(tab_dict, strings, passes=3):
     stats = collections.Counter(open_moved=0, jump_moved=0)
     for _ in range(passes):
         before = sum(stats.values())
-        _refine_pass(events, times, frets, strings, stats)
+        _refine_pass(events, times, frets, strings, stats, open_low)
         if sum(stats.values()) == before:
             break
     return stats
 
 
-def _refine_pass(events, times, frets, strings, stats):
+def _refine_pass(events, times, frets, strings, stats, open_low=0.0):
     prev_string = None
     for i, e in enumerate(events):
         hand = _hand(frets, times, i)
@@ -269,7 +273,7 @@ def _refine_pass(events, times, frets, strings, stats):
                 pitch = strings[n["string"]] + n["fret"]
                 used = {m["string"] for m in notes if m is not n}
                 ref = prev_string if len(notes) == 1 else None
-                now = _cost(n["string"], n["fret"], hand, ref)
+                now = _cost(n["string"], n["fret"], hand, ref, open_low)
                 best = (now, n["string"], n["fret"])
                 for s, sp in enumerate(strings):
                     f = pitch - sp
@@ -278,7 +282,7 @@ def _refine_pass(events, times, frets, strings, stats):
                     others = [m["fret"] for m in notes if m is not n and m["fret"] > 0]
                     if f > 0 and others and max(others + [f]) - min(others + [f]) > MAX_SPAN:
                         continue
-                    c = _cost(s, f, hand, ref)
+                    c = _cost(s, f, hand, ref, open_low)
                     if c < best[0]:
                         best = (c, s, f)
                 if best[0] <= now - MIN_GAIN:
@@ -318,7 +322,7 @@ def jump_stats(tab_path):
 # ----------------------------------------------------------------------
 # Guitar Pro (.gp5) export: keeps tuttut's string/fret choices
 # ----------------------------------------------------------------------
-GP_LENGTHS = [(16, 1, False), (12, 2, True), (8, 2, False), (6, 4, True),
+GP_LENGTHS = [(24, 1, True), (16, 1, False), (12, 2, True), (8, 2, False), (6, 4, True),
               (4, 4, False), (3, 8, True), (2, 8, False), (1, 16, False)]  # (16ths, value, dotted)
 GP_SINGLE = {L for L, _, _ in GP_LENGTHS}  # lengths one GP5 note value can show
 
@@ -328,7 +332,7 @@ def beat_pieces(pos, length, beat16, bar16):
 
     The first piece runs only to the next beat. From a beat, whole beats are kept together only as a
     half bar (from beat 1 or the middle of a 4-beat bar), a whole bar that one note value can show
-    (not 9/8 or 12/8: those are kept as dotted halves from odd beats), or a dotted half from beat 1;
+    (not 9/8: dotted half tied to a dotted quarter, the usual engraving), or a dotted half from beat 1;
     everything else is tied beat by beat. Within a beat split_len picks the values.
     Players read the beat from where each note starts (user interview 2026-11: write it beat by beat).
     Returns [(16ths, value, dotted)] like split_len.

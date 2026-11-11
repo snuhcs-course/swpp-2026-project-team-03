@@ -77,7 +77,7 @@ def main(src, out_dir, tuning="auto", refine=True):
     bass = st.part_midi(pm, notes, "Bass", program=BASS_PROGRAM)
     bass.write(str(out_dir / "bass.mid"))
     st.write_tuning(out_dir, tuning)
-    p, t = st.tab(bass, "tab_bass", tuning, out_dir, refine=refine)
+    p, t = st.tab(bass, "tab_bass", tuning, out_dir, refine=refine, open_low=st.BASS_OPEN_COST)
     n, big, med = st.jump_stats(p)
     print(f"  TAB bass: {n} fretted events · jumps >5 frets: {big} ({big / max(n - 1, 1) * 100:.1f}%) · median move {med:.1f} frets")
 

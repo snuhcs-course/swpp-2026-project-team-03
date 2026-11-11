@@ -112,7 +112,7 @@ def test_tab_runs_refine_only_when_asked(tmp_path, monkeypatch):
     pm.instruments.append(inst)
     calls = []
     real = st.refine_positions
-    monkeypatch.setattr(st, "refine_positions", lambda tab, strings: calls.append(1) or real(tab, strings))
+    monkeypatch.setattr(st, "refine_positions", lambda tab, strings, **kw: calls.append(1) or real(tab, strings, **kw))
     st.tab(pm, "raw", "standard", tmp_path, refine=False)
     assert calls == []
     _, t = st.tab(pm, "fixed", "standard", tmp_path, refine=True)
@@ -135,7 +135,7 @@ def test_tab_runs_refine_only_when_asked(tmp_path, monkeypatch):
     (0, 12, 6, 24, [12]),            # 12/8: dotted half on beat 1
     (0, 12, 6, 12, [12]),            # 6/8: whole bar is one dotted half
     (0, 18, 6, 18, [12, 6]),         # 9/8: whole bar -> dotted half + dotted quarter, cut at beat 3
-    (0, 24, 6, 24, [12, 12]),        # 12/8: whole bar -> two dotted halves, cut at beat 3
+    (0, 24, 6, 24, [24]),            # 12/8: whole bar is one dotted whole note
     (0, 12, 4, 12, [12]),            # 3/4: whole bar is one dotted half
 ])
 def test_beat_pieces(pos, length, beat16, bar16, expected):
@@ -166,16 +166,29 @@ def test_gp5_off_beat_half_note_is_written_tied(tmp_path):
     assert [b.notes[0].type for b in beats[1:4]] == [gp.NoteType.normal, gp.NoteType.tie, gp.NoteType.tie]
 
 
-@pytest.mark.parametrize("num,expected", [(9, [6, 3]), (12, [6, 6])])
-def test_gp5_compound_whole_bar_note_is_cut_at_a_beat(tmp_path, num, expected):
-    """A note filling a 9/8 or 12/8 bar is tied at the dotted-quarter beat, not after 16 16ths."""
+@pytest.mark.parametrize("num,expected", [(9, [6, 3]), (12, [12])])
+def test_gp5_compound_whole_bar_note(tmp_path, num, expected):
+    """A note filling a 9/8 bar is a dotted half tied to a dotted quarter; in 12/8 it is one dotted whole."""
     path = tmp_path / "c.gp5"
     write_gp5(path, "t", 120, num, "standard", [("g", [(0, num * 2, [(1, 3)])])], 8)
     beats = gp.parse(str(path)).tracks[0].measures[0].voices[0].beats
     eighths = [{1: 8, 2: 4, 4: 2, 8: 1}[b.duration.value] * (1.5 if b.duration.isDotted else 1)
                for b in beats]
     assert eighths == expected
-    assert [b.notes[0].type for b in beats] == [gp.NoteType.normal, gp.NoteType.tie]
+    assert [b.notes[0].type for b in beats] == [gp.NoteType.normal, gp.NoteType.tie][:len(expected)]
+
+
+BASS = [43, 38, 33, 28]   # G2 D2 A1 E1
+
+
+@pytest.mark.parametrize("open_low,expected", [(0.0, [3, 0, 0, 0, 3]), (st.BASS_OPEN_COST, [3, 5, 5, 5, 3])])
+def test_bass_open_strings_in_first_position(open_low, expected):
+    """Interview (스차오마 bass 18, 52마디): D open <-> A open in first position is hard to mute.
+    Guitar keeps first-position open strings (open_low 0); bass_tab moves them to the 5th fret."""
+    events = [(0.0, [(2, 3)]), (0.25, [(1, 0)]), (0.5, [(2, 0)]), (0.75, [(1, 0)]), (1.0, [(2, 3)])]
+    tab = _tab(events, BASS)
+    refine_positions(tab, BASS, open_low=open_low)
+    assert [e[0][1] for e in _positions(tab)] == expected
 
 
 def test_open_strings_in_first_position_stay():
