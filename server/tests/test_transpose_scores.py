@@ -1,5 +1,6 @@
 """Rule based key changes preserve timing, drums and playable TAB notes."""
 
+import copy
 import guitarpro
 import pretty_midi
 import pytest
@@ -61,3 +62,45 @@ def test_low_open_string_uses_retuning_when_downshift_cannot_be_fretted(tmp_path
     after = guitarpro.parse(str(output))
     assert note_pitch(after) == note_pitch(before) - 1
     assert after.tracks[0].strings[-1].value == before.tracks[0].strings[-1].value - 1
+
+
+def test_retuning_is_limited_to_the_track_with_an_open_low_note(tmp_path):
+    source, output = tmp_path / "source.gp5", tmp_path / "output.gp5"
+    gp5_with_note(source, string=6, fret=0)
+    song = guitarpro.parse(str(source))
+    second = copy.deepcopy(song.tracks[0])
+    second.number = 2
+    second.measures[0].voices[0].beats[0].notes[0].value = 5
+    song.tracks.append(second)
+    guitarpro.write(song, str(source))
+    before = guitarpro.parse(str(source))
+    transpose_gp5(source, output, -1)
+    after = guitarpro.parse(str(output))
+    assert len(after.tracks) == 2
+    assert after.tracks[0].strings[-1].value == before.tracks[0].strings[-1].value - 1
+    assert [s.value for s in after.tracks[1].strings] == [s.value for s in before.tracks[1].strings]
+    assert after.tracks[1].measures[0].voices[0].beats[0].notes[0].value == 4
+
+
+@pytest.mark.parametrize("second_track", [False, True])
+@pytest.mark.parametrize("bass", [False, True])
+def test_retuned_first_track_keeps_transposed_key_signature(tmp_path, second_track, bass):
+    source, output = tmp_path / "source.gp5", tmp_path / "output.gp5"
+    gp5_with_note(source, string=4 if bass else 6, fret=0)
+    song = guitarpro.parse(str(source))
+    if bass:
+        song.tracks[0].strings = [guitarpro.models.GuitarString(i + 1, pitch)
+                                  for i, pitch in enumerate((43, 38, 33, 28))]
+    song.key = guitarpro.KeySignature.GMajor
+    song.measureHeaders[0].keySignature = guitarpro.KeySignature.GMajor
+    if second_track:
+        other = copy.deepcopy(song.tracks[0])
+        other.number = 2
+        other.measures[0].voices[0].beats[0].notes[0].value = 5
+        song.tracks.append(other)
+    guitarpro.write(song, str(source))
+
+    transpose_gp5(source, output, -1)
+    after = guitarpro.parse(str(output))
+    assert after.measureHeaders[0].keySignature == guitarpro.KeySignature.FMajorSharp
+    assert after.tracks[0].measures[0].header.keySignature == guitarpro.KeySignature.FMajorSharp

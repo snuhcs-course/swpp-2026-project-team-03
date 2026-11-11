@@ -20,6 +20,7 @@ class RockyApiTest {
     private var lastKey: String? = null
     private var lastType: String? = null
     private var lastMethod: String? = null
+    private var asyncPolls = 0
 
     @Before fun start() {
         http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -34,6 +35,13 @@ class RockyApiTest {
                 "/jobs/abc123abc123" -> 200 to """{"id":"abc123abc123","state":"running","stage":"BEATS","completed":0,"total":1}"""
                 "/jobs/abc123abc123/files/scores/full_band.pdf" -> 200 to "%PDF-1.4 fake"
                 "/jobs/abc123abc123/transpositions/-1" -> 200 to """{"id":"abc123abc123","title":"Song","full_band":{"pdf":"scores/full_band.pdf"},"instruments":{}}"""
+                "/jobs/abc123abc123/transpositions/1" -> when (ex.requestMethod) {
+                    "POST" -> 202 to """{"id":"abc123abc123","semitones":1,"state":"queued"}"""
+                    else -> {
+                        asyncPolls++
+                        200 to """{"id":"abc123abc123","state":"complete","title":"Song","full_band":{"pdf":"scores/full_band.pdf"},"instruments":{}}"""
+                    }
+                }
                 "/jobs/abc123abc123/transpositions/-1/files/scores/full_band.pdf" -> 200 to "%PDF-1.4 shifted"
                 "/jobs/locked000000" -> 401 to """{"detail":"missing or wrong X-Rocky-Key"}"""
                 else -> 404 to """{"detail":"no such job"}"""
@@ -126,6 +134,13 @@ class RockyApiTest {
         val dest = tmp.root.resolve("transposed/full_band.pdf")
         api().downloadTransposed("abc123abc123", -1, result.fullBand.pdf, dest)
         assertEquals("%PDF-1.4 shifted", dest.readText())
+    }
+
+    @Test fun transposePollsAcceptedRequest() {
+        val result = api().transpose("abc123abc123", 1)
+        assertEquals("scores/full_band.pdf", result.fullBand.pdf)
+        assertEquals(1, asyncPolls)
+        assertEquals("GET", lastMethod)
     }
 
     @Test fun healthIsFalseWhenNothingListens() {

@@ -35,6 +35,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -62,7 +63,10 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     accounts = accounts or Accounts(store.root / "rocky.db")
     api_key = os.environ.get("ROCKY_API_KEY", "")
     max_bytes = int(os.environ.get("ROCKY_MAX_UPLOAD_MB", "60")) * CHUNK
-    transpose_lock = threading.Lock()
+    transpose_guard = threading.Lock()
+    transpose_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rocky-transpose")
+    transpose_tasks: dict[tuple[str, int], Future] = {}
+    transpose_job_locks: dict[str, threading.Lock] = {}
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -169,7 +173,9 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         find(job_id)
         if accounts.job_shared(job_id):  # band members still open it from here
             raise HTTPException(409, "the score is shared to a band")
-        with transpose_lock:  # not while a key change is writing into the run folder
+        with transpose_guard:
+            if any(key[0] == job_id and not task.done() for key, task in transpose_tasks.items()):
+                raise HTTPException(409, "key change is still processing")
             outcome = worker.delete(job_id)
         if outcome is None:
             raise HTTPException(404, "no such job")
@@ -227,26 +233,71 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(404, "transposed score is not ready") from None
         return {"id": job_id, "title": find(job_id).title, "semitones": semitones, **result}
 
+    def render_transposition(job_id: str, semitones: int, run: Path) -> None:
+        # Different songs can render concurrently; variants of one song cannot
+        # race over its source files or consume multiple publication Pods.
+        with transpose_job_locks[job_id]:
+            try:
+                transposed_result(job_id, semitones)
+                return
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+            runner.run_transpose(f"{job_id}-{abs(semitones):02d}{'p' if semitones > 0 else 'm'}",
+                                 store.run_dir(job_id), run, semitones, store.log(job_id))
+            transposed_result(job_id, semitones)
+
     @app.post("/jobs/{job_id}/transpositions/{semitones}", dependencies=[Depends(check_key)])
-    def make_transposition(job_id: str, semitones: int) -> dict:
+    def make_transposition(job_id: str, semitones: int, response: Response) -> dict:
         run = transposed_run(job_id, semitones)
         if semitones == 0:
             return transposed_result(job_id, semitones)
-        with transpose_lock:
+        try:
+            return transposed_result(job_id, semitones)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+        if not callable(getattr(runner, "run_transpose", None)):
+            raise HTTPException(501, "transposition is not supported by this runner")
+        key = (job_id, semitones)
+        with transpose_guard:
+            if store.get(job_id) is None:
+                raise HTTPException(404, "no such job")
             try:
                 return transposed_result(job_id, semitones)
             except HTTPException as exc:
                 if exc.status_code != 404:
                     raise
-            render = getattr(runner, "run_transpose", None)
-            if not callable(render):
-                raise HTTPException(501, "transposition is not supported by this runner")
-            try:
-                render(f"{job_id}-{abs(semitones):02d}{'p' if semitones > 0 else 'm'}",
-                       store.run_dir(job_id), run, semitones, store.log(job_id))
-            except (OSError, ValueError, RuntimeError) as exc:
-                raise HTTPException(422 if isinstance(exc, ValueError) else 500, str(exc)[:300]) from exc
-            return transposed_result(job_id, semitones)
+            future = transpose_tasks.get(key)
+            if future is None or future.done():
+                transpose_job_locks.setdefault(job_id, threading.Lock())
+                future = transpose_pool.submit(render_transposition, job_id, semitones, run)
+                transpose_tasks[key] = future
+        response.status_code = 202
+        return {"id": job_id, "semitones": semitones,
+                "state": "running" if future.running() else "queued"}
+
+    @app.get("/jobs/{job_id}/transpositions/{semitones}", dependencies=[Depends(check_key)])
+    def transposition_status(job_id: str, semitones: int) -> dict:
+        transposed_run(job_id, semitones)
+        try:
+            return {"state": "complete", **transposed_result(job_id, semitones)}
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+        with transpose_guard:
+            future = transpose_tasks.get((job_id, semitones))
+        if future is None:
+            raise HTTPException(404, "transposition was not requested")
+        if future.done():
+            error = future.exception()
+            if error is not None:
+                return {"id": job_id, "semitones": semitones, "state": "failed",
+                        "error": str(error)[:300]}
+            return {"id": job_id, "semitones": semitones, "state": "failed",
+                    "error": "transposed score is incomplete"}
+        return {"id": job_id, "semitones": semitones,
+                "state": "running" if future.running() else "queued"}
 
     @app.get("/jobs/{job_id}/transpositions/{semitones}/result", dependencies=[Depends(check_key)])
     def get_transposition(job_id: str, semitones: int) -> dict:

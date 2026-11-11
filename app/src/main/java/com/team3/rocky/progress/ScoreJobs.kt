@@ -137,10 +137,12 @@ object ScoreJobs {
     }
 
     private fun launch(app: Context, job: ScoreJob) {
+        if (job !in jobs) return
         job.runner = scope.launch {
             try {
                 runOnServer(app, job, job.audio)
-                Toast.makeText(
+                // 그사이 사용자가 지웠거나 '악기 다시 선택'으로 바꾼 곡이면 알리지 않는다.
+                if (job in jobs) Toast.makeText(
                     app, tr("'${job.title}' 악보가 완성됐어요", "'${job.title}' is ready"), Toast.LENGTH_LONG,
                 ).show()
             } catch (e: CancellationException) {

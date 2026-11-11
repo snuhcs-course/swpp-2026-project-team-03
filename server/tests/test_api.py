@@ -1,3 +1,6 @@
+import time
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -64,7 +67,14 @@ def test_transposition_renders_and_caches_complete_band_and_parts(setup):
     job_id = upload(client).json()["id"]
     worker.run(store.get(job_id))
     assert client.post(f"/jobs/{job_id}/transpositions/13").status_code == 422
-    assert client.post(f"/jobs/{job_id}/transpositions/-1").status_code == 200
+    start = client.post(f"/jobs/{job_id}/transpositions/-1")
+    assert start.status_code == 202
+    for _ in range(100):
+        status = client.get(f"/jobs/{job_id}/transpositions/-1")
+        if status.json()["state"] == "complete":
+            break
+        time.sleep(.02)
+    assert status.json()["state"] == "complete"
     result = client.get(f"/jobs/{job_id}/transpositions/-1/result").json()
     assert result["semitones"] == -1
     assert set(result["instruments"]) == {"guitar", "bass", "drums", "piano"}
@@ -74,6 +84,60 @@ def test_transposition_renders_and_caches_complete_band_and_parts(setup):
     assert client.get(f"/jobs/{job_id}/transpositions/-1/files/manifest.json").status_code == 404
     assert client.post(f"/jobs/{job_id}/transpositions/-1").status_code == 200
     assert len([c for c in runner.calls if c[0] == "transpose"]) == 1
+
+
+def test_slow_key_change_does_not_block_another_song(setup):
+    started, release = threading.Event(), threading.Event()
+
+    class SlowFirst(FakeRunner):
+        def run_transpose(self, job_id, source, target, semitones, log, note=lambda _m: None):
+            if semitones == -1:
+                started.set()
+                assert release.wait(5)
+            return super().run_transpose(job_id, source, target, semitones, log, note)
+
+    client, store, _, worker = setup(SlowFirst())
+    first, second = upload(client).json()["id"], upload(client).json()["id"]
+    worker.run(store.get(first))
+    worker.run(store.get(second))
+    try:
+        assert client.post(f"/jobs/{first}/transpositions/-1").status_code == 202
+        assert started.wait(2)
+        assert client.post(f"/jobs/{second}/transpositions/1").status_code == 202
+        for _ in range(100):
+            status = client.get(f"/jobs/{second}/transpositions/1").json()
+            if status["state"] == "complete":
+                break
+            time.sleep(.02)
+        assert status["state"] == "complete"
+        assert client.get(f"/jobs/{first}/transpositions/-1").json()["state"] == "running"
+        assert client.delete(f"/jobs/{first}").status_code == 409
+    finally:
+        release.set()
+
+
+def test_failed_key_change_can_be_retried(setup):
+    runner = FakeRunner(fail_stage="transpose")
+    client, store, _, worker = setup(runner)
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    path = f"/jobs/{job_id}/transpositions/1"
+    assert client.post(path).status_code == 202
+    for _ in range(100):
+        status = client.get(path).json()
+        if status["state"] == "failed":
+            break
+        time.sleep(.02)
+    assert status["state"] == "failed"
+    assert "transpose pod failed" in status["error"]
+    runner.fail_stage = None
+    assert client.post(path).status_code == 202
+    for _ in range(100):
+        status = client.get(path).json()
+        if status["state"] == "complete":
+            break
+        time.sleep(.02)
+    assert status["state"] == "complete"
 
 
 def test_failure_reports_pipeline_error(setup):
@@ -360,7 +424,11 @@ def test_delete_removes_key_changes_too(setup):
     client, store, _, worker = setup()
     job_id = upload(client).json()["id"]
     worker.run(store.get(job_id))
-    assert client.post(f"/jobs/{job_id}/transpositions/2").status_code == 200
+    assert client.post(f"/jobs/{job_id}/transpositions/2").status_code == 202
+    for _ in range(100):
+        if client.get(f"/jobs/{job_id}/transpositions/2").json()["state"] == "complete":
+            break
+        time.sleep(.02)
     assert (store.run_dir(job_id) / "transpositions" / "+2").is_dir()
     assert client.delete(f"/jobs/{job_id}").json()["deleted"] is True
     assert not store.run_dir(job_id).exists()

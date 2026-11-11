@@ -131,6 +131,8 @@ fun ResultScreen(
     var local by remember(work.id) { mutableStateOf(ScoreStore.load(ctx, work.id)) }
     var changingKey by remember { mutableStateOf(false) }
     var keyDialog by remember { mutableStateOf(false) }
+    // 대화상자에서 고른 키. '바꾸기'를 눌러야 서버가 한 번만 다시 만든다 (+반 키를 두 번 눌러도 한 번).
+    var targetKey by remember(work.id) { mutableIntStateOf(local?.semitones ?: 0) }
     // 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트. 칩을 누르면 무슨 뜻인지 3초 동안 보여준다.
     // 밴드에서 받은 악보는 서버 결과(faint_parts)로 판단한다.
     val warn = (work.unrecognized + local?.faint.orEmpty().filter { it in work.instruments && it !in ai }).toSet()
@@ -274,6 +276,7 @@ fun ResultScreen(
                 position = 0
                 duration = 0
                 local = updated
+                targetKey = updated.semitones
                 keyDialog = false
             } catch (e: Exception) {
                 Toast.makeText(
@@ -381,27 +384,28 @@ fun ResultScreen(
     if (keyDialog) {
         val now = local?.semitones ?: 0
         AlertDialog(
-            onDismissRequest = { if (!changingKey) keyDialog = false },
+            onDismissRequest = { if (!changingKey) { keyDialog = false; targetKey = now } },
             title = { Text(tr("키 바꾸기", "Change key")) },
             text = {
                 Column {
-                    Text(tr("지금: ${keyLabel(now)}", "Now: ${keyLabel(now)}"), fontWeight = FontWeight.Bold)
+                    Text(tr("지금: ${keyLabel(now)}", "Now: ${keyLabel(now)}"), color = cs.onSurfaceVariant)
+                    Text(tr("바꿀 키: ${keyLabel(targetKey)}", "New key: ${keyLabel(targetKey)}"), fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(12.dp))
                     // 반 키 = 반음 1개, 한 키 = 반음 2개. 위아래 한 옥타브(12반음)까지.
                     for (row in listOf(listOf(-2, -1), listOf(1, 2))) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             row.forEach { step ->
                                 OutlinedButton(
-                                    shape = ButtonShape, onClick = { changeKey(now + step) },
-                                    enabled = !changingKey && now + step in -12..12,
+                                    shape = ButtonShape, onClick = { targetKey += step },
+                                    enabled = !changingKey && targetKey + step in -12..12,
                                     modifier = Modifier.weight(1f), contentPadding = TightButtonPadding,
                                 ) { Text(stepLabel(step), maxLines = 1) }
                             }
                         }
                         Spacer(Modifier.height(8.dp))
                     }
-                    if (now != 0) {
-                        TextButton(onClick = { changeKey(0) }, enabled = !changingKey) { Text(tr("원키로 돌아가기", "Back to the original key")) }
+                    if (targetKey != 0) {
+                        TextButton(onClick = { targetKey = 0 }, enabled = !changingKey) { Text(tr("원키로", "Original key")) }
                     }
                     if (changingKey) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
@@ -418,7 +422,12 @@ fun ResultScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { keyDialog = false }, enabled = !changingKey) { Text(tr("닫기", "Close")) }
+                TextButton(onClick = { changeKey(targetKey) }, enabled = !changingKey && targetKey != now) {
+                    Text(tr("${keyLabel(targetKey)}${if (targetKey == 0) "로" else "으로"} 바꾸기", "Change to ${keyLabel(targetKey)}"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { keyDialog = false; targetKey = now }, enabled = !changingKey) { Text(tr("닫기", "Close")) }
             },
         )
     }
