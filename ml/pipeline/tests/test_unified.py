@@ -300,6 +300,17 @@ def test_publication_adds_demo_audio_and_scores_to_completed_run(tmp_path, monke
     assert publication_ready(runner.out)
     assert runner.manifest["status"] == runner.manifest["score_publication"] == "complete"
 
+    # A completed Tabtify publication must be replaced even if its GP5 inputs
+    # are unchanged; otherwise --resume would serve the old PDFs indefinitely.
+    for part in ("guitar", "bass"):
+        contract["instruments"][part]["converter"] = "gp5-to-pdf"
+    (runner.out / "scores" / "score_outputs.json").write_text(json.dumps(contract), encoding="utf-8")
+    assert not publication_ready(runner.out)
+    calls.clear()
+    runner.publish_outputs()
+    assert {Path(cmd[3]).name for cmd in calls if cmd[0] == "node"} == {"guitar.pdf", "bass.pdf"}
+    assert publication_ready(runner.out)
+
     (runner.out / "scores" / "guitar.mp3").unlink()
     assert not publication_ready(runner.out)
     args.resume = True
@@ -419,7 +430,7 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
     assert contract["version"] == 5
     assert set(contract["instruments"]) == {"guitar", "guitar_1", "guitar_2"}
     assert contract["instruments"]["guitar"]["converter"] == "musescore-score"
-    assert contract["instruments"]["guitar_1"]["converter"] == "gp5-to-pdf"
+    assert contract["instruments"]["guitar_1"]["converter"] == "gp5-alphatab"
     assert contract["instruments"]["guitar_2"]["source"] == "scores/guitar_2_render.gp5"
     assert len(pretty_midi.PrettyMIDI(str(runner.out / "scores" / "guitar_2.mid")).instruments) == 1
     assert {Path(cmd[3]).name for cmd in calls if cmd[0] == "node"} == {"guitar_1.pdf", "guitar_2.pdf"}

@@ -1,0 +1,53 @@
+# One-song CPU-only comparison. Replace INPUT with a completed GP5 on the PVC.
+# Setup is excluded from measured conversion time. The Pod exits when finished.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-gp5-alphatab-bench-20261107
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ferrari
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: muscriptor-data
+  containers:
+    - name: benchmark
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      command: ['/bin/bash', '-lc']
+      args:
+        - |
+          set -euo pipefail
+          WORK=/data/gp5_alphatab_trial_20261107
+          INPUT=/data/mp3_fix_validation_20261104/run/scores/guitar_render.gp5
+          OLD=/data/rocky-unified/ml/gp5_to_pdf_tabtify_20261107/convert.js
+          NEW="$WORK/gp5_to_pdf/convert.js"
+          cd "$WORK/gp5_to_pdf"
+          npm ci --omit=dev --no-audit --no-fund > "$WORK/npm-ci.log" 2>&1
+          printf 'run\tconverter\tseconds\texit_code\tbytes\n' > "$WORK/timings.tsv"
+          run_case() {
+            local run="$1" kind="$2" script="$3" output="$WORK/${1}_${2}.pdf"
+            local start finish code=0 bytes=0
+            start=$(date +%s%3N)
+            node "$script" "$INPUT" "$output" --timeout-ms 180000 > "$WORK/${1}_${2}.log" 2>&1 || code=$?
+            finish=$(date +%s%3N)
+            if test -f "$output"; then bytes=$(stat -c %s "$output"); fi
+            printf '%s\t%s\t%s\t%s\t%s\n' "$run" "$kind" "$(awk "BEGIN {printf \"%.3f\", ($finish-$start)/1000}")" "$code" "$bytes" >> "$WORK/timings.tsv"
+          }
+          run_case 1 tabtify "$OLD"
+          run_case 1 alphatab "$NEW"
+          run_case 2 alphatab "$NEW"
+          run_case 2 tabtify "$OLD"
+          cat "$WORK/timings.tsv"
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data

@@ -1,5 +1,5 @@
 # CPU-only publication Pod. Set ROCKY_RUN_DIR to the matching unified run.
-# Requires Tabtify access for guitar/bass GP5 export.
+# GP5 scores are rendered locally with alphaTab; no Tabtify access is needed.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -27,6 +27,7 @@ spec:
           chmod 700 "$XDG_RUNTIME_DIR"
           apt-get -o Acquire::Retries=5 update -qq
           apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils
+          npm ci --omit=dev --no-audit --no-fund
           exec /data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py \
             "$ROCKY_RUN_DIR" --musescore musescore3 \
             --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js \

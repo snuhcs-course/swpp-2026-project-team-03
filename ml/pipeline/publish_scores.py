@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish full-band and instrument PDF scores and MP3 playback from a unified run.
 
-This stage needs MuseScore, Node/Playwright, and the gp5-to-pdf module.
+This stage needs MuseScore, Node/Playwright, and the local alphaTab GP5 renderer.
 It can run without a GPU. For PDFs, guitar and bass use their completed GP5
 tablatures; full-band, keyboard, and drums use the final assembled MIDI. All
 playback audio is synthesized from that MIDI (or its instrument-only copies),
@@ -28,6 +28,7 @@ import pretty_midi
 # MuseScore 3's stock drumset drops these GM pitches during MIDI import.
 # Map them only in notation inputs; full_score.mid remains untouched.
 DRUM_NOTATION_MAP = {39: 38, 70: 54, 82: 44}  # clap->snare, maracas->tambourine, shaker->pedal hi-hat
+GP5_PDF_CONVERTER = "gp5-alphatab"
 
 
 def score_part_name(track: pretty_midi.Instrument, guitar_number: int = 0) -> tuple[str, str]:
@@ -197,6 +198,8 @@ def publication_ready(run: Path) -> bool:
             for track in item.get("tracks", []):
                 if "source_gp5" not in track:
                     continue
+                if item.get("converter") != GP5_PDF_CONVERTER:
+                    return False
                 relative_gp5 = Path(track["source_gp5"])
                 if relative_gp5.is_absolute() or ".." in relative_gp5.parts:
                     return False
@@ -304,7 +307,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
     def render_pdf(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
         target = out / f"{key}.pdf"
         prior = previous.get("full_band", {}) if key == "full_band" else previous.get("instruments", {}).get(key, {})
-        if force or not unchanged(target, source, prior):
+        if force or prior.get("converter") != converter or not unchanged(target, source, prior):
             target.unlink(missing_ok=True)
             subprocess.run(command, check=True)
         pages = pdf_pages(target, pdfinfo)
@@ -397,7 +400,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                            "--timeout-ms", "180000"]
                 if chrome is not None:
                     command.extend(("--chrome", str(chrome)))
-                render(key, prepared_gp5, "gp5-to-pdf", command,
+                render(key, prepared_gp5, GP5_PDF_CONVERTER, command,
                        [{"name": key, "source_gp5": gp5.relative_to(run).as_posix(),
                          "source_gp5_sha256": sha256(gp5)}])
         else:
@@ -412,7 +415,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                        "--timeout-ms", "180000"]
             if chrome is not None:
                 command.extend(("--chrome", str(chrome)))
-            render(part, prepared_gp5, "gp5-to-pdf", command,
+            render(part, prepared_gp5, GP5_PDF_CONVERTER, command,
                    [{"name": part, "source_gp5": gp5.relative_to(run).as_posix(),
                      "source_gp5_sha256": sha256(gp5)}])
 
