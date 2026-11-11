@@ -108,6 +108,27 @@ class SubprocessRunner:
         self._run(job_id, self.transpose_cmd, source, target, str(semitones), log)
 
 
+# MuseScore 3 and Poppler for the PDF / key-change Pods. The Playwright image does not have them,
+# and downloading them from the Ubuntu mirror on every Pod start failed on 2026-11-12
+# ("Connection reset by peer") after the GPU stage had already finished. So the .deb files are
+# kept on the volume once (server/k8s/pdf-debs-pod.yaml) and installed from there; the mirror is
+# only the fallback when that folder is missing or does not install.
+PDF_TOOLS = "musescore3 poppler-utils"
+
+
+def pdf_tools_install() -> list[str]:
+    debs = os.environ.get("ROCKY_PDF_DEBS", "/data/cache/pdf-debs")
+    return [
+        f'if compgen -G "{debs}/*.deb" > /dev/null && dpkg -i {debs}/*.deb > /tmp/pdf-tools-dpkg.log 2>&1; then',
+        f'  echo "PDF tools: installed from {debs}"',
+        "else",
+        f'  echo "PDF tools: {debs} missing or incomplete, downloading from the mirror"',
+        "  apt-get -o Acquire::Retries=5 update -qq",
+        f"  apt-get -o Acquire::Retries=5 install -y -qq -f --no-install-recommends {PDF_TOOLS}",
+        "fi",
+    ]
+
+
 class KubernetesRunner:
     """Create one GPU Pod and then one CPU Pod per song in the workspace namespace.
 
@@ -199,8 +220,7 @@ class KubernetesRunner:
             "export DEBIAN_FRONTEND=noninteractive QT_QPA_PLATFORM=offscreen",
             "export XDG_RUNTIME_DIR=/tmp/rocky-qt-runtime",
             'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"',
-            "apt-get -o Acquire::Retries=5 update -qq",
-            "apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils",
+            *pdf_tools_install(),
             '/data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py "$ROCKY_OUTPUT_DIR" '
             "--musescore musescore3 --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js",
         ])
@@ -213,8 +233,7 @@ class KubernetesRunner:
             "export DEBIAN_FRONTEND=noninteractive QT_QPA_PLATFORM=offscreen",
             "export XDG_RUNTIME_DIR=/tmp/rocky-qt-runtime",
             'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"',
-            "apt-get -o Acquire::Retries=5 update -qq",
-            "apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musescore3 poppler-utils",
+            *pdf_tools_install(),
             '/data/rocky-unified/.venv/bin/python /data/server/rocky_server/transpose_scores.py '
             '"$ROCKY_SOURCE_DIR" "$ROCKY_OUTPUT_DIR" "$ROCKY_SEMITONES"',
             '/data/rocky-unified/.venv/bin/python /data/pipeline/publish_scores.py "$ROCKY_OUTPUT_DIR" '

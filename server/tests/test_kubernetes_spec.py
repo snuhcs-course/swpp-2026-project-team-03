@@ -124,3 +124,22 @@ def test_other_refusals_fail_at_once(tmp_path, monkeypatch):
     r.core = core
     with pytest.raises(RunnerError, match="cannot create"):
         r.run_midi("abc123abc123", Path("/a.wav"), tmp_path, "keyboard", tmp_path / "log")
+
+
+@pytest.mark.parametrize("make", [
+    lambda r: r.pdf_pod("abc123abc123", Path("/data/rocky-unified/runs/x")),
+    lambda r: r.transpose_pod("abc123abc123-01p", Path("/data/rocky-unified/runs/x"),
+                              Path("/data/rocky-unified/runs/x/transpose/+1"), 1),
+])
+def test_score_pods_install_pdf_tools_from_the_volume_before_the_mirror(make):
+    script = make(runner()).spec.containers[0].args[0]
+    local = script.index("dpkg -i /data/cache/pdf-debs/*.deb")
+    mirror = script.index("apt-get -o Acquire::Retries=5 install")
+    assert local < mirror < script.index("publish_scores.py")
+    assert "musescore3 poppler-utils" in script
+
+
+def test_pdf_tools_folder_can_be_moved(monkeypatch):
+    monkeypatch.setenv("ROCKY_PDF_DEBS", "/data/other-debs")
+    script = runner().pdf_pod("abc123abc123", Path("/data/rocky-unified/runs/x")).spec.containers[0].args[0]
+    assert "dpkg -i /data/other-debs/*.deb" in script

@@ -126,6 +126,12 @@ class Worker:
     (ROCKY_PARALLEL, default 1).
     """
 
+    # The PDF stage only renders files that are already on the volume, so a failed attempt
+    # (e.g. a mirror download cut off while installing MuseScore) is tried again before the
+    # song is marked failed; the GPU stage is not repeated.
+    PDF_ATTEMPTS = 3
+    PDF_RETRY_WAIT_SEC = 20.0
+
     def __init__(self, store: JobStore, runner, parallel: int = 1) -> None:
         self.store, self.runner = store, runner
         self.parallel = max(1, parallel)
@@ -245,6 +251,22 @@ class Worker:
         current = self.store.get(job_id)
         return current is not None and current.state in ("cancelling", "cancelled")
 
+    def _publish(self, job: Job, run: Path, log: Path, note) -> None:
+        attempts = max(1, int(self.PDF_ATTEMPTS))
+        for attempt in range(1, attempts + 1):
+            try:
+                self.runner.run_pdf(job.id, run, log, note=note)
+                return
+            except RunnerError:
+                if attempt == attempts or self._is_cancelling(job.id):
+                    raise
+            with log.open("a", encoding="utf-8") as out:
+                out.write(f"PDF stage failed (attempt {attempt}/{attempts}); trying again\n")
+            note(f"악보 PDF 만들기를 다시 시도하는 중 ({attempt + 1}/{attempts})")
+            time.sleep(self.PDF_RETRY_WAIT_SEC)
+            if self._is_cancelling(job.id):
+                raise RunnerError(f"job {job.id} was cancelled while waiting to retry the PDF stage")
+
     def run(self, job: Job) -> None:
         store = self.store
         log = store.log(job.id)
@@ -273,7 +295,7 @@ class Worker:
                 self._finish_cancel(job)
                 return
             if not (run / "scores" / "score_outputs.json").is_file():
-                self.runner.run_pdf(job.id, run, log, note=note)
+                self._publish(job, run, log, note)
             if self._is_cancelling(job.id):
                 self._finish_cancel(job)
                 return

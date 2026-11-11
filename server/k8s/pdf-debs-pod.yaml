@@ -1,0 +1,47 @@
+# One-off CPU Pod: keeps the MuseScore 3 / Poppler .deb files on the volume, so the PDF and
+# key-change Pods install them from /data/cache/pdf-debs instead of the Ubuntu mirror
+# (rocky_server.runners.pdf_tools_install). Same image as those Pods, so the files match it.
+# Run again only when ROCKY_PDF_IMAGE changes.
+#   kubectl apply -f k8s/pdf-debs-pod.yaml
+#   kubectl logs -f pod/rocky-pdf-debs      # ends with "pdf-debs ready"
+#   kubectl delete pod rocky-pdf-debs
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-pdf-debs
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ferrari
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: muscriptor-data
+  containers:
+    - name: main
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      command: ['/bin/bash', '-c']
+      args:
+        - |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive QT_QPA_PLATFORM=offscreen
+          apt-get -o Acquire::Retries=5 update -qq
+          apt-get -o Acquire::Retries=5 install -y -qq --download-only --no-install-recommends musescore3 poppler-utils
+          rm -rf /data/cache/pdf-debs.new && mkdir -p /data/cache/pdf-debs.new
+          cp /var/cache/apt/archives/*.deb /data/cache/pdf-debs.new/
+          # the same install the PDF Pod will do, in a fresh container of the same image
+          dpkg -i /data/cache/pdf-debs.new/*.deb > /tmp/dpkg.log 2>&1 || { tail -40 /tmp/dpkg.log; exit 1; }
+          command -v musescore3 pdftoppm
+          rm -rf /data/cache/pdf-debs && mv /data/cache/pdf-debs.new /data/cache/pdf-debs
+          echo "pdf-debs ready: $(ls /data/cache/pdf-debs | wc -l) files, $(du -sh /data/cache/pdf-debs | cut -f1)"
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data
