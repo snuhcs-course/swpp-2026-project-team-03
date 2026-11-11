@@ -3,6 +3,7 @@ package com.team3.rocky.server
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.team3.rocky.Work
 import com.team3.rocky.band.BandDatabase
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -87,7 +88,11 @@ class ServerCleanupTest {
     @Test fun bandDatabaseKnowsSharedWorks() {
         val db = BandDatabase(ctx, name = null)
         try {
-            assertTrue(db.isWorkShared(1L))  // the demo band's shared song
+            // The demo band was removed (2026-11-11): share a score in a band made for this test.
+            val band = db.insertBand("테스트밴드", "TEST26", owner = 7L, now = 1L)
+            db.insertMember(band, 7L, "나", "guitar", now = 1L)
+            assertTrue(db.insertScore(band, Work(id = 777L, title = "공유한 곡", instruments = listOf("guitar"), date = "2026.11.11 12:00"), 7L, "나", now = 2L))
+            assertTrue(db.isWorkShared(777L))
             assertFalse(db.isWorkShared(workId))
         } finally {
             db.close()
