@@ -9,6 +9,7 @@ import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import java.io.File
 
@@ -37,6 +38,8 @@ object PhoneSaver {
         return saved
     }
 
+    // MediaStore.Downloads는 안드로이드 10(Q)부터 있다. 그 전 버전은 saveLegacy를 쓴다.
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun saveQ(ctx: Context, file: File): Boolean {
         val resolver = ctx.contentResolver
         val values = ContentValues().apply {
