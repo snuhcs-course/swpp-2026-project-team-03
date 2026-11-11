@@ -1,0 +1,7 @@
+# Beat This! (torch 포함). GPU를 쓰려면 CUDA 버전에 맞는 torch를 먼저 설치
+beat-this
+pretty_midi>=0.2.10
+numpy
+# 테스트용
+pytest
+pytest-cov
