@@ -131,7 +131,7 @@ python align.py --midi jaejae.mid --beats jaejae_beats.json --out jaejae_aligned
 
 ## 입력 주의
 
-- **`--audio`에는 보컬을 지우기 전 원곡을 넣습니다.** 
+- `--audio`에는 원곡을 넣어도 되지만, 최종 파이프라인(`ml/pipeline/unified.py`)은 BS-RoFormer가 만든 **`no_vocals.wav`(보컬을 뺀 5개 stem 합)** 로 박을 찾습니다.
 - MIDI는 MuScriptor 출력처럼 초 단위 시간이 실제 오디오와 맞는 파일이어야 합니다.
 
 ## 한계
@@ -169,6 +169,6 @@ python -m pytest -q --cov=align --cov=drum_sync --cov-report=term-missing
 | Google Drive 마운트, 고정 경로, zip·파일명 규칙 | 경로를 인자로 받음 |
 | `device="cuda"` 고정 | `auto` (GPU 없으면 CPU) |
 | 셀 전역 변수(`beat_results`, `matched_songs`)에 의존 | 함수 하나로 import 가능 |
-| `__no_vocals.wav`로 박 검출 | 원곡 오디오로 박 검출 |
+| `__no_vocals.wav`로 박 검출 | 받은 오디오로 박 검출 (파이프라인은 `no_vocals.wav`) |
 | 셀에서 10곡 일괄 처리 | `--midi-dir` 일괄 처리 (모델 한 번만 로드) |
 | 테스트 없음 | pytest 21개 |

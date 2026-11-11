@@ -250,7 +250,8 @@ def fix_beats(beats: Sequence[float], downbeats: Sequence[float],
     downbeats = np.asarray(downbeats, dtype=float)
     if len(downbeats) == 0:
         return new, np.array([])
-    per_bar = beats_per_bar or estimate_beats_per_bar(b, downbeats)
+    # 마디당 박 수는 다시 센 박(new) 기준으로 센다. 원래 박(b)으로 세면 2/3 간격 구간의 마디가 6박으로 세어진다
+    per_bar = beats_per_bar or estimate_beats_per_bar(new, downbeats)
     first = int(np.argmin(np.abs(new - downbeats[0])))
     return new, new[first % per_bar::per_bar]
 

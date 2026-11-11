@@ -563,6 +563,22 @@ def test_auto_compound_end_to_end():
     assert not r.compound and r.meter == "4/4"
 
 
+def test_fix_beats_counts_bar_on_recounted_beats():
+    # 12/8, 점4분음표 = 1.0 s, 마디 = 4 s. 0~40 s는 점4분음표, 40~100 s는 8분음표 2개(2/3 s)로 찍힘.
+    # 원래 박으로 세면 뒤쪽 마디가 6박이라 다수가 되어 18/8이 나왔다 (2026-11-11 리뷰).
+    beats = np.concatenate([np.arange(0, 40, 1.0), 40 + np.arange(0, 60, 2 / 3)])
+    downbeats = np.arange(0, 100, 4.0)
+    new, down = fix_beats(beats, downbeats, 60)
+    assert np.allclose(np.diff(new), 1.0, atol=1e-6)
+    assert np.allclose(np.diff(down), 4.0, atol=1e-6)
+
+
+def test_auto_compound_mostly_eighth_pairs_is_twelve_eight():
+    beats = np.concatenate([np.arange(0, 40, 1.0), 40 + np.arange(0, 60, 2 / 3)])
+    onsets = np.arange(0, 99, 1 / 3)                     # 셋잇단 8분음표
+    _, r = align_pretty_midi(make_midi([(60, t, t + 0.3) for t in onsets]), beats, np.arange(0, 100, 4.0))
+    assert r.compound and r.meter == "12/8"
+
 def test_cli_no_auto_meter(tmp_path, capsys):
     from align import main, save_beats
     beats = list(np.arange(0, 33) * 0.5)
