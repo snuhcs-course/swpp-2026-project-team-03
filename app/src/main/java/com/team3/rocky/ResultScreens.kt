@@ -100,6 +100,7 @@ fun ResultScreen(
     // 서버에서 만든 악보면 폰에 받아 둔 PDF·MIDI를, 아니면 데모 파일(assets/demo)을 쓴다.
     var local by remember(work.id) { mutableStateOf(ScoreStore.load(ctx, work.id)) }
     var changingKey by remember { mutableStateOf(false) }
+    var selectedKeyOffset by remember(work.id) { mutableIntStateOf(local?.semitones ?: 0) }
     // 서버 결과는 기타 2를 따로 가질 수 있어서 파트 이름 그대로, 데모는 파일 이름(assetBase)으로.
     fun baseOf(part: String?) = part?.let { if (local != null) it else Demo.assetBase(it) } ?: Demo.BAND
     fun serverPart(base: String) = base.takeIf { it != Demo.BAND }
@@ -279,37 +280,49 @@ fun ResultScreen(
         Spacer(Modifier.height(10.dp))
 
         if (saved && local != null) {
-            Text("키 조정 · ${if (local!!.semitones == 0) "원키" else "${if (local!!.semitones > 0) "+" else ""}${local!!.semitones}반음"}",
+            fun keyLabel(offset: Int) = if (offset == 0) "원키" else "${if (offset > 0) "+" else ""}${offset}반음"
+            Text("키 조정 · 현재 ${keyLabel(local!!.semitones)} · 선택 ${keyLabel(selectedKeyOffset)}",
                 fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((step, label) in listOf(-2 to "−한 키", -1 to "−반 키", 1 to "+반 키", 2 to "+한 키")) {
                     OutlinedButton(
-                        onClick = {
-                            val next = local!!.semitones + step
-                            changingKey = true
-                            scope.launch {
-                                try {
-                                    val updated = withContext(Dispatchers.IO) {
-                                        if (next == 0) ScoreStore.useOriginal(ctx, work.id)
-                                        else ScoreStore.transpose(ctx, RockyApi.from(ctx), work.id, next)
-                                    }
-                                    player.reset()
-                                    playing = false
-                                    loadedBase = null
-                                    position = 0
-                                    duration = 0
-                                    local = updated
-                                } catch (e: Exception) {
-                                    Toast.makeText(ctx, "키를 바꾸지 못했어요: ${e.message}", Toast.LENGTH_LONG).show()
-                                } finally {
-                                    changingKey = false
-                                }
-                            }
-                        },
-                        enabled = !changingKey && local!!.semitones + step in -12..12,
+                        onClick = { selectedKeyOffset += step },
+                        enabled = !changingKey && selectedKeyOffset + step in -12..12,
                     ) { Text(label, maxLines = 1, fontSize = 12.sp) }
                 }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(
+                    onClick = { selectedKeyOffset = local!!.semitones },
+                    enabled = !changingKey && selectedKeyOffset != local!!.semitones,
+                ) { Text("선택 취소", fontSize = 12.sp) }
+                Button(
+                    onClick = {
+                        val next = selectedKeyOffset
+                        changingKey = true
+                        scope.launch {
+                            try {
+                                val updated = withContext(Dispatchers.IO) {
+                                    if (next == 0) ScoreStore.useOriginal(ctx, work.id)
+                                    else ScoreStore.transpose(ctx, RockyApi.from(ctx), work.id, next)
+                                }
+                                player.reset()
+                                playing = false
+                                loadedBase = null
+                                position = 0
+                                duration = 0
+                                local = updated
+                                selectedKeyOffset = updated.semitones
+                            } catch (e: Exception) {
+                                Toast.makeText(ctx, "키를 바꾸지 못했어요: ${e.message}", Toast.LENGTH_LONG).show()
+                            } finally {
+                                changingKey = false
+                            }
+                        }
+                    },
+                    enabled = !changingKey && selectedKeyOffset != local!!.semitones,
+                ) { Text("${keyLabel(selectedKeyOffset)} 적용", fontSize = 12.sp) }
             }
             if (changingKey) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

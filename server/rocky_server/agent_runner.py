@@ -40,6 +40,7 @@ class PodRequest:
     log: str = ""
     done: threading.Event = field(default_factory=threading.Event)
     cancel_requested: bool = False
+    ever_claimed: bool = False
 
 
 def spec_builder() -> KubernetesRunner:
@@ -71,6 +72,10 @@ class AgentRunner:
             for req in self.requests.values():
                 if req.job_id == job_id and not req.done.is_set():
                     req.cancel_requested = True
+                    if not req.ever_claimed:
+                        # No agent can have created this Pod. Release the worker slot now.
+                        req.phase = "Cancelled"
+                        req.done.set()
 
     def forget(self, job_id: str) -> None:
         with self.lock:
@@ -133,6 +138,7 @@ class AgentRunner:
                 return None
             req = min(free, key=lambda r: r.created)
             req.agent, req.last_seen, req.note = agent, now, None
+            req.ever_claimed = True
             return {"rid": req.rid, "kind": req.kind, "job_id": req.job_id,
                     "pod": req.pod, "cancel": req.cancel_requested}
 
