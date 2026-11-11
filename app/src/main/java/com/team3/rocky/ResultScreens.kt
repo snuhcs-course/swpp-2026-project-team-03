@@ -103,7 +103,6 @@ import com.team3.rocky.score.MeasureClock
 import com.team3.rocky.score.MeasureLayout
 import com.team3.rocky.score.ScoreLayout
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import java.io.File
 
@@ -594,6 +593,7 @@ private fun ScoreSheet(
         val top = if (bleed) 24.dp else 12.dp
         val gap = 20.dp
         val pageWidth = (maxWidth - side * 2) * zoom
+        val cardWidth = maxWidth - side * 2
         // 지금 마디가 있는 줄이 바뀔 때마다 그 줄이 위에 오게 넘긴다 (그림은 pageWidth에 맞춰 늘어난다).
         LaunchedEffect(box?.page, box?.top, followBox, pageWidth) {
             val b = box ?: return@LaunchedEffect
@@ -638,7 +638,7 @@ private fun ScoreSheet(
                     )
                 }
                 // 악보를 끝까지 본 다음에 평가한다.
-                RatingCard(stars, onRate, Modifier.width(maxWidth - side * 2))
+                RatingCard(stars, onRate, Modifier.width(cardWidth))
             }
         }
         // 위 가운데 손잡이 (종이 느낌)
