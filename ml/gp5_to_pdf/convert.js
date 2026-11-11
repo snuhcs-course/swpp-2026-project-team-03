@@ -68,6 +68,7 @@ const PAGE_HTML = `<!doctype html>
   html, body { margin: 0; background: #fff; }
   h1 { font: 600 14px/1.3 sans-serif; margin: 0 0 6px; }
   h1:not(:first-child) { break-before: page; }
+  .tuning { font: 11px/1.3 sans-serif; margin: 0 0 6px; }
   .track { width: ${SCORE_WIDTH_PX}px; }
   /* Rows of the score are moved into normal flow so that a page break never cuts a system. */
   .row { position: relative; break-inside: avoid; }
@@ -118,6 +119,20 @@ async function renderAllTracks({ scale, width }) {
   // alphaTab cuts long track names off beside the staff, so the name is printed as a heading instead.
   score.stylesheet.singleTrackTrackNamePolicy = at.model.TrackNamePolicy.Hidden;
   const songTitle = [score.title, score.artist].map((t) => (t || '').trim()).filter(Boolean).join(' - ');
+  const pitchName = (pitch, preferFlats) => {
+    const names = preferFlats
+      ? ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+      : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    return names[((pitch % 12) + 12) % 12];
+  };
+  const standardTunings = [
+    [64, 59, 55, 50, 45, 40], // six-string guitar, top TAB line first
+    [43, 38, 33, 28],         // four-string bass
+    [43, 38, 33, 28, 23],     // five-string bass
+  ];
+  const isCommonDownTuning = (tuning) => standardTunings.some((standard) =>
+    tuning.length === standard.length && [1, 2, 3, 4].some((semitones) =>
+      standard.every((pitch, i) => tuning[i] === pitch - semitones)));
 
   for (let index = 0; index < score.tracks.length; index += 1) {
     const holder = document.createElement('div');
@@ -126,6 +141,15 @@ async function renderAllTracks({ scale, width }) {
     const heading = document.createElement('h1');
     heading.textContent = [songTitle, score.tracks[index].name].filter(Boolean).join(' · ');
     document.body.appendChild(heading);
+    const tuning = score.tracks[index].staves[0]?.tuning;
+    if (tuning?.length) {
+      const label = document.createElement('p');
+      label.className = 'tuning';
+      const pitches = Array.from(tuning);
+      const preferFlats = isCommonDownTuning(pitches);
+      label.textContent = `String tuning (top to bottom): ${pitches.map((pitch) => pitchName(pitch, preferFlats)).join(' · ')}`;
+      document.body.appendChild(label);
+    }
     document.body.appendChild(holder);
     const api = new at.AlphaTabApi(holder, settings());
     await new Promise((resolve, reject) => {
