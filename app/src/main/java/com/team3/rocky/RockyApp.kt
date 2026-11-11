@@ -266,19 +266,22 @@ fun RockyApp() {
                 canNext = (original.isNotEmpty() || originalUnknown) && !twoGuitarsFromNone,
                 unknown = originalUnknown,
                 onUnknown = { originalUnknown = !originalUnknown; if (originalUnknown) original = emptySet() },
-                footer = {
-                    val ai = Demo.ordered(Demo.aiGenerated(Demo.ordered(lineup), Demo.ordered(original)))
-                    // '악기 다시 선택'으로 왔으면 무엇이 달라 보였는지 먼저 알려 준다.
+                // '악기 다시 선택'으로 왔으면 지난번에 무엇이 달라 보였는지 맨 위에서 먼저 알려 준다.
+                notice = {
                     s.redo?.let { ScoreJobs.find(it) }?.let { old ->
                         val names = { parts: List<String> -> parts.joinToString(" · ") { Demo.label(it, old.lineup) } }
-                        if (old.unrecognized.isNotEmpty()) InfoNote(
-                            tr("거의 안 들린 악기: ${names(old.unrecognized)}", "Barely audible: ${names(old.unrecognized)}"), strong = true,
-                        )
-                        if (old.overlooked.isNotEmpty()) InfoNote(
-                            tr("고르지 않았지만 들린 악기: ${names(old.overlooked)}", "Audible but not picked: ${names(old.overlooked)}"), strong = true,
-                        )
-                        if (old.instrumentDoubt) Spacer(Modifier.height(8.dp))
+                        if (old.unrecognized.isNotEmpty()) {
+                            Spacer(Modifier.height(10.dp))
+                            InfoNote(tr("거의 안 들린 악기: ${names(old.unrecognized)}", "Barely audible: ${names(old.unrecognized)}"), strong = true)
+                        }
+                        if (old.overlooked.isNotEmpty()) {
+                            Spacer(Modifier.height(if (old.unrecognized.isEmpty()) 10.dp else 6.dp))
+                            InfoNote(tr("고르지 않았지만 들린 악기: ${names(old.overlooked)}", "Audible but not picked: ${names(old.overlooked)}"), strong = true)
+                        }
                     }
+                },
+                footer = {
+                    val ai = Demo.ordered(Demo.aiGenerated(Demo.ordered(lineup), Demo.ordered(original)))
                     when {
                         twoGuitarsFromNone -> InfoNote(
                             tr(
@@ -1184,6 +1187,8 @@ fun OriginalScreen(
     canNext: Boolean,
     onNext: () -> Unit,
     footer: @Composable () -> Unit,
+    /** 올린 곡 바로 아래에 보여줄 안내 (악기 다시 선택에서 씀). */
+    notice: @Composable () -> Unit = {},
 ) {
     val cs = MaterialTheme.colorScheme
     Page(tr("3 / 3단계", "Step 3 of 3"), onBack, actions = { StepBars(3) }, bottom = {
@@ -1214,6 +1219,7 @@ fun OriginalScreen(
                     Text(songSub, fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            notice()
             Spacer(Modifier.height(22.dp))
             Text(tr("이 곡에서는\n어떤 악기가 들리나요?", "Which instruments\ndo you hear?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
