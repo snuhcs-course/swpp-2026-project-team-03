@@ -141,7 +141,7 @@ k5 logs -f rocky-api        # 1~2분 뒤 "Uvicorn running on http://0.0.0.0:8000
   k5 logs -f rocky-pdf-debs                     # 마지막 줄 "pdf-debs ready: ..." 확인 후 Ctrl+C
   k5 delete pod rocky-pdf-debs
   ```
-  PDF 단계가 실패하면 서버가 20초 뒤 PDF만 다시 시도한다 (최대 3번, GPU 단계는 다시 안 함).
+  PDF Pod가 미러 설치 실패처럼 일시적인 이유로 실패하면(로그에 `ROCKY_TRANSIENT_FAILURE`, 종료 코드 75) 서버가 20초 뒤 PDF만 다시 시도한다 (최대 3번, 15분 안에서만, GPU 단계는 다시 안 함). 시간 초과·agent 없음·코드 오류는 다시 시도하지 않는다.
 
 ---
 

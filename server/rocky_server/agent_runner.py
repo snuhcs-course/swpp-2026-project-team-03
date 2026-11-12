@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .runners import KubernetesRunner, RunnerError
+from .runners import KubernetesRunner, RunnerError, pod_failure
 
 WAIT_FOR_AGENT = "노트북 연결(agent)을 기다리는 중"
 
@@ -114,7 +114,7 @@ class AgentRunner:
         with log.open("a", encoding="utf-8") as out:
             out.write(f"===== {req.pod['metadata']['name']} ({req.phase}, agent {req.agent}) =====\n{req.log}\n")
         if req.phase != "Succeeded":
-            raise RunnerError(f"{kind} pod {req.phase or 'failed'}; see {log.name}")
+            raise pod_failure(f"{kind} pod", req.phase, req.log, log.name)
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
                  note=lambda _msg: None, original: str = "unknown") -> None:

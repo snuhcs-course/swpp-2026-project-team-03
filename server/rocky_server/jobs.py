@@ -15,7 +15,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .runners import RunnerError, to_wav
+from .runners import RunnerError, TransientPodFailure, to_wav
 
 STATES = ("uploading", "queued", "running", "publishing", "cancelling", "cancelled", "complete", "failed")
 
@@ -126,11 +126,14 @@ class Worker:
     (ROCKY_PARALLEL, default 1).
     """
 
-    # The PDF stage only renders files that are already on the volume, so a failed attempt
-    # (e.g. a mirror download cut off while installing MuseScore) is tried again before the
-    # song is marked failed; the GPU stage is not repeated.
+    # The PDF stage only renders files that are already on the volume, so a Pod that failed for a
+    # passing reason (TransientPodFailure: e.g. the mirror reset the connection while installing
+    # MuseScore) is tried again before the song is marked failed; the GPU stage is not repeated.
+    # Timeouts, a missing agent and real errors are not retried, and no retry starts after
+    # PDF_STAGE_DEADLINE_SEC, so one song cannot hold the worker much longer than before.
     PDF_ATTEMPTS = 3
     PDF_RETRY_WAIT_SEC = 20.0
+    PDF_STAGE_DEADLINE_SEC = 15 * 60.0
 
     def __init__(self, store: JobStore, runner, parallel: int = 1) -> None:
         self.store, self.runner = store, runner
@@ -253,15 +256,17 @@ class Worker:
 
     def _publish(self, job: Job, run: Path, log: Path, note) -> None:
         attempts = max(1, int(self.PDF_ATTEMPTS))
+        stop_retrying_at = time.monotonic() + self.PDF_STAGE_DEADLINE_SEC
         for attempt in range(1, attempts + 1):
             try:
                 self.runner.run_pdf(job.id, run, log, note=note)
                 return
-            except RunnerError:
-                if attempt == attempts or self._is_cancelling(job.id):
+            except TransientPodFailure:
+                if (attempt == attempts or self._is_cancelling(job.id)
+                        or time.monotonic() + self.PDF_RETRY_WAIT_SEC > stop_retrying_at):
                     raise
             with log.open("a", encoding="utf-8") as out:
-                out.write(f"PDF stage failed (attempt {attempt}/{attempts}); trying again\n")
+                out.write(f"PDF stage failed for a passing reason (attempt {attempt}/{attempts}); trying again\n")
             note(f"악보 PDF 만들기를 다시 시도하는 중 ({attempt + 1}/{attempts})")
             time.sleep(self.PDF_RETRY_WAIT_SEC)
             if self._is_cancelling(job.id):

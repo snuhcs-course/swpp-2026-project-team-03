@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,3 +144,54 @@ def test_pdf_tools_folder_can_be_moved(monkeypatch):
     monkeypatch.setenv("ROCKY_PDF_DEBS", "/data/other-debs")
     script = runner().pdf_pod("abc123abc123", Path("/data/rocky-unified/runs/x")).spec.containers[0].args[0]
     assert "dpkg -i /data/other-debs/*.deb" in script
+
+
+# ---- the install snippet itself, run in bash with fake dpkg / apt-get / musescore3 / pdftoppm ----
+
+def _fake(bin_dir, name, body):
+    p = bin_dir / name
+    p.write_text("#!/bin/sh\n" + body + "\n")
+    p.chmod(0o755)
+
+
+def _run_install(tmp_path, monkeypatch, *, cache_has_tools, mirror_ok=True):
+    import shutil
+    import subprocess
+    from rocky_server.runners import pdf_tools_install
+    bash = shutil.which("bash")
+    if bash is None or sys.platform == "win32":
+        pytest.skip("needs a POSIX bash")
+    debs, bin_dir = tmp_path / "debs", tmp_path / "bin"
+    debs.mkdir(); bin_dir.mkdir()
+    for tool in ("cat", "chmod"):  # the fake installers below need these; nothing else is on PATH
+        (bin_dir / tool).symlink_to(shutil.which(tool))
+    (debs / "some-library.deb").write_bytes(b"deb")
+    calls = tmp_path / "calls"
+    tools = f'cat > {bin_dir}/musescore3 <<X\n#!/bin/sh\nX\nchmod +x {bin_dir}/musescore3\n' \
+            f'cat > {bin_dir}/pdftoppm <<X\n#!/bin/sh\nX\nchmod +x {bin_dir}/pdftoppm'
+    _fake(bin_dir, "dpkg", f'echo dpkg >> {calls}\n' + (tools if cache_has_tools else "true"))
+    _fake(bin_dir, "apt-get", f'echo "apt-get $*" >> {calls}\n' + (tools if mirror_ok else "exit 100"))
+    monkeypatch.setenv("ROCKY_PDF_DEBS", str(debs))
+    script = "set -euo pipefail\n" + "\n".join(pdf_tools_install()) + "\necho DONE"
+    r = subprocess.run([bash, "-c", script], capture_output=True, text=True,
+                       env={"PATH": str(bin_dir)})
+    return r, (calls.read_text() if calls.exists() else "")
+
+
+def test_a_complete_cache_is_used_without_the_mirror(tmp_path, monkeypatch):
+    r, calls = _run_install(tmp_path, monkeypatch, cache_has_tools=True)
+    assert r.returncode == 0 and "installed from" in r.stdout and "DONE" in r.stdout
+    assert "apt-get" not in calls
+
+
+def test_a_partial_cache_falls_back_to_the_mirror(tmp_path, monkeypatch):
+    # dpkg -i succeeds, but MuseScore / Poppler are not among the files
+    r, calls = _run_install(tmp_path, monkeypatch, cache_has_tools=False)
+    assert r.returncode == 0 and "downloading from the mirror" in r.stdout and "DONE" in r.stdout
+    assert "apt-get" in calls and "install" in calls
+
+
+def test_a_mirror_failure_is_marked_transient(tmp_path, monkeypatch):
+    from rocky_server.runners import TRANSIENT_MARKER
+    r, _ = _run_install(tmp_path, monkeypatch, cache_has_tools=False, mirror_ok=False)
+    assert r.returncode == 75 and TRANSIENT_MARKER in r.stdout and "DONE" not in r.stdout

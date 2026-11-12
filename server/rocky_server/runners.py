@@ -26,6 +26,21 @@ class RunnerError(RuntimeError):
     pass
 
 
+class TransientPodFailure(RunnerError):
+    """A Pod that failed for a reason worth one more try (it printed TRANSIENT_MARKER)."""
+
+
+# Printed (and exit 75) by a Pod script when it fails for a passing reason, e.g. the Ubuntu
+# mirror resetting the connection while installing the PDF tools. Only these failures are retried.
+TRANSIENT_MARKER = "ROCKY_TRANSIENT_FAILURE"
+
+
+def pod_failure(what: str, phase: str | None, pod_log: str, log_name: str) -> RunnerError:
+    """The error for a finished Pod that did not succeed."""
+    cls = TransientPodFailure if TRANSIENT_MARKER in (pod_log or "") else RunnerError
+    return cls(f"{what} {phase or 'failed'}; see {log_name}")
+
+
 def to_wav(source: Path) -> Path:
     """Decode mp3/m4a/flac to 44.1 kHz stereo WAV when ffmpeg is available.
 
@@ -118,14 +133,20 @@ PDF_TOOLS = "musescore3 poppler-utils"
 
 def pdf_tools_install() -> list[str]:
     debs = os.environ.get("ROCKY_PDF_DEBS", "/data/cache/pdf-debs")
+    have_tools = "command -v musescore3 > /dev/null && command -v pdftoppm > /dev/null"
     return [
-        f'if compgen -G "{debs}/*.deb" > /dev/null && dpkg -i {debs}/*.deb > /tmp/pdf-tools-dpkg.log 2>&1; then',
+        # the cache counts only if it installs AND both programs are there afterwards
+        f'if compgen -G "{debs}/*.deb" > /dev/null && dpkg -i {debs}/*.deb > /tmp/pdf-tools-dpkg.log 2>&1 && {have_tools}; then',
         f'  echo "PDF tools: installed from {debs}"',
         "else",
         f'  echo "PDF tools: {debs} missing or incomplete, downloading from the mirror"',
-        "  apt-get -o Acquire::Retries=5 update -qq",
-        f"  apt-get -o Acquire::Retries=5 install -y -qq -f --no-install-recommends {PDF_TOOLS}",
+        "  if ! { apt-get -o Acquire::Retries=5 update -qq &&",
+        f"         apt-get -o Acquire::Retries=5 install -y -qq -f --no-install-recommends {PDF_TOOLS}; }}; then",
+        f'    echo "{TRANSIENT_MARKER}: could not install the PDF tools from the mirror"',
+        "    exit 75",
+        "  fi",
         "fi",
+        f'{have_tools} || {{ echo "PDF tools: musescore3 or pdftoppm still missing"; exit 1; }}',
     ]
 
 
@@ -280,8 +301,7 @@ class KubernetesRunner:
                     note(None)
                     return
                 if status.phase == "Failed":
-                    self._save_log(name, log)
-                    raise RunnerError(f"pod {name} failed; see {log.name}")
+                    raise pod_failure(f"pod {name}", "failed", self._save_log(name, log), log.name)
                 if status.phase == "Pending":
                     waiting = any(c.reason == "Unschedulable" for c in (status.conditions or []))
                     note("GPU 차례를 기다리는 중" if waiting else None)
@@ -305,14 +325,16 @@ class KubernetesRunner:
                     return
             time.sleep(1)
 
-    def _save_log(self, name: str, log: Path) -> None:
+    def _save_log(self, name: str, log: Path) -> str:
         try:
             text = self.core.read_namespaced_pod_log(name, self.namespace, tail_lines=400)
             with log.open("a", encoding="utf-8") as out:
                 out.write(f"===== {name} =====\n{text}\n")
+            return text or ""
         except Exception as exc:  # the log is only for people; never fail the song over it
             with log.open("a", encoding="utf-8") as out:
                 out.write(f"(could not read log of {name}: {exc})\n")
+            return ""
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
                  note=lambda _msg: None, original: str = "unknown") -> None:
