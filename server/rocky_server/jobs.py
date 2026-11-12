@@ -112,7 +112,11 @@ class JobStore:
 
     def update(self, job: Job, **changes) -> Job:
         with self.lock:
-            current = self.get(job.id) or job
+            current = self.get(job.id)
+            if current is None:
+                # The record was purged (the user deleted the song). A stale Job object must not
+                # write it back: the delete contract (NFR-07) is that nothing of it stays.
+                return job
             # A worker may hold an older Job object while the cancel endpoint
             # changes its state. Progress updates must not revive that job.
             if current.state in ("cancelling", "cancelled") and changes.get("state") != "cancelled":
@@ -178,7 +182,8 @@ class Worker:
     def claim(self) -> Job | None:
         """Take the oldest queued job and mark it running, so no other thread takes it."""
         with self.store.lock:
-            job = next((j for j in self.store.all() if j.state == "queued"), None)
+            job = next((j for j in self.store.all()
+                        if j.state == "queued" and not self.store.is_deleted(j.id)), None)
             if job is not None:
                 job.state = "running"
                 job.started_at = job.started_at or time.time()
@@ -221,16 +226,47 @@ class Worker:
         self.notify()
         return job.state
 
+    def retry(self, job_id: str) -> dict:
+        """Put a failed song back in the queue under the same id (POST /jobs/{id}/retry).
+
+        Checked and changed in one step under the store lock, like delete() above, so a song
+        the user deleted is never brought back. Raises RetryRefused with the HTTP status."""
+        with self.store.lock:
+            job = self.store.get(job_id)
+            if job is None or self.store.is_deleted(job_id):
+                raise RetryRefused(404, "no such job")
+            if job.state != "failed":
+                raise RetryRefused(409, f"only a failed song can be retried (state is {job.state})")
+            if job.reason:  # the input itself was refused; the same file gives the same answer
+                raise RetryRefused(409, "this file was refused; upload a different one")
+            if not job.retryable:
+                raise RetryRefused(409, job.user_message or "this failure cannot be retried; upload the song again")
+            if not (self.store.inputs / job.filename).is_file():
+                raise RetryRefused(410, "the uploaded audio is gone; upload the song again")
+            retry_from = job.retry_from
+            job.state, job.error, job.note, job.started_at, job.finished_at = "queued", None, None, None, None
+            job.__dict__.update(CLEAR_FAILURE)
+            self.store.save(job)
+        forget = getattr(self.runner, "forget", None)
+        if callable(forget):
+            forget(job_id)
+        self.notify()
+        return {"id": job_id, "state": "queued", "retry_from": retry_from,
+                "queue_position": self.queue_position(job_id)}
+
     def delete(self, job_id: str) -> str | None:
         """Delete a job and all its files. None if there is no such job.
 
         "deleted": gone now. "pending": the song is still uploading or its Pod is
         being stopped (cancel above); it is purged as soon as that finishes.
         """
-        job = self.store.get(job_id)
-        if job is None:
-            return None
-        self.store.tombstone(job_id).touch()
+        # Read the state and leave the mark under the store lock, so a concurrent retry either
+        # happened before (and is cancelled below as a queued song) or sees the mark and refuses.
+        with self.store.lock:
+            job = self.store.get(job_id)
+            if job is None:
+                return None
+            self.store.tombstone(job_id).touch()
         if job.state == "uploading":  # create_job purges it when the upload ends
             return "pending"
         if job.state in ("queued", "running", "publishing", "cancelling"):
@@ -367,6 +403,12 @@ def failure_reason(run: Path, exc: Exception) -> str:
     except (OSError, ValueError):
         pass
     return f"{type(exc).__name__}: {exc}"[:500]
+
+
+class RetryRefused(Exception):
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status, self.detail = status, detail
 
 
 CLEAR_FAILURE = dict(error_code=None, user_message=None, retryable=False, retry_after_sec=None,

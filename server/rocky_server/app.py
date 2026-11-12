@@ -43,7 +43,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, U
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .accounts import AccountError, Accounts, User
-from .jobs import CLEAR_FAILURE, JobStore, Worker
+from .jobs import JobStore, RetryRefused, Worker
 from .lineup import APP_PARTS, LineupError, pipeline_args
 from .progress import allowed_paths, result_files, run_progress
 from .runners import make_runner
@@ -165,24 +165,11 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def retry_job(job_id: str) -> dict:
         """Run a failed song again under the same id. A run with full_score.mid only runs the
         PDF stage again; otherwise unified.py --resume skips the stages that already finished."""
-        job = find(job_id)
-        if job.state != "failed":
-            raise HTTPException(409, f"only a failed song can be retried (state is {job.state})")
-        if job.reason:  # the input itself was refused; the same file gives the same answer
-            raise HTTPException(409, "this file was refused; upload a different one")
-        if not job.retryable:
-            raise HTTPException(409, job.user_message or "this failure cannot be retried; upload the song again")
-        if not (store.inputs / job.filename).is_file():
-            raise HTTPException(410, "the uploaded audio is gone; upload the song again")
-        retry_from = job.retry_from
-        store.update(job, state="queued", error=None, note=None, started_at=None, finished_at=None,
-                     **CLEAR_FAILURE)
-        forget = getattr(runner, "forget", None)
-        if callable(forget):
-            forget(job.id)
-        worker.notify()
-        return {"id": job.id, "state": "queued", "retry_from": retry_from,
-                "queue_position": worker.queue_position(job.id)}
+        find(job_id)
+        try:
+            return worker.retry(job_id)
+        except RetryRefused as refused:
+            raise HTTPException(refused.status, refused.detail)
 
     @app.post("/jobs/{job_id}/cancel", dependencies=[Depends(check_key)])
     def cancel_job(job_id: str) -> dict:

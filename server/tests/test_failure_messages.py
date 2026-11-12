@@ -161,3 +161,72 @@ def test_agent_runner_tells_a_missing_agent_from_a_slow_pod(tmp_path):
         runner.run_pdf("abcabcabcabc", tmp_path, tmp_path / "log")
     t.join()
     assert not isinstance(err.value, NoAgent)
+
+
+# ---- retry vs delete (NFR-07: a deleted song never comes back) ----
+
+def failed_song(setup):
+    runner = ScriptedRunner(pdf_errors=[TransientPodFailure("pdf pod Failed; see x.log")] * 3)
+    client, store, worker = setup(runner)
+    job_id = upload(client)
+    worker.run(store.get(job_id))
+    assert client.get(f"/jobs/{job_id}").json()["retryable"] is True
+    return client, store, worker, job_id
+
+
+def assert_gone(client, store, worker, job_id):
+    assert client.get(f"/jobs/{job_id}").status_code == 404
+    assert store.get(job_id) is None and not store.run_dir(job_id).exists()
+    assert not list(store.inputs.glob(f"{job_id}.*"))
+    assert worker.claim() is None
+
+
+def test_retry_after_delete_is_404(setup):
+    client, store, worker, job_id = failed_song(setup)
+    assert client.delete(f"/jobs/{job_id}").json()["deleted"] is True
+    assert client.post(f"/jobs/{job_id}/retry").status_code == 404
+    assert_gone(client, store, worker, job_id)
+
+
+def test_delete_during_a_retry_still_removes_the_song(setup):
+    """The reviewer's interleaving: retry has validated the job and is writing it back when
+    DELETE arrives. DELETE now waits for the store lock, sees the queued song, cancels and purges it."""
+    client, store, worker, job_id = failed_song(setup)
+    in_save, release = threading.Event(), threading.Event()
+    real_save = store.save
+
+    def slow_save(job):
+        if job.id == job_id and job.state == "queued" and threading.current_thread().name == "retry":
+            in_save.set()
+            release.wait(5)
+        real_save(job)
+    store.save = slow_save
+
+    results = {}
+    retry = threading.Thread(target=lambda: results.update(retry=worker.retry(job_id)), name="retry")
+    retry.start()
+    assert in_save.wait(5)
+    delete = threading.Thread(target=lambda: results.update(delete=worker.delete(job_id)))
+    delete.start()
+    time.sleep(0.2)
+    assert delete.is_alive()  # blocked on the store lock while retry holds it
+    release.set()
+    retry.join(5); delete.join(5)
+
+    assert results["retry"]["state"] == "queued" and results["delete"] == "deleted"
+    assert_gone(client, store, worker, job_id)
+
+
+def test_a_stale_update_does_not_recreate_a_purged_record(setup):
+    client, store, worker, job_id = failed_song(setup)
+    stale = store.get(job_id)
+    store.purge(job_id)
+    store.update(stale, state="queued")
+    assert store.get(job_id) is None
+
+
+def test_a_queued_song_marked_deleted_is_never_claimed(setup):
+    client, store, worker = setup(FakeRunner())
+    job_id = upload(client)
+    store.tombstone(job_id).touch()
+    assert worker.claim() is None
