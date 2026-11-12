@@ -15,7 +15,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .runners import RunnerError, TransientPodFailure, to_wav
+from .runners import NoAgent, PodTimeout, RunnerError, TransientPodFailure, to_wav
 
 STATES = ("uploading", "queued", "running", "publishing", "cancelling", "cancelled", "complete", "failed")
 
@@ -42,6 +42,13 @@ class Job:
     # set when unified.py refused the input (state is then "failed"):
     # too_short, silent or not_band_audio. The app shows its own message for it.
     reason: str | None = None
+    # set for every other failure (see describe_failure): what the app tells the user and offers.
+    # `error` above stays the developer's text (exception or pipeline error).
+    error_code: str | None = None       # pdf_network, timeout, no_agent, pipeline_error, upload_interrupted
+    user_message: str | None = None     # Korean, for people: what happened and what to do
+    retryable: bool = False             # POST /jobs/{id}/retry is worth calling
+    retry_after_sec: int | None = None  # wait this long before retrying (None: right away)
+    retry_from: str | None = None       # "pdf": only the PDF stage runs again; "gpu": from the stage that stopped
 
 
 class JobStore:
@@ -154,7 +161,8 @@ class Worker:
                 # The request was already persisted. Never restart its pipeline.
                 self.store.update(job, state="cancelled", finished_at=time.time())
             elif job.state == "uploading":  # the upload was cut off by the restart
-                self.store.update(job, state="failed", error="upload interrupted")
+                self.store.update(job, state="failed", error="upload interrupted",
+                                  **UPLOAD_INTERRUPTED)
         for t in self.threads:
             t.start()
         self.notify()
@@ -176,6 +184,7 @@ class Worker:
                 job.started_at = job.started_at or time.time()
                 job.error = None
                 job.reason = None
+                job.__dict__.update(CLEAR_FAILURE)
                 self.store.save(job)
             return job
 
@@ -324,7 +333,8 @@ class Worker:
                              error=REJECTION_MESSAGES.get(code, REJECTION_MESSAGES["not_band_audio"]))
                 free_space(run, store.inputs, job.filename)
             else:
-                store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc))
+                store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc),
+                             **describe_failure(run, exc, getattr(self.runner, "timeout_sec", None)))
         finally:
             if store.is_deleted(job.id) and not self._is_cancelling(job.id):
                 store.purge(job.id)
@@ -357,6 +367,44 @@ def failure_reason(run: Path, exc: Exception) -> str:
     except (OSError, ValueError):
         pass
     return f"{type(exc).__name__}: {exc}"[:500]
+
+
+CLEAR_FAILURE = dict(error_code=None, user_message=None, retryable=False, retry_after_sec=None,
+                     retry_from=None)
+
+UPLOAD_INTERRUPTED = dict(
+    error_code="upload_interrupted", retryable=False, retry_after_sec=None, retry_from=None,
+    user_message="음원을 올리는 중에 연결이 끊겼어요. 처음부터 다시 올려 주세요.")
+
+PDF_NETWORK_RETRY_AFTER_SEC = 60
+
+
+def describe_failure(run: Path, exc: Exception, timeout_sec: float | None = None) -> dict:
+    """What the app shows for a failed song, and whether POST /jobs/{id}/retry can help.
+
+    retry_from follows the worker: a run that already has full_score.mid only runs the PDF stage
+    again; otherwise unified.py --resume continues from the stage that stopped."""
+    from_pdf = (run / "full_score.mid").is_file()
+    retry_from = "pdf" if from_pdf else "gpu"
+    redo = ("'다시 시도'를 누르면 채보 결과는 그대로 두고 악보 파일(PDF)만 다시 만들어요. 약 1~2분 걸려요."
+            if from_pdf else
+            "'다시 시도'를 누르면 이미 끝난 단계는 건너뛰고 멈춘 단계부터 이어서 해요. 길어도 10분 안팎이에요.")
+    if isinstance(exc, TransientPodFailure):
+        return dict(error_code="pdf_network", retryable=True, retry_after_sec=PDF_NETWORK_RETRY_AFTER_SEC,
+                    retry_from=retry_from,
+                    user_message="악보 파일(PDF)을 만드는 프로그램을 준비하다가 인터넷 연결이 끊겼어요. "
+                                 f"{PDF_NETWORK_RETRY_AFTER_SEC}초쯤 기다린 뒤 " + redo)
+    if isinstance(exc, NoAgent):
+        return dict(error_code="no_agent", retryable=False, retry_after_sec=None, retry_from=retry_from,
+                    user_message="지금 악보를 만드는 컴퓨터가 서버에 연결되어 있지 않아서 시작하지 못했어요. "
+                                 "다시 시도해도 같은 결과가 나와요. 팀에게 알려 주세요.")
+    if isinstance(exc, PodTimeout):
+        minutes = round((timeout_sec or 5400) / 60)
+        return dict(error_code="timeout", retryable=True, retry_after_sec=None, retry_from=retry_from,
+                    user_message=f"{minutes}분 안에 끝나지 않아서 멈췄어요. 지금 바로 " + redo)
+    return dict(error_code="pipeline_error", retryable=True, retry_after_sec=None, retry_from=retry_from,
+                user_message="악보를 만드는 중에 오류가 났어요. 지금 바로 " + redo +
+                             " 같은 곡이 두 번 실패하면 팀에게 알려 주세요.")
 
 
 def free_space(run: Path, inputs: Path, filename: str) -> None:

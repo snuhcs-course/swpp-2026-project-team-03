@@ -30,6 +30,14 @@ class TransientPodFailure(RunnerError):
     """A Pod that failed for a reason worth one more try (it printed TRANSIENT_MARKER)."""
 
 
+class PodTimeout(RunnerError):
+    """The Pod did not finish within ROCKY_JOB_TIMEOUT_SEC."""
+
+
+class NoAgent(PodTimeout):
+    """Agent mode: no agent ever picked the request up before the timeout."""
+
+
 # Printed (and exit 75) by a Pod script when it fails for a passing reason, e.g. the Ubuntu
 # mirror resetting the connection while installing the PDF tools. Only these failures are retried.
 TRANSIENT_MARKER = "ROCKY_TRANSIENT_FAILURE"
@@ -306,7 +314,7 @@ class KubernetesRunner:
                     waiting = any(c.reason == "Unschedulable" for c in (status.conditions or []))
                     note("GPU 차례를 기다리는 중" if waiting else None)
                 time.sleep(self.POLL_SEC)
-            raise RunnerError(f"pod {name} did not finish within {self.timeout_sec} s")
+            raise PodTimeout(f"pod {name} did not finish within {self.timeout_sec} s")
         finally:
             self._delete(name)  # frees the GPU quota even after a failure or timeout
 

@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .runners import KubernetesRunner, RunnerError, pod_failure
+from .runners import KubernetesRunner, NoAgent, PodTimeout, RunnerError, pod_failure
 
 WAIT_FOR_AGENT = "노트북 연결(agent)을 기다리는 중"
 
@@ -106,7 +106,9 @@ class AgentRunner:
                     msg = req.note if req.agent else WAIT_FOR_AGENT
                 note(msg)
                 if time.monotonic() > deadline:
-                    raise RunnerError(f"{kind} pod did not finish within {int(self.timeout_sec)} s")
+                    if not req.ever_claimed:
+                        raise NoAgent(f"no agent took the {kind} pod within {int(self.timeout_sec)} s")
+                    raise PodTimeout(f"{kind} pod did not finish within {int(self.timeout_sec)} s")
         finally:
             with self.lock:
                 self.requests.pop(req.rid, None)
