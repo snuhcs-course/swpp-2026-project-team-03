@@ -15,7 +15,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .runners import RunnerError, to_wav
+from .runners import NoAgent, PodTimeout, RunnerError, TransientPodFailure, to_wav
 
 STATES = ("uploading", "queued", "running", "publishing", "cancelling", "cancelled", "complete", "failed")
 
@@ -42,6 +42,13 @@ class Job:
     # set when unified.py refused the input (state is then "failed"):
     # too_short, silent or not_band_audio. The app shows its own message for it.
     reason: str | None = None
+    # set for every other failure (see describe_failure): what the app tells the user and offers.
+    # `error` above stays the developer's text (exception or pipeline error).
+    error_code: str | None = None       # pdf_network, timeout, no_agent, pipeline_error, upload_interrupted
+    user_message: str | None = None     # Korean, for people: what happened and what to do
+    retryable: bool = False             # POST /jobs/{id}/retry is worth calling
+    retry_after_sec: int | None = None  # wait this long before retrying (None: right away)
+    retry_from: str | None = None       # "pdf": only the PDF stage runs again; "gpu": from the stage that stopped
 
 
 class JobStore:
@@ -105,7 +112,11 @@ class JobStore:
 
     def update(self, job: Job, **changes) -> Job:
         with self.lock:
-            current = self.get(job.id) or job
+            current = self.get(job.id)
+            if current is None:
+                # The record was purged (the user deleted the song). A stale Job object must not
+                # write it back: the delete contract (NFR-07) is that nothing of it stays.
+                return job
             # A worker may hold an older Job object while the cancel endpoint
             # changes its state. Progress updates must not revive that job.
             if current.state in ("cancelling", "cancelled") and changes.get("state") != "cancelled":
@@ -126,6 +137,15 @@ class Worker:
     (ROCKY_PARALLEL, default 1).
     """
 
+    # The PDF stage only renders files that are already on the volume, so a Pod that failed for a
+    # passing reason (TransientPodFailure: e.g. the mirror reset the connection while installing
+    # MuseScore) is tried again before the song is marked failed; the GPU stage is not repeated.
+    # Timeouts, a missing agent and real errors are not retried, and no retry starts after
+    # PDF_STAGE_DEADLINE_SEC, so one song cannot hold the worker much longer than before.
+    PDF_ATTEMPTS = 3
+    PDF_RETRY_WAIT_SEC = 20.0
+    PDF_STAGE_DEADLINE_SEC = 15 * 60.0
+
     def __init__(self, store: JobStore, runner, parallel: int = 1) -> None:
         self.store, self.runner = store, runner
         self.parallel = max(1, parallel)
@@ -145,7 +165,8 @@ class Worker:
                 # The request was already persisted. Never restart its pipeline.
                 self.store.update(job, state="cancelled", finished_at=time.time())
             elif job.state == "uploading":  # the upload was cut off by the restart
-                self.store.update(job, state="failed", error="upload interrupted")
+                self.store.update(job, state="failed", error="upload interrupted",
+                                  **UPLOAD_INTERRUPTED)
         for t in self.threads:
             t.start()
         self.notify()
@@ -161,12 +182,14 @@ class Worker:
     def claim(self) -> Job | None:
         """Take the oldest queued job and mark it running, so no other thread takes it."""
         with self.store.lock:
-            job = next((j for j in self.store.all() if j.state == "queued"), None)
+            job = next((j for j in self.store.all()
+                        if j.state == "queued" and not self.store.is_deleted(j.id)), None)
             if job is not None:
                 job.state = "running"
                 job.started_at = job.started_at or time.time()
                 job.error = None
                 job.reason = None
+                job.__dict__.update(CLEAR_FAILURE)
                 self.store.save(job)
             return job
 
@@ -203,16 +226,47 @@ class Worker:
         self.notify()
         return job.state
 
+    def retry(self, job_id: str) -> dict:
+        """Put a failed song back in the queue under the same id (POST /jobs/{id}/retry).
+
+        Checked and changed in one step under the store lock, like delete() above, so a song
+        the user deleted is never brought back. Raises RetryRefused with the HTTP status."""
+        with self.store.lock:
+            job = self.store.get(job_id)
+            if job is None or self.store.is_deleted(job_id):
+                raise RetryRefused(404, "no such job")
+            if job.state != "failed":
+                raise RetryRefused(409, f"only a failed song can be retried (state is {job.state})")
+            if job.reason:  # the input itself was refused; the same file gives the same answer
+                raise RetryRefused(409, "this file was refused; upload a different one")
+            if not job.retryable:
+                raise RetryRefused(409, job.user_message or "this failure cannot be retried; upload the song again")
+            if not (self.store.inputs / job.filename).is_file():
+                raise RetryRefused(410, "the uploaded audio is gone; upload the song again")
+            retry_from = job.retry_from
+            job.state, job.error, job.note, job.started_at, job.finished_at = "queued", None, None, None, None
+            job.__dict__.update(CLEAR_FAILURE)
+            self.store.save(job)
+        forget = getattr(self.runner, "forget", None)
+        if callable(forget):
+            forget(job_id)
+        self.notify()
+        return {"id": job_id, "state": "queued", "retry_from": retry_from,
+                "queue_position": self.queue_position(job_id)}
+
     def delete(self, job_id: str) -> str | None:
         """Delete a job and all its files. None if there is no such job.
 
         "deleted": gone now. "pending": the song is still uploading or its Pod is
         being stopped (cancel above); it is purged as soon as that finishes.
         """
-        job = self.store.get(job_id)
-        if job is None:
-            return None
-        self.store.tombstone(job_id).touch()
+        # Read the state and leave the mark under the store lock, so a concurrent retry either
+        # happened before (and is cancelled below as a queued song) or sees the mark and refuses.
+        with self.store.lock:
+            job = self.store.get(job_id)
+            if job is None:
+                return None
+            self.store.tombstone(job_id).touch()
         if job.state == "uploading":  # create_job purges it when the upload ends
             return "pending"
         if job.state in ("queued", "running", "publishing", "cancelling"):
@@ -245,6 +299,24 @@ class Worker:
         current = self.store.get(job_id)
         return current is not None and current.state in ("cancelling", "cancelled")
 
+    def _publish(self, job: Job, run: Path, log: Path, note) -> None:
+        attempts = max(1, int(self.PDF_ATTEMPTS))
+        stop_retrying_at = time.monotonic() + self.PDF_STAGE_DEADLINE_SEC
+        for attempt in range(1, attempts + 1):
+            try:
+                self.runner.run_pdf(job.id, run, log, note=note)
+                return
+            except TransientPodFailure:
+                if (attempt == attempts or self._is_cancelling(job.id)
+                        or time.monotonic() + self.PDF_RETRY_WAIT_SEC > stop_retrying_at):
+                    raise
+            with log.open("a", encoding="utf-8") as out:
+                out.write(f"PDF stage failed for a passing reason (attempt {attempt}/{attempts}); trying again\n")
+            note(f"악보 PDF 만들기를 다시 시도하는 중 ({attempt + 1}/{attempts})")
+            time.sleep(self.PDF_RETRY_WAIT_SEC)
+            if self._is_cancelling(job.id):
+                raise RunnerError(f"job {job.id} was cancelled while waiting to retry the PDF stage")
+
     def run(self, job: Job) -> None:
         store = self.store
         log = store.log(job.id)
@@ -273,7 +345,7 @@ class Worker:
                 self._finish_cancel(job)
                 return
             if not (run / "scores" / "score_outputs.json").is_file():
-                self.runner.run_pdf(job.id, run, log, note=note)
+                self._publish(job, run, log, note)
             if self._is_cancelling(job.id):
                 self._finish_cancel(job)
                 return
@@ -297,7 +369,8 @@ class Worker:
                              error=REJECTION_MESSAGES.get(code, REJECTION_MESSAGES["not_band_audio"]))
                 free_space(run, store.inputs, job.filename)
             else:
-                store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc))
+                store.update(job, state="failed", finished_at=time.time(), note=None, error=failure_reason(run, exc),
+                             **describe_failure(run, exc, getattr(self.runner, "timeout_sec", None)))
         finally:
             if store.is_deleted(job.id) and not self._is_cancelling(job.id):
                 store.purge(job.id)
@@ -330,6 +403,50 @@ def failure_reason(run: Path, exc: Exception) -> str:
     except (OSError, ValueError):
         pass
     return f"{type(exc).__name__}: {exc}"[:500]
+
+
+class RetryRefused(Exception):
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status, self.detail = status, detail
+
+
+CLEAR_FAILURE = dict(error_code=None, user_message=None, retryable=False, retry_after_sec=None,
+                     retry_from=None)
+
+UPLOAD_INTERRUPTED = dict(
+    error_code="upload_interrupted", retryable=False, retry_after_sec=None, retry_from=None,
+    user_message="음원을 올리는 중에 연결이 끊겼어요. 처음부터 다시 올려 주세요.")
+
+PDF_NETWORK_RETRY_AFTER_SEC = 60
+
+
+def describe_failure(run: Path, exc: Exception, timeout_sec: float | None = None) -> dict:
+    """What the app shows for a failed song, and whether POST /jobs/{id}/retry can help.
+
+    retry_from follows the worker: a run that already has full_score.mid only runs the PDF stage
+    again; otherwise unified.py --resume continues from the stage that stopped."""
+    from_pdf = (run / "full_score.mid").is_file()
+    retry_from = "pdf" if from_pdf else "gpu"
+    redo = ("'다시 시도'를 누르면 채보 결과는 그대로 두고 악보 파일(PDF)만 다시 만들어요. 약 1~2분 걸려요."
+            if from_pdf else
+            "'다시 시도'를 누르면 이미 끝난 단계는 건너뛰고 멈춘 단계부터 이어서 해요. 길어도 10분 안팎이에요.")
+    if isinstance(exc, TransientPodFailure):
+        return dict(error_code="pdf_network", retryable=True, retry_after_sec=PDF_NETWORK_RETRY_AFTER_SEC,
+                    retry_from=retry_from,
+                    user_message="악보 파일(PDF)을 만드는 프로그램을 준비하다가 인터넷 연결이 끊겼어요. "
+                                 f"{PDF_NETWORK_RETRY_AFTER_SEC}초쯤 기다린 뒤 " + redo)
+    if isinstance(exc, NoAgent):
+        return dict(error_code="no_agent", retryable=False, retry_after_sec=None, retry_from=retry_from,
+                    user_message="지금 악보를 만드는 컴퓨터가 서버에 연결되어 있지 않아서 시작하지 못했어요. "
+                                 "다시 시도해도 같은 결과가 나와요. 팀에게 알려 주세요.")
+    if isinstance(exc, PodTimeout):
+        minutes = round((timeout_sec or 5400) / 60)
+        return dict(error_code="timeout", retryable=True, retry_after_sec=None, retry_from=retry_from,
+                    user_message=f"{minutes}분 안에 끝나지 않아서 멈췄어요. 지금 바로 " + redo)
+    return dict(error_code="pipeline_error", retryable=True, retry_after_sec=None, retry_from=retry_from,
+                user_message="악보를 만드는 중에 오류가 났어요. 지금 바로 " + redo +
+                             " 같은 곡이 두 번 실패하면 팀에게 알려 주세요.")
 
 
 def free_space(run: Path, inputs: Path, filename: str) -> None:

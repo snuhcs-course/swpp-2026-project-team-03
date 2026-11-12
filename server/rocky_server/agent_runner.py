@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .runners import KubernetesRunner, RunnerError
+from .runners import KubernetesRunner, NoAgent, PodTimeout, RunnerError, pod_failure
 
 WAIT_FOR_AGENT = "노트북 연결(agent)을 기다리는 중"
 
@@ -106,7 +106,9 @@ class AgentRunner:
                     msg = req.note if req.agent else WAIT_FOR_AGENT
                 note(msg)
                 if time.monotonic() > deadline:
-                    raise RunnerError(f"{kind} pod did not finish within {int(self.timeout_sec)} s")
+                    if not req.ever_claimed:
+                        raise NoAgent(f"no agent took the {kind} pod within {int(self.timeout_sec)} s")
+                    raise PodTimeout(f"{kind} pod did not finish within {int(self.timeout_sec)} s")
         finally:
             with self.lock:
                 self.requests.pop(req.rid, None)
@@ -114,7 +116,7 @@ class AgentRunner:
         with log.open("a", encoding="utf-8") as out:
             out.write(f"===== {req.pod['metadata']['name']} ({req.phase}, agent {req.agent}) =====\n{req.log}\n")
         if req.phase != "Succeeded":
-            raise RunnerError(f"{kind} pod {req.phase or 'failed'}; see {log.name}")
+            raise pod_failure(f"{kind} pod", req.phase, req.log, log.name)
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
                  note=lambda _msg: None, original: str = "unknown") -> None:
