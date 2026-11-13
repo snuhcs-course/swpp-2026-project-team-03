@@ -17,3 +17,7 @@ local.properties
 # Local databases (user accounts live on the device, never in the repo)
 *.db
 *.db-journal
+
+# Python bytecode (caused checkout conflicts)
+__pycache__/
+*.pyc

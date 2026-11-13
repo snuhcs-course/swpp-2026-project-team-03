@@ -73,6 +73,13 @@ class FailureTest {
         assertTrue(ScoreJobs.classify(ApiException(410, "gone")).message.contains("다시 올려"))
     }
 
+    @Test fun refusedLineupIsNotBlamedOnTheGuitars() {
+        // 422는 모드·악기 구성·기타 대수 검사 모두에서 온다
+        val m = ScoreJobs.classify(ApiException(422, "personal takes one kind")).message
+        assertTrue(m.contains("악기를 다시 골라"))
+        assertFalse(m.contains("기타"))
+    }
+
     @Test fun connectionProblemsCanBeRetried() {
         assertTrue(ScoreJobs.classify(IOException("timeout")).retry)
         assertTrue(ScoreJobs.classify(ApiException(503, "busy")).retry)

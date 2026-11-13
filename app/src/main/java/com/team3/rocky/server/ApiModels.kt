@@ -64,12 +64,6 @@ data class JobResult(
      * 악보는 만들어지지만 음이 아주 적을 수 있어서 결과 화면에 ⚠️를 붙인다.
      */
     val faintParts: List<String> = emptyList(),
-    /**
-     * 사용자가 원곡에 없다고 했지만(고르지 않았지만) 원곡에서 소리가 뚜렷한 악기 (manifest의 undeclared_parts).
-     * faintParts의 반대 경우. 지금 앱은 원곡 악기를 묻지 않아서 쓰지 않는다 (서버가 보내면 읽기만 한다).
-     * 파이프라인이 아직 이 값을 만들지 않으면 비어 있다.
-     */
-    val undeclaredParts: List<String> = emptyList(),
     /** 파이프라인이 원곡에서 들은 기타 대수 (0~2). 모르면 null. '기타 대수 바꿔서 다시 만들기'에 보여준다. */
     val originalGuitars: Int? = null,
 )
@@ -107,7 +101,6 @@ object ApiJson {
             originalParts = o.strings("original_parts"),
             generatedParts = o.strings("generated_parts"),
             faintParts = o.strings("faint_parts"),
-            undeclaredParts = o.strings("undeclared_parts"),
             originalGuitars = o.intOrNull("original_guitars"),
         )
     }

@@ -421,11 +421,16 @@ class Accounts:
     # ---------- ratings ----------
 
     def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=()) -> dict:
-        """Save (or change) one rater's stars for a score."""
+        """Save (or change) one rater's stars for a score.
+
+        Ratings sent without a login all count as rater 0, so a later anonymous rating of the same
+        score replaces the earlier one. The app requires a login, so this only affects direct API use.
+        """
         if isinstance(stars, bool) or not isinstance(stars, int) or not 1 <= stars <= 5:
             raise AccountError(422, "별점은 1에서 5 사이예요", "stars")
         parts = [i for i in instruments if i in BAND_PARTS] if isinstance(instruments, list) else []
-        with self._tx():
+        # the lock like every other write: _Tx joins a transaction already open on the shared connection
+        with self.lock, self._tx():
             self.db.execute(
                 """INSERT INTO ratings (job_id, rater, stars, title, instruments, rated_at) VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT (job_id, rater) DO UPDATE SET stars = excluded.stars, title = excluded.title,
@@ -435,7 +440,8 @@ class Accounts:
 
     def ratings(self) -> dict:
         """Every rating, newest first, with the count and average (for the team)."""
-        rows = self.db.execute("SELECT * FROM ratings ORDER BY rated_at DESC").fetchall()
+        with self.lock:
+            rows = self.db.execute("SELECT * FROM ratings ORDER BY rated_at DESC").fetchall()
         items = [{"job_id": r["job_id"], "stars": r["stars"], "title": r["title"],
                   "instruments": [i for i in r["instruments"].split(",") if i], "rated_at": r["rated_at"],
                   "logged_in": r["rater"] != 0} for r in rows]

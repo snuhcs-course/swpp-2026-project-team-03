@@ -56,3 +56,34 @@ def test_rating_needs_the_api_key(client):  # noqa: F811
     del client.headers["X-Rocky-Key"]
     assert client.get("/ratings").status_code == 401
     assert client.put(f"/jobs/{job}/rating", json={"stars": 3}).status_code == 401
+
+
+def test_ratings_and_sign_ups_at_the_same_time_all_land(tmp_path):
+    """rate() shares the connection with every other request, so it must take the same lock."""
+    import threading
+    from rocky_server.accounts import Accounts
+    accounts = Accounts(tmp_path / "accounts.db")
+    errors = []
+
+    def rate(t):
+        for i in range(150):
+            try:
+                accounts.rate(f"job{t}x{i}", 1 + i % 5, None, "t", ["drums"])
+            except Exception as exc:  # noqa: BLE001 - any error here is the bug
+                errors.append(exc)
+
+    def sign_up(t):
+        for i in range(40):
+            try:
+                accounts.sign_up(f"u{t}x{i}@snu.ac.kr", "password12", f"n{t}x{i}", ["guitar"])
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+    threads = [threading.Thread(target=rate, args=(t,)) for t in range(4)]
+    threads += [threading.Thread(target=sign_up, args=(t,)) for t in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert accounts.ratings()["count"] == 600

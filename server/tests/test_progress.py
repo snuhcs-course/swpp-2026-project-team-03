@@ -74,16 +74,6 @@ def test_result_passes_faint_parts_from_manifest(tmp_path):
 
 
 
-def test_result_passes_undeclared_parts_to_the_app(tmp_path):
-    import json
-    write_outputs(tmp_path)
-    assert result_files(tmp_path)["undeclared_parts"] == []  # older manifests have none
-    manifest = json.loads((tmp_path / "manifest.json").read_text())
-    manifest["undeclared_parts"] = ["guitar"]
-    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
-    assert result_files(tmp_path)["undeclared_parts"] == ["guitar"]
-
-
 def test_result_passes_the_inferred_guitar_count(tmp_path):
     import json
     write_outputs(tmp_path)
