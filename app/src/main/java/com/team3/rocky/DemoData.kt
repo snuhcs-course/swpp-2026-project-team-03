@@ -38,11 +38,11 @@ object Demo {
      */
     fun personalGuitarNote(guitars: Int): String? = when (guitars) {
         1 -> tr(
-            "원곡에 기타가 두 대라면 두 기타가 한 악보로 합쳐져서, 혼자 치기엔 조금 어려울 수 있어요.",
-            "If the song has two guitars, both are merged into one score, which can be a bit hard to play alone.",
+            "원곡에 기타가 두 대인 경우 두 기타가 한 악보로 합쳐져서, 연주하기 어려운 악보가 나올 수 있어요.",
+            "If the song has two guitars, both are merged into one score, which can be hard to play.",
         )
         2 -> tr(
-            "원곡에 기타가 한 대라면 두 번째 기타 악보는 AI가 새로 만들어요(✨).",
+            "원곡에 기타가 한 대인 경우 두 번째 기타 악보는 AI가 새로 만들어요(✨).",
             "If the song has one guitar, the second guitar score is made with AI (✨).",
         )
         else -> null
