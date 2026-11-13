@@ -291,6 +291,12 @@ class Runner:
             raise ValueError("Known original needs at least one band instrument for Beat This! and MIDI-GPT")
         if not self.original_unknown:
             guitar_case(self.original_guitars, self.requested_guitars)
+        # Solo practice: one instrument. Its stem is transcribed first; only when
+        # that instrument is not in the song are the other stems transcribed too,
+        # so MIDI-GPT can write the part from them.
+        self.personal = bool(getattr(args, "personal", False))
+        if self.personal and (not self.original_unknown or len(self.requested_parts) != 1):
+            raise ValueError("--personal takes an unknown original and exactly one requested instrument")
         self.audio = args.audio.resolve(strict=True)
         self.out = args.output_dir.resolve()
         self.pipeline = Path(__file__).resolve().parent
@@ -304,11 +310,12 @@ class Runner:
             note_floor_db=getattr(args, "note_floor_db", GateConfig.note_floor_db),
             min_notes_per_minute=getattr(args, "min_notes_per_minute", GateConfig.min_notes_per_minute))
         self.config = {
-            "pipeline_contract": 13,
+            "pipeline_contract": 14,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,
             "requested": sorted(self.requested_parts), "requested_guitars": self.requested_guitars,
+            "personal": self.personal,
             "model": args.model,
             "transcription_workers": getattr(args, "transcription_workers", 2),
             "midigpt_model": args.midigpt_model, "device": args.device,
@@ -394,6 +401,38 @@ class Runner:
         self.manifest["status"] = "complete"
         atomic_json(self.manifest_path, self.manifest)
 
+    def probe_focus(self, focus: str, stems_dir: Path, midi_dir: Path, no_vocals: Path,
+                    stem_command: Callable[[str], list[str]]) -> tuple[str, ...]:
+        """Solo practice: transcribe the chosen instrument's stem and gate it.
+
+        If notes are left after the note gate (the same sparse-stem rule as an
+        unknown original), the instrument is in the song and is the only stem
+        transcribed. Otherwise every stem is transcribed and MIDI-GPT writes the
+        part. Returns the stems to transcribe; the focus MIDI is reused.
+        """
+        probe_file = self.out / "focus_probe.json"
+        # The server shows transcription progress for these stems.
+        self.manifest["transcribe_stems"] = [focus]
+        atomic_json(self.manifest_path, self.manifest)
+
+        def probe():
+            import soundfile as sf
+            self.command(f"muscriptor_{focus}", stem_command(focus))
+            duration = float(sf.info(str(no_vocals)).duration)
+            report = gate_stem(midi_dir / f"{focus}.mid", stems_dir / f"{focus}.wav", focus,
+                               self.out / "focus_probe" / f"{focus}.mid", self.gates, family,
+                               declared=False, original_unknown=True, duration_sec=duration)
+            atomic_json(probe_file, {"stem": focus, "in_song": report["notes_final"] > 0,
+                                     "gate": report})
+        self.stage("focus_probe", [probe_file, midi_dir / f"{focus}.mid"], probe,
+                   validate=lambda: valid_midi(midi_dir / f"{focus}.mid"))
+        in_song = bool(json.loads(probe_file.read_text(encoding="utf-8"))["in_song"])
+        stems = (focus,) if in_song else TRANSCRIBE_STEMS
+        self.manifest["personal_focus"] = {"stem": focus, "in_song": in_song}
+        self.manifest["transcribe_stems"] = list(stems)
+        atomic_json(self.manifest_path, self.manifest)
+        return stems
+
     def run(self) -> Path:
         stems_dir = self.out / "stems"
         stem_files = [stems_dir / f"{s}.wav" for s in STEMS]
@@ -423,15 +462,30 @@ class Runner:
 
         midi_dir = self.out / "stem_midi"
         midi_dir.mkdir(exist_ok=True)
+        base = [str(self.model_python), str(self.pipeline / "transcribe_with_progress.py")]
+
+        def stem_command(stem: str) -> list[str]:
+            return base + [str(stems_dir / f"{stem}.wav"), str(midi_dir / f"{stem}.mid"),
+                           "--model", self.args.model, "--device", self.args.device,
+                           "--instruments", HINTS[stem], "--progress",
+                           str(midi_dir / f"{stem}.progress.jsonl"), "--resume-existing"]
+
+        probed: tuple[str, ...] = ()
+        if self.personal:
+            focus = next(iter(self.requested_parts))
+            transcribe_stems = self.probe_focus(focus, stems_dir, midi_dir, no_vocals, stem_command)
+            probed = (focus,)
         stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
+        todo = tuple(s for s in transcribe_stems if s not in probed)
         jobs_file = midi_dir / "transcription_jobs.json"
         def transcribe():
             atomic_json(jobs_file, [{"stem": stem, "audio": str(stems_dir / f"{stem}.wav"),
                                      "output": str(stem_midis[stem]),
                                      "instruments": HINTS.get(stem),
                                      "progress": str(midi_dir / f"{stem}.progress.jsonl")}
-                                    for stem in transcribe_stems])
-            base = [str(self.model_python), str(self.pipeline / "transcribe_with_progress.py")]
+                                    for stem in todo])
+            if not todo:
+                return
             if getattr(self.args, "transcription_workers", 2) == 1:
                 self.command("muscriptor_batch", base + [
                     "--jobs-file", str(jobs_file), "--model", self.args.model,
@@ -441,12 +495,8 @@ class Runner:
                 with ThreadPoolExecutor(max_workers=self.args.transcription_workers) as pool:
                     futures = []
                     # Longest stems first reduces tail idle time with two workers.
-                    for stem in (s for s in ("guitar", "bass", "piano", "drums") if s in transcribe_stems):
-                        cmd = base + [str(stems_dir / f"{stem}.wav"), str(stem_midis[stem]),
-                                      "--model", self.args.model, "--device", self.args.device,
-                                      "--instruments", HINTS[stem], "--progress",
-                                      str(midi_dir / f"{stem}.progress.jsonl"), "--resume-existing"]
-                        futures.append(pool.submit(self.command, f"muscriptor_{stem}", cmd))
+                    for stem in (s for s in ("guitar", "bass", "piano", "drums") if s in todo):
+                        futures.append(pool.submit(self.command, f"muscriptor_{stem}", stem_command(stem)))
                     for future in futures:
                         future.result()
         if transcribe_stems:
@@ -668,6 +718,8 @@ def cli(argv: list[str] | None = None) -> int:
                    help="original lineup: unknown, or comma-separated keyboard,bass,guitar1/guitar2,drums")
     p.add_argument("--requested", required=True,
                    help="output lineup: comma-separated keyboard,bass,guitar1/guitar2,drums")
+    p.add_argument("--personal", action="store_true",
+                   help="solo practice: one requested instrument; transcribe only its stem when it is in the song")
     p.add_argument("--resume", action="store_true", help="resume the same audio and configuration")
     p.add_argument("--modules-root", type=Path, default=Path("/data/rocky-unified/ml"))
     p.add_argument("--model-python", type=Path, default=Path("/data/rocky-unified/.venv/bin/python"))
@@ -705,6 +757,8 @@ def cli(argv: list[str] | None = None) -> int:
             raise ValueError("Known original needs at least one band instrument")
         if not original_unknown and original_guitars == 0 and requested_guitars == 2:
             raise ValueError("Generating two guitars from zero original guitars is not supported")
+        if args.personal and (not original_unknown or len(requested_parts) != 1):
+            raise ValueError("--personal takes an unknown original and exactly one requested instrument")
     except ValueError as exc:
         p.error(str(exc))
     args.gp5_converter = args.gp5_converter.resolve()

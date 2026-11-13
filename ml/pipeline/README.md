@@ -45,6 +45,17 @@ original guitars for the same cases below:
 | 0 | 1 | MIDI-GPT generates one guitar |
 | 0 | 2 | rejected in this iteration |
 
+**Solo practice (`--personal`, contract 14).** The app's solo mode asks for
+one instrument with `--original unknown`. After separation, `focus_probe`
+transcribes only that instrument's stem and runs the note gate on it with the
+unknown-original sparse rule. If notes remain, the instrument is in the song:
+it is the only stem transcribed, and MIDI-GPT does not run, so the job skips
+three of the four MuScriptor stems. If the stem is empty or sparse, the other
+three stems are transcribed (the probe MIDI is reused) and MIDI-GPT writes the
+part from them, as for the full band. The manifest records
+`personal_focus: {stem, in_song}` and `transcribe_stems` for the server's
+progress.
+
 Only requested parts absent from the declared original (or detected original
 when unknown) are generated. A generated second guitar keeps the original
 guitar in MIDI-GPT's context; both receive independent TAB processing before
