@@ -636,7 +636,7 @@ fun HomeTab(
         }
         Spacer(Modifier.height(20.dp))
         Text(
-            tr("오늘은 어떤 곡을\n연주하나요?", "What are you\nplaying today?"),
+            tr("오늘은 어떤 곡을 연주하나요?", "What are you playing today?"),
             fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp,
         )
         Spacer(Modifier.height(24.dp))

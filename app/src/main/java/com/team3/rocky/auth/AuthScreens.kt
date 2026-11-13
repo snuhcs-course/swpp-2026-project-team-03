@@ -239,7 +239,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
     }) {
         Column(Modifier.fillMaxWidth().weight(1f).imePadding().verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(16.dp))
-            Text(tr("ROCKY와 함께\n밴드 악보를 만들어요", "Make band scores\nwith ROCKY"), fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
+            Text(tr("ROCKY와 함께 밴드 악보를 만들어요", "Make band scores with ROCKY"), fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(24.dp))
 
             SectionLabel(tr("계정", "Account"))

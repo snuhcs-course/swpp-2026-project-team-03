@@ -67,7 +67,7 @@ fun PersonalPickScreen(
                 InfoNote(notice, strong = true)
                 Spacer(Modifier.height(14.dp))
             }
-            Text(tr("어떤 악기를\n연습하나요?", "Which instruments\nare you practicing?"),
+            Text(tr("어떤 악기를 연습하나요?", "Which instruments are you practicing?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
             Text(tr("내가 연주할 악기를 모두 골라 주세요 · 고른 악기의 악보만 만들어요", "Pick every instrument you play · we make scores just for those"),

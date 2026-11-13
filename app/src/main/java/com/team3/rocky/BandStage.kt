@@ -148,7 +148,7 @@ fun BandStageScreen(
                 InfoNote(notice, strong = true)
                 Spacer(Modifier.height(14.dp))
             }
-            Text(tr("우리 밴드에\n어떤 악기가 있나요?", "What instruments\nare in your band?"),
+            Text(tr("우리 밴드에 어떤 악기가 있나요?", "What instruments are in your band?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
             Text(tr("무대에서 눌러 고르세요 · 기타는 2대까지", "Tap them on stage · up to 2 guitars"),

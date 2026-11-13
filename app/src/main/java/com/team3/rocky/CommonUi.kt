@@ -1,5 +1,8 @@
 package com.team3.rocky
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.text.style.LineBreak
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -95,10 +98,22 @@ val Pretendard = FontFamily(
     Font(R.font.pretendard_extrabold, FontWeight.Black),
 )
 
-/** 모든 글자 스타일에 Pretendard를 쓰고, 큰 제목은 자간을 살짝 좁힌다. */
-private val RockyTypography = Typography().let { t ->
+/**
+ * 긴 문장의 줄바꿈: 한국어는 단어(어절) 단위로만 넘긴다 ('합쳐져서, 혼 / 자'처럼 단어 중간에서 끊기지 않게).
+ * 안드로이드 13(API 33) 이상에서 글자 언어가 한국어일 때 적용된다. 그 아래 버전은 기본 줄바꿈.
+ */
+private val WordLineBreak = LineBreak(
+    strategy = LineBreak.Strategy.HighQuality,
+    strictness = LineBreak.Strictness.Strict,
+    wordBreak = LineBreak.WordBreak.Phrase,
+)
+
+/** 모든 글자 스타일에 Pretendard를 쓰고, 큰 제목은 자간을 살짝 좁힌다. 줄바꿈은 단어 단위. */
+private fun rockyTypography(lang: Lang) = Typography().let { t ->
+    val locale = if (lang == Lang.KO) LocaleList("ko-KR") else LocaleList("en-US")
     fun TextStyle.p(tight: Boolean = false) =
-        copy(fontFamily = Pretendard, letterSpacing = if (tight) (-0.4).sp else letterSpacing)
+        copy(fontFamily = Pretendard, letterSpacing = if (tight) (-0.4).sp else letterSpacing,
+            lineBreak = WordLineBreak, localeList = locale)
     t.copy(
         displayLarge = t.displayLarge.p(true), displayMedium = t.displayMedium.p(true), displaySmall = t.displaySmall.p(true),
         headlineLarge = t.headlineLarge.p(true), headlineMedium = t.headlineMedium.p(true), headlineSmall = t.headlineSmall.p(true),
@@ -110,7 +125,10 @@ private val RockyTypography = Typography().let { t ->
 
 @Composable
 fun RockyTheme(dark: Boolean = AppSettings.dark, content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = RockyTypography, content = content)
+    // 언어를 바꾸면 줄바꿈 규칙(한국어 단어 단위)도 같이 바뀐다.
+    val lang = AppSettings.lang
+    val typography = remember(lang) { rockyTypography(lang) }
+    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = typography, content = content)
 }
 
 /** 카드 바탕: 둥근 모서리 + 면 색 + 얇은 1px 테두리 (시안 A). */

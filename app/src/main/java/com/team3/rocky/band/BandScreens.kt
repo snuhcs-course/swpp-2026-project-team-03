@@ -97,7 +97,7 @@ fun BandListScreen(
             list.isEmpty() -> {
                 Spacer(Modifier.height(64.dp))
                 Text(
-                    tr("참여한 밴드가 없어요.\n밴드를 만들고 초대 코드를 보내 보세요.", "No bands yet.\nCreate one and send the invite code."),
+                    tr("참여한 밴드가 없어요. 밴드를 만들고 초대 코드를 보내 보세요.", "No bands yet. Create one and send the invite code."),
                     color = cs.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -444,7 +444,7 @@ fun ShareToBandScreen(
     val bands by produceState<List<BandSummary>?>(null, user.id) { value = repo.myBands(user) }
 
     Page(tr("밴드에 공유", "Share with a band"), onBack) {
-        Text(tr("어느 밴드에\n공유할까요?", "Which band\ngets this score?"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
+        Text(tr("어느 밴드에 공유할까요?", "Which band gets this score?"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
         Spacer(Modifier.height(6.dp))
         Text(work.title, color = cs.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(24.dp))
@@ -501,7 +501,7 @@ fun PickScoreScreen(user: User, repo: BandRepository, bandId: Long, onBack: () -
     val works = remember { WorkStore.load(ctx).filter { !it.personal } }
 
     Page(tr("악보 공유", "Share a score"), onBack) {
-        Text(tr("보관함에서 악보를\n골라주세요", "Pick a score\nfrom your library"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
+        Text(tr("보관함에서 악보를 골라주세요", "Pick a score from your library"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
         Spacer(Modifier.height(24.dp))
         if (works.isEmpty()) {
             Text(
