@@ -340,7 +340,9 @@ class Worker:
             if not (run / "full_score.mid").is_file():
                 self.runner.run_midi(job.id, audio, run, job.pipeline_requested, log, note=note,
                                      original=job.pipeline_original,
-                                     personal=job.mode == "personal")
+                                     # --personal needs an unknown original; a guitar-count redo
+                                     # sends the original, and then only those stems are transcribed
+                                     personal=job.mode == "personal" and job.pipeline_original == "unknown")
             if self._is_cancelling(job.id):
                 self._finish_cancel(job)
                 return

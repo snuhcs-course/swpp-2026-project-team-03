@@ -392,6 +392,12 @@ def test_solo_practice_runs_the_pipeline_in_personal_mode(setup):
                     data={"requested": "bass", "lineup": "bass", "mode": "personal", "title": "t"})
     worker.run(store.get(r.json()["id"]))
     assert runner.personal is True
+    # a guitar-count redo sends the original lineup: no --personal (unified.py refuses it)
+    r = client.post("/jobs", files={"file": ("s.wav", b"RIFF....WAVE", "audio/wav")},
+                    data={"requested": "guitar", "lineup": "guitar", "original": "bass,guitar",
+                          "mode": "personal", "title": "t"})
+    worker.run(store.get(r.json()["id"]))
+    assert runner.personal is False
 
 
 @pytest.mark.parametrize("lineup, mode", [("piano,guitar", "personal"), ("bass", "solo")])
