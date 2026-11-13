@@ -17,6 +17,26 @@ class RatingStoreTest {
         assertEquals(false, back.sent)
     }
 
+    @Test fun keepsTheOneLineComment() {
+        val r = RatingStore.Rating(7L, "Song", listOf("bass"), 3, 1L, comment = "베이스가\t좀\n틀려요")
+        val back = RatingStore.decode(7L, RatingStore.encode(r))!!
+        assertEquals("베이스가 좀 틀려요", back.comment)
+        assertEquals("Song", back.title)
+    }
+
+    @Test fun readsRatingsSavedBeforeComments() {
+        val old = RatingStore.decode(3L, "5\t10\t1\tdrums,guitar\tBasket Case")!!
+        assertEquals(5, old.stars)
+        assertEquals("Basket Case", old.title)
+        assertEquals("", old.comment)
+        assertEquals(true, old.sent)
+    }
+
+    @Test fun commentIsOneLineAndCapped() {
+        assertEquals("a b", RatingStore.cleanComment("  a\n\n b  "))
+        assertEquals(RatingStore.COMMENT_MAX, RatingStore.cleanComment("가".repeat(150)).length)
+    }
+
     @Test fun ignoresBrokenOrOutOfRangeValues() {
         assertNull(RatingStore.decode(1L, "garbage"))
         assertNull(RatingStore.decode(1L, "9\t0\t0\tdrums\tSong"))

@@ -152,16 +152,17 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
     }
 
     /**
-     * 악보 별점(1~5)을 보낸다. 로그인했으면 [token]으로 누가 매겼는지 남긴다 (한 사람이 다시 매기면 바뀐다).
+     * 악보 별점(1~5)과 한 줄 의견([comment], 없으면 빈 글자)을 보낸다.
+     * 로그인했으면 [token]으로 누가 매겼는지 남긴다 (한 사람이 다시 매기면 바뀐다).
      * 서버에서 곡이 이미 지워졌으면(404) 보낼 곳이 없으므로 그냥 끝낸다.
      */
-    fun rate(jobId: String, stars: Int, title: String, instruments: List<String>, token: String? = null) {
+    fun rate(jobId: String, stars: Int, title: String, instruments: List<String>, comment: String = "", token: String? = null) {
         val c = open("/jobs/$jobId/rating", "PUT")
         c.doOutput = true
         c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
         if (!token.isNullOrBlank()) c.setRequestProperty("Authorization", "Bearer $token")
         val body = org.json.JSONObject().put("stars", stars).put("title", title)
-            .put("instruments", org.json.JSONArray(instruments)).toString()
+            .put("instruments", org.json.JSONArray(instruments)).put("comment", comment).toString()
         c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
         if (c.responseCode == 404) c.disconnect() else c.body()
     }

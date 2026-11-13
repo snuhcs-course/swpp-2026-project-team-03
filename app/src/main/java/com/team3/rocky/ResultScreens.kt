@@ -1,45 +1,27 @@
 package com.team3.rocky
 
-import kotlin.math.roundToInt
-import androidx.compose.ui.layout.layout
 import android.Manifest
 import android.media.MediaPlayer
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -48,21 +30,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -73,38 +63,51 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.team3.rocky.server.LocalScore
-import com.team3.rocky.server.PdfPages
-import com.team3.rocky.server.ScoreStore
-import com.team3.rocky.server.RockyApi
 import com.team3.rocky.score.MeasureBox
 import com.team3.rocky.score.MeasureClock
 import com.team3.rocky.score.MeasureLayout
 import com.team3.rocky.score.ScoreLayout
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Size
+import com.team3.rocky.server.LocalScore
+import com.team3.rocky.server.PdfPages
+import com.team3.rocky.server.RockyApi
+import com.team3.rocky.server.ScoreStore
 import java.io.File
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** "1:05"처럼 */
 private fun mmss(ms: Int): String {
@@ -389,6 +392,25 @@ fun ResultScreen(
     // 악보 맨 아래 별점 (1~5). 품질 개선용으로 모은다.
     var stars by remember(work.id) { mutableStateOf(RatingStore.stars(ctx, work.id)) }
 
+    // 결과를 처음 보고 나갈 때, 아직 별점을 안 매겼으면 평가 창을 한 번 띄운다 (팀이 피드백을 모으는 용도).
+    var askRating by remember { mutableStateOf(false) }
+    val wantRating = stars == 0 && local != null && !RatingStore.asked(ctx, work.id)
+    fun leave() { if (wantRating) askRating = true else onBack() }
+    BackHandler(enabled = wantRating && !fullScreen) { askRating = true }
+    if (askRating) {
+        RatingDialog(
+            onSend = { n, note ->
+                stars = n
+                RatingStore.rate(ctx, work, n, note)
+                RatingStore.markAsked(ctx, work.id)
+                askRating = false
+                onBack()
+            },
+            onLater = { RatingStore.markAsked(ctx, work.id); askRating = false; onBack() },
+            onDismiss = { askRating = false },  // 창 밖을 누르면 악보로 돌아간다
+        )
+    }
+
     val sheet: @Composable (Modifier, Boolean) -> Unit = { modifier, bleed ->
         ScoreSheet(
             pages = pages, scroll = scoreScroll, zoom = zoom,
@@ -467,7 +489,7 @@ fun ResultScreen(
         )
     }
 
-    Page(work.title, onBack, actions = {
+    Page(work.title, { leave() }, actions = {
         Box {
             TextButton(onClick = { menuOpen = true }) {
                 Text("⋮", fontSize = 22.sp, color = cs.onSurface,
@@ -746,6 +768,74 @@ private fun ScoreSheet(
             ) { FullScreenGlyph(exit = fullScreen, color = Color.White) }
         }
     }
+}
+
+/**
+ * 결과를 처음 보고 나갈 때 뜨는 평가 창: 별 5개로 총점(필수) + 한 줄 의견(선택).
+ * '다음에'를 누르면 이 악보에서는 다시 묻지 않는다 (악보 맨 아래 별점 칸은 그대로 있음).
+ */
+@Composable
+private fun RatingDialog(onSend: (Int, String) -> Unit, onLater: () -> Unit, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var pick by remember { mutableIntStateOf(0) }
+    var note by remember { mutableStateOf("") }
+    val used = note.codePointCount(0, note.length)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(tr("이 악보는 어땠나요?", "How was this score?")) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    tr("남겨 주신 평가는 ROCKY 악보를 더 좋게 만드는 데 써요.", "Your rating helps us make better scores."),
+                    fontSize = 14.sp, color = cs.onSurfaceVariant, lineHeight = 20.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    for (n in 1..5) {
+                        Box(
+                            Modifier.size(48.dp).clip(CircleShape).clickable { pick = n }
+                                .semantics { contentDescription = tr("별 ${n}개", "$n stars") },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("★", fontSize = 34.sp, color = if (n <= pick) cs.primary else cs.outlineVariant)
+                        }
+                    }
+                }
+                Text(
+                    when (pick) {
+                        0 -> tr("별을 눌러 5점 만점으로 골라 주세요", "Tap a star to rate out of 5")
+                        1 -> tr("1점 · 별로예요", "1 · Poor")
+                        2 -> tr("2점 · 아쉬워요", "2 · Fair")
+                        3 -> tr("3점 · 보통이에요", "3 · Okay")
+                        4 -> tr("4점 · 좋아요", "4 · Good")
+                        else -> tr("5점 · 아주 좋아요", "5 · Great")
+                    },
+                    fontSize = 13.sp, maxLines = 1,
+                    color = if (pick == 0) cs.onSurfaceVariant else cs.primary,
+                    fontWeight = if (pick == 0) FontWeight.Normal else FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { v ->
+                        val one = v.replace('\n', ' ')
+                        note = if (one.codePointCount(0, one.length) <= RatingStore.COMMENT_MAX) one
+                        else one.substring(0, one.offsetByCodePoints(0, RatingStore.COMMENT_MAX))
+                    },
+                    placeholder = { Text(tr("한 줄 의견 (선택)", "One-line comment (optional)")) },
+                    singleLine = true,
+                    supportingText = { Text("$used / ${RatingStore.COMMENT_MAX}") },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = pick > 0, onClick = { onSend(pick, note) }) { Text(tr("보내기", "Send")) }
+        },
+        dismissButton = { TextButton(onClick = onLater) { Text(tr("다음에", "Later")) } },
+    )
 }
 
 /** 악보 맨 아래 별점 칸. 흰 종이 위에 놓이므로 밝은 색으로 그린다. */

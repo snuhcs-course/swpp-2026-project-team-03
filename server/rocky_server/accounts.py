@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS shared_scores (
 CREATE INDEX IF NOT EXISTS idx_members_user ON band_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_scores_job ON shared_scores(job_id);
 -- Star ratings (1-5) the app collects under each score, to see which results need work.
+-- comment: the optional one-line opinion from the popup shown when a result is first left.
 -- One row per score and rater; rater 0 is someone who was not logged in. Kept after the job is deleted.
 CREATE TABLE IF NOT EXISTS ratings (
     job_id      TEXT    NOT NULL,
@@ -152,6 +153,7 @@ CREATE TABLE IF NOT EXISTS ratings (
     stars       INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
     title       TEXT    NOT NULL DEFAULT '',
     instruments TEXT    NOT NULL DEFAULT '',
+    comment     TEXT    NOT NULL DEFAULT '',
     rated_at    INTEGER NOT NULL,
     PRIMARY KEY (job_id, rater)
 );
@@ -172,6 +174,10 @@ class Accounts:
         self.clock = clock
         with self.lock:
             self.db.executescript(SCHEMA)
+            # databases made before the rating comment (11/14) get the column
+            if "comment" not in {r["name"] for r in self.db.execute("PRAGMA table_info(ratings)")}:
+                self.db.execute("ALTER TABLE ratings ADD COLUMN comment TEXT NOT NULL DEFAULT ''")
+                self.db.commit()
             self._remove_old_demo()
 
     # ---------- helpers ----------
@@ -420,24 +426,32 @@ class Accounts:
 
     # ---------- ratings ----------
 
-    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=()) -> dict:
-        """Save (or change) one rater's stars for a score."""
+    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=(),
+             comment=None) -> dict:
+        """Save (or change) one rater's stars for a score. comment None keeps the saved one."""
         if isinstance(stars, bool) or not isinstance(stars, int) or not 1 <= stars <= 5:
             raise AccountError(422, "별점은 1에서 5 사이예요", "stars")
         parts = [i for i in instruments if i in BAND_PARTS] if isinstance(instruments, list) else []
+        if comment is not None and not isinstance(comment, str):
+            raise AccountError(422, "의견은 글자로 보내 주세요", "comment")
+        note = " ".join(comment.split())[:300] if comment is not None else None
         with self._tx():
             self.db.execute(
-                """INSERT INTO ratings (job_id, rater, stars, title, instruments, rated_at) VALUES (?, ?, ?, ?, ?, ?)
+                """INSERT INTO ratings (job_id, rater, stars, title, instruments, comment, rated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (job_id, rater) DO UPDATE SET stars = excluded.stars, title = excluded.title,
-                   instruments = excluded.instruments, rated_at = excluded.rated_at""",
-                (job_id, rater.id if rater else 0, stars, str(title)[:200], ",".join(parts), self.clock()))
+                   instruments = excluded.instruments, rated_at = excluded.rated_at,
+                   comment = CASE WHEN ? THEN excluded.comment ELSE ratings.comment END""",
+                (job_id, rater.id if rater else 0, stars, str(title)[:200], ",".join(parts), note or "",
+                 self.clock(), note is not None))
         return {"job_id": job_id, "stars": stars}
 
     def ratings(self) -> dict:
         """Every rating, newest first, with the count and average (for the team)."""
         rows = self.db.execute("SELECT * FROM ratings ORDER BY rated_at DESC").fetchall()
         items = [{"job_id": r["job_id"], "stars": r["stars"], "title": r["title"],
-                  "instruments": [i for i in r["instruments"].split(",") if i], "rated_at": r["rated_at"],
+                  "instruments": [i for i in r["instruments"].split(",") if i], "comment": r["comment"],
+                  "rated_at": r["rated_at"],
                   "logged_in": r["rater"] != 0} for r in rows]
         average = round(sum(i["stars"] for i in items) / len(items), 2) if items else None
         histogram = {str(n): sum(1 for i in items if i["stars"] == n) for n in range(1, 6)}
