@@ -5,17 +5,14 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Storage (WorkStore), bundled demo files (Assets) and the dark-mode setting, on a device. */
+/** Storage (WorkStore) and the dark-mode setting, on a device. (The bundled demo files were removed on 2026-11-11.) */
 @RunWith(AndroidJUnit4::class)
 class DemoDataTest {
     private val ctx = ApplicationProvider.getApplicationContext<Context>()
@@ -53,30 +50,16 @@ class DemoDataTest {
         assertEquals(listOf(2L), WorkStore.load(ctx).map { it.id })
     }
 
-    @Test fun demoFilesAreFoundAndPagesAreInNumericOrder() {
-        assertTrue("band.mp3" in Assets.list(ctx))
-        assertEquals("band.mp3", Assets.find(ctx, "band", listOf("wav", "mp3")))
-        assertNull(Assets.find(ctx, "band", listOf("ogg")))
-
-        val pages = Assets.pages(ctx, "band")
-        assertEquals((1..12).map { "band-$it.png" }, pages)       // band-2 before band-10
-        assertEquals(listOf("bass-1.png", "bass-2.png", "bass-3.png"), Assets.pages(ctx, "bass"))
-        assertTrue(Assets.pages(ctx, "nothing").isEmpty())
-    }
-
-    @Test fun demoFileIsCopiedToTheCache() {
-        val copy = Assets.toCache(ctx, "band.mid", "copy.mid")
-        val original = ctx.assets.open("demo/band.mid").use { it.readBytes() }
-        assertTrue(copy.isFile)
-        assertArrayEquals(original, copy.readBytes())
-    }
-
-    @Test fun scorePagesBecomeOnePdf() {
-        val pdf = Assets.pagesToPdf(ctx, "bass", "bass-test.pdf")
-        assertNotNull(pdf)
-        val head = pdf!!.inputStream().use { it.readNBytesCompat(4) }
-        assertEquals("%PDF", String(head, Charsets.US_ASCII))
-        assertNull(Assets.pagesToPdf(ctx, "nothing", "none.pdf"))
+    @Test fun soloPracticeWorkKeepsItsModeAndSongFile() {
+        val solo = Work(7, "夜に駆ける", listOf("guitar"), "2026.11.13 23:00", personal = true, audio = "content://media/song/7")
+        WorkStore.add(ctx, solo)
+        WorkStore.add(ctx, Work(8, "Band song", listOf("drums", "bass"), "2026.11.13 23:01"))
+        val loaded = WorkStore.load(ctx).associateBy { it.id }
+        assertTrue(loaded.getValue(7).personal)
+        assertEquals("content://media/song/7", loaded.getValue(7).audio)
+        assertEquals("夜に駆ける", loaded.getValue(7).title)
+        assertFalse(loaded.getValue(8).personal)
+        assertEquals(null, loaded.getValue(8).audio)
     }
 
     @Test fun fileNamesAreMadeSafe() {
@@ -91,16 +74,5 @@ class DemoDataTest {
         AppSettings.setDark(ctx, true)
         AppSettings.load(ctx)
         assertTrue(AppSettings.dark)
-    }
-
-    private fun java.io.InputStream.readNBytesCompat(n: Int): ByteArray {
-        val buf = ByteArray(n)
-        var off = 0
-        while (off < n) {
-            val r = read(buf, off, n - off)
-            if (r < 0) break
-            off += r
-        }
-        return buf.copyOf(off)
     }
 }

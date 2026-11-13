@@ -12,7 +12,6 @@ import androidx.compose.ui.test.printToString
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.team3.rocky.ExportScreen
 import com.team3.rocky.ResultScreen
 import com.team3.rocky.RockyTheme
 import com.team3.rocky.progress.AudioFile
@@ -30,7 +29,7 @@ import org.junit.runner.RunWith
 import java.io.File
 
 /**
- * 실제 앱 코드로 서버까지 한 바퀴: 업로드 → 진행 상태 → 결과 받기 → 결과·내보내기 화면.
+ * 실제 앱 코드로 서버까지 한 바퀴: 업로드 → 진행 상태 → 결과 받기 → 결과 화면.
  *
  * 에뮬레이터에서 호스트 PC의 서버(server/, 가짜 파이프라인)를 10.0.2.2:8000으로 부른다.
  * GitHub Actions의 android-e2e 작업이 서버를 먼저 띄운다. 서버가 없으면 이 테스트는 건너뛴다.
@@ -82,7 +81,7 @@ class ServerEndToEndTest {
 
         // 결과 화면: 서버 PDF가 그림으로 보인다
         val work = job.toWork()
-        compose.setContent { RockyTheme { ResultScreen(work, onBack = {}, onSaved = {}, onExport = {}, onShareToBand = {}) } }
+        compose.setContent { RockyTheme { ResultScreen(work, onBack = {}, onSaved = {}, onShareToBand = {}) } }
         // Advance the Compose clock so ResultScreen's LaunchedEffect starts PDF rendering.
         compose.waitForIdle()
         try {
@@ -91,21 +90,8 @@ class ServerEndToEndTest {
             // 무엇이 보이고 있었는지 남긴다 (로딩 중 / '악보가 없어요' / 오류)
             throw AssertionError("결과 화면에 악보가 안 보임. 화면:\n" + compose.onRoot().printToString(maxDepth = 30), e)
         }
-        compose.onNodeWithText("✨ 피아노").assertIsDisplayed()
-    }
-
-    @Test fun exportListsServerFiles() {
-        lateinit var job: ScoreJob
-        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            job = ScoreJobs.start(ctx, "E2E 내보내기", listOf("drums", "guitar"), listOf("drums", "guitar"), song())
-        }
-        waitFor(job)
-        assertNull("작업 실패: ${job.error}", job.error)
-        val work = job.toWork()
-        compose.setContent { RockyTheme { ExportScreen(work, onBack = {}) } }
-        assertTrue(compose.onAllNodesWithText("MIDI").fetchSemanticsNodes().isNotEmpty())
-        assertTrue(compose.onAllNodesWithText("음원").fetchSemanticsNodes().isNotEmpty())
-        compose.onNodeWithText("1개 파일 보내기").assertIsDisplayed()
+        // 칩은 옆으로 넘겨 보는 줄이라 화면 밖에 있을 수 있어서 있는지만 본다.
+        compose.onNodeWithText("✨ 피아노").assertExists()
     }
 
     @Test fun unreachableServerFailsWithMessage() {
@@ -116,6 +102,6 @@ class ServerEndToEndTest {
         }
         waitFor(job, 30)
         assertTrue(job.failed)
-        assertTrue(job.error!!.contains("서버에 연결할 수 없어요"))
+        assertTrue(job.error!!.contains("인터넷에 연결할 수 없어요"))
     }
 }

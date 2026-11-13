@@ -32,7 +32,7 @@ class ServerProgressTest {
         }
         override fun upload(
             input: InputStream, fileName: String, title: String, requested: List<String>,
-            original: List<String>, lineup: List<String>,
+            original: List<String>, lineup: List<String>, mode: String,
         ) = "job"
         override fun cancel(jobId: String) = "cancelled"
         override fun result(jobId: String) = throw UnsupportedOperationException()
@@ -81,7 +81,11 @@ class ServerProgressTest {
             fail("expected JobFailedException")
         } catch (e: JobFailedException) {
             assertEquals("not_band_audio", e.reason)
-            assertEquals("밴드 곡을 올려 주세요.", com.team3.rocky.progress.ScoreJobs.failureMessage(e))
+            // 앱은 reason 코드로 한국어·영어 안내를 직접 고른다 (서버 안내는 한국어뿐).
+            assertEquals(
+                "밴드 악기 소리가 거의 들리지 않아요. 밴드 곡을 올려 주세요.",
+                com.team3.rocky.progress.ScoreJobs.failureMessage(e),
+            )
         }
     }
 

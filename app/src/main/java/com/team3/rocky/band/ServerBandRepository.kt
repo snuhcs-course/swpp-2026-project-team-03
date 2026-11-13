@@ -76,7 +76,7 @@ class ServerBandRepository(
     override suspend fun leave(user: User, bandId: Long) = io(Unit) { api().post("/bands/$bandId/leave"); Unit }
 
     override suspend fun share(user: User, bandId: Long, work: Work): Boolean = io(false) {
-        // 밴드원이 다른 폰에서 받을 수 있게 서버 작업 번호를 같이 올린다 (데모 곡은 없음).
+        // 밴드원이 다른 폰에서 받을 수 있게 서버 작업 번호를 같이 올린다
         val jobId = ScoreStore.load(ctx, work.id)?.result?.id
         val body = JSONObject().put("work_id", work.id).put("title", work.title)
             .put("instruments", JSONArray(work.instruments)).put("date", work.date)
@@ -121,9 +121,11 @@ class ServerBandRepository(
         try {
             BandResult.Success(band(JSONObject(block())))
         } catch (e: MemberApiException) {
-            BandResult.Failure(e.message ?: "요청을 처리하지 못했어요")
+            BandResult.Failure(e.message ?: com.team3.rocky.tr("요청을 처리하지 못했어요", "Couldn't do that"))
         } catch (e: IOException) {
-            BandResult.Failure("서버에 연결하지 못했어요. 인터넷이나 서버 설정을 확인해 주세요")
+            BandResult.Failure(
+                com.team3.rocky.tr("서버에 연결하지 못했어요. 인터넷이나 연결 설정을 확인해 주세요", "Can't reach the server. Check the internet or connection settings"),
+            )
         }
     }
 }

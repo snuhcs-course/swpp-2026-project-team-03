@@ -23,6 +23,19 @@ data class JobStatus(
      * 이때 error는 사용자에게 바로 보여줄 수 있는 안내 문장이다.
      */
     val reason: String? = null,
+    /**
+     * 서버 처리 실패의 종류 (#25): pdf_network, timeout, no_agent, pipeline_error, upload_interrupted.
+     * 옛 서버는 보내지 않는다 (null).
+     */
+    val errorCode: String? = null,
+    /** 서버가 만든 사용자용 안내 (한국어). 앱은 errorCode로 직접 문장을 고르고, 모르는 코드일 때만 쓴다. */
+    val message: String? = null,
+    /** POST /jobs/{id}/retry로 같은 곡을 다시 돌릴 수 있는지. 옛 서버는 null. */
+    val retryable: Boolean? = null,
+    /** 다시 시도하기 전에 기다릴 시간(초). null이면 바로. */
+    val retryAfterSec: Int? = null,
+    /** 다시 시도하면 어디부터 하는지: "pdf"(악보 파일만, 1~2분) 또는 "gpu"(멈춘 단계부터). */
+    val retryFrom: String? = null,
 ) {
     val isRejected get() = isFailed && reason != null
 
@@ -47,10 +60,12 @@ data class JobResult(
     /** 원곡에 없어서 MIDI-GPT가 새로 만든 악기 → 결과 화면에 'AI 생성' 표시 */
     val generatedParts: List<String>,
     /**
-     * 사용자가 원곡에 있다고 골랐지만 그 악기 소리가 거의 들리지 않은 파트 (piano, guitar, bass, drums).
-     * 악보는 만들어졌지만 비어 있거나 부정확할 수 있다 → 결과 화면에 경고 표시용.
+     * 사용자가 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 악기 (파이프라인 manifest의 faint_parts).
+     * 악보는 만들어지지만 음이 아주 적을 수 있어서 결과 화면에 ⚠️를 붙인다.
      */
     val faintParts: List<String> = emptyList(),
+    /** 파이프라인이 원곡에서 들은 기타 대수 (0~2). 모르면 null. '기타 대수 바꿔서 다시 만들기'에 보여준다. */
+    val originalGuitars: Int? = null,
 )
 
 object ApiJson {
@@ -67,6 +82,11 @@ object ApiJson {
             error = o.stringOrNull("error"),
             note = o.stringOrNull("note"),
             reason = o.stringOrNull("reason"),
+            errorCode = o.stringOrNull("error_code"),
+            message = o.stringOrNull("message"),
+            retryable = if (o.has("retryable") && !o.isNull("retryable")) o.getBoolean("retryable") else null,
+            retryAfterSec = o.intOrNull("retry_after_sec"),
+            retryFrom = o.stringOrNull("retry_from"),
         )
     }
 
@@ -81,6 +101,7 @@ object ApiJson {
             originalParts = o.strings("original_parts"),
             generatedParts = o.strings("generated_parts"),
             faintParts = o.strings("faint_parts"),
+            originalGuitars = o.intOrNull("original_guitars"),
         )
     }
 

@@ -8,8 +8,13 @@ import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
+import com.team3.rocky.progress.ScoreJobs
 
 class MainActivity : ComponentActivity() {
+    // 앱을 보고 있는지. 안 보는 동안 악보 만들기가 멈추면 휴대폰 알림으로 알린다 (progress/JobNotifier).
+    override fun onStart() { super.onStart(); ScoreJobs.appVisible = true }
+    override fun onStop() { ScoreJobs.appVisible = false; super.onStop() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)

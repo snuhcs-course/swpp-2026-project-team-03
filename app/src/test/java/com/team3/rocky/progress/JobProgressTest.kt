@@ -1,11 +1,7 @@
 // AI-generated with Claude Code, 2026-10-31
 package com.team3.rocky.progress
 
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class JobProgressTest {
@@ -35,15 +31,5 @@ class JobProgressTest {
         assertEquals("약 40초 남음", formatEta(38))
         assertEquals("약 1분 30초 남음", formatEta(92))
         assertEquals("약 2분 남음", formatEta(121))
-    }
-
-    @Test fun demoGoesForwardAndFinishes() = runBlocking {
-        val all = DemoProgress.track("demo").toList()
-        val values = all.map { it.overall }
-        assertTrue(values.zipWithNext().all { (a, b) -> b >= a })
-        assertTrue(all.last().done)
-        // 채보 첫 구간이 끝나기 전에는 남은 시간을 모른다 (실제 MuScriptor와 같게).
-        assertNull(all.first { it.stage == Stage.TRANSCRIBE }.etaSec)
-        assertEquals(30, all.first { it.stage == Stage.TRANSCRIBE }.total)
     }
 }

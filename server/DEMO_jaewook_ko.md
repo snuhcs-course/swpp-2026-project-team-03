@@ -61,7 +61,7 @@ adb reverse tcp:8000 tcp:8080       # 폰의 8000 → 노트북 8080 → 서버
   | GPU 차례를 기다리는 중 | ferrari 노드 GPU를 다른 팀이 씀 → 기다리기 |
   | 노트북 연결(agent)을 기다리는 중 | 탭 2 agent가 꺼짐 → 다시 실행 |
   | 서버에 연결할 수 없어요 | 탭 1 port-forward 끊김 또는 `adb reverse` 풀림 → 다시 |
-- 서버가 안 되면: 진행상황 카드의 **데모 결과 보기**, 업로드 화면의 **데모 곡으로 체험하기**
+- 서버가 안 되면: 데모 곡·데모 결과는 11/11에 앱에서 뺐으므로, 미리 만들어 보관함에 저장해 둔 악보로 시연
 - 케이블이 빠지거나 폰을 재부팅하면 → `adb reverse tcp:8000 tcp:8080` 다시
 - "address already in use" 가 나오면: `lsof -nP -iTCP:8080 -sTCP:LISTEN` 로 이미 켜진 port-forward 가 있는지 확인
 - 로그인이 만료되면 port-forward/agent가 오류 → `kubectl auth whoami` 로 다시 로그인 후 탭 1·2 다시

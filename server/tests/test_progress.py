@@ -1,3 +1,5 @@
+import json
+
 from rocky_server.progress import (allowed_paths, current_app_stage, overall_fraction, result_files,
                                   run_progress)
 
@@ -71,6 +73,17 @@ def test_result_passes_faint_parts_from_manifest(tmp_path):
     assert result_files(tmp_path)["faint_parts"] == ["piano"]
 
 
+
+def test_result_passes_the_inferred_guitar_count(tmp_path):
+    import json
+    write_outputs(tmp_path)
+    assert result_files(tmp_path)["original_guitars"] is None  # older manifests have none
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["original_guitars_inferred"] = 2
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert result_files(tmp_path)["original_guitars"] == 2
+
+
 def test_arrange_progress_moves_forward_and_ends_at_100(tmp_path):
     from rocky_server.progress import arrange_steps
     base = ["bs_roformer", *[f"muscriptor_{s}" for s in STEMS], "merge_stems", "beat_this", "align"]
@@ -88,6 +101,18 @@ def test_only_declared_original_stems_are_waited_for(tmp_path):
     # original = guitar,drums: unified.py transcribes only those two stems
     write_manifest(tmp_path, ["bs_roformer", "muscriptor_drums", "muscriptor_guitar"],
                    config={"original": ["drums", "guitar"]})
+    assert run_progress(tmp_path, 10)["stage"] == "BEATS"
+
+
+def test_solo_practice_waits_only_for_the_stems_it_transcribes(tmp_path):
+    # contract 14: the chosen stem is checked first, then only it (or all four) is transcribed
+    write_manifest(tmp_path, ["bs_roformer", "input_check"], transcribe_stems=["bass"],
+                   config={"original": "unknown"})
+    write_progress(tmp_path, "bass", 2, 4)
+    p = run_progress(tmp_path, 10)
+    assert p["stage"] == "TRANSCRIBE" and (p["completed"], p["total"]) == (2, 4)
+    write_manifest(tmp_path, ["bs_roformer", "input_check", "focus_probe", "muscriptor_batch"],
+                   transcribe_stems=["bass"], config={"original": "unknown"})
     assert run_progress(tmp_path, 10)["stage"] == "BEATS"
 
 

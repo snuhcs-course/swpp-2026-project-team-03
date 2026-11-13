@@ -119,8 +119,9 @@ class AgentRunner:
             raise pod_failure(f"{kind} pod", req.phase, req.log, log.name)
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
-                 note=lambda _msg: None, original: str = "unknown") -> None:
-        self._run(job_id, "midi", self.builder.midi_pod(job_id, audio, run, requested, original), log, note)
+                 note=lambda _msg: None, original: str = "unknown", personal: bool = False) -> None:
+        self._run(job_id, "midi", self.builder.midi_pod(job_id, audio, run, requested, original, personal),
+                  log, note)
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run(job_id, "pdf", self.builder.pdf_pod(job_id, run), log, note)

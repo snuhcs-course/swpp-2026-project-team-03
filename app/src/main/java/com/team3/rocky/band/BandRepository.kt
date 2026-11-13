@@ -1,6 +1,8 @@
 // AI-generated with Claude Code, 2026-10-31
 package com.team3.rocky.band
 
+import com.team3.rocky.tr
+
 import android.content.Context
 import com.team3.rocky.Work
 import com.team3.rocky.auth.User
@@ -54,7 +56,7 @@ class LocalBandRepository(
     override suspend fun create(user: User, name: String, instrument: String): BandResult = io {
         BandRules.validateName(name)?.let { return@io BandResult.Failure(it) }
         val code = generateSequence { BandRules.newCode() }.take(20).firstOrNull { !db.codeExists(it) }
-            ?: return@io BandResult.Failure("초대 코드를 만들지 못했어요. 다시 시도해 주세요")
+            ?: return@io BandResult.Failure(tr("초대 코드를 만들지 못했어요. 다시 시도해 주세요", "Couldn't make an invite code. Please try again"))
         val now = clock()
         val id = db.writableDatabase.inTransaction {
             val id = db.insertBand(name.trim(), code, user.id, now)
@@ -67,8 +69,9 @@ class LocalBandRepository(
     override suspend fun join(user: User, code: String, instrument: String): BandResult = io {
         BandRules.validateCode(code)?.let { return@io BandResult.Failure(it) }
         val band = db.findBandByCode(BandRules.normalizeCode(code))
-            ?: return@io BandResult.Failure("이 초대 코드로 된 밴드가 없어요")
-        if (db.isMember(band.id, user.id)) return@io BandResult.Failure("이미 참여 중인 밴드예요")
+            ?: return@io BandResult.Failure(tr("이 초대 코드로 된 밴드가 없어요", "No band has this invite code"))
+        if (db.isMember(band.id, user.id)) return@io BandResult.Failure(tr("이미 참여 중인 밴드예요", "You're already in this band"))
+        if (db.members(band.id, band.ownerId).size >= BandRules.MEMBERS_MAX) return@io BandResult.Failure(BandRules.fullMessage())
         db.insertMember(band.id, user.id, user.nickname, instrument, clock())
         BandResult.Success(band)
     }
@@ -92,8 +95,8 @@ class LocalBandRepository(
 
     override suspend fun rename(user: User, bandId: Long, name: String): BandResult = io {
         BandRules.validateName(name)?.let { return@io BandResult.Failure(it) }
-        val band = db.findBand(bandId) ?: return@io BandResult.Failure("밴드를 찾을 수 없어요")
-        if (band.ownerId != user.id) return@io BandResult.Failure("방장만 밴드 이름을 바꿀 수 있어요")
+        val band = db.findBand(bandId) ?: return@io BandResult.Failure(tr("밴드를 찾을 수 없어요", "Band not found"))
+        if (band.ownerId != user.id) return@io BandResult.Failure(tr("방장만 밴드 이름을 바꿀 수 있어요", "Only the leader can rename the band"))
         db.rename(bandId, name.trim())
         BandResult.Success(db.findBand(bandId)!!)
     }

@@ -83,4 +83,33 @@ class ApiJsonTest {
         )
         assertEquals(listOf("piano"), r.faintParts)
     }
+
+    @Test fun failedStatusCarriesRetryInfo() {
+        val s = ApiJson.status(
+            """{"id":"x","state":"failed","queue_position":null,"error":"PodFailed","reason":null,
+               "error_code":"pdf_network","message":"인터넷이 끊겼어요","retryable":true,"retry_after_sec":60,
+               "retry_from":"pdf","stage":"ARRANGE","completed":0,"total":1,"eta_sec":null}"""
+        )
+        assertEquals("pdf_network", s.errorCode)
+        assertEquals(true, s.retryable)
+        assertEquals(60, s.retryAfterSec)
+        assertEquals("pdf", s.retryFrom)
+        val e = JobFailedException.of(s)
+        assertEquals("인터넷이 끊겼어요", e.userMessage)
+        assertEquals(60, e.retryAfterSec)
+    }
+
+    @Test fun oldServerHasNoRetryInfo() {
+        val s = ApiJson.status("""{"id":"x","state":"failed","error":"boom","stage":"SEPARATE","completed":0,"total":1}""")
+        assertNull(s.errorCode)
+        assertNull(s.retryable)
+        assertNull(s.retryAfterSec)
+    }
+
+    @Test fun resultCarriesTheGuitarCountTheModelHeard() {
+        val base = """"title":"t","full_band":{"pdf":"b.pdf"},"instruments":{},"original_parts":["guitar"],"generated_parts":[]"""
+        assertEquals(2, ApiJson.result("""{"id":"x",$base,"original_guitars":2}""").originalGuitars)
+        assertNull(ApiJson.result("""{"id":"x",$base,"original_guitars":null}""").originalGuitars)
+        assertNull(ApiJson.result("""{"id":"x",$base}""").originalGuitars)
+    }
 }

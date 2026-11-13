@@ -86,7 +86,7 @@ Errors come as `{"detail": "<message for the app>", "field": "email" | "nickname
 | `POST` | `/bands/{id}/scores` 🔒 | share `{work_id, job_id, title, instruments, date, original}` → `{created}` |
 | `PATCH` | `/bands/{id}/scores/{sid}` 🔒 | `{title}` (the sharer or the owner) |
 
-The database starts with the demo band `BAND33` (three members who cannot log in, and the app's built-in demo song).
+There is no demo band any more (removed 2026-11-11). A database from an older version still holding the demo band `BAND33` and its placeholder members is cleaned up when the server starts.
 Passwords are stored as PBKDF2-SHA256 hashes and tokens as SHA-256 hashes.
 
 When `ROCKY_API_KEY` is set, every request except `/health` needs the header

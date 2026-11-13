@@ -51,12 +51,15 @@ class FakeRunner:
     def __init__(self, fail_stage=None):
         self.fail_stage = fail_stage
         self.calls = []
+        self.personal = None  # the last run_midi's solo-practice flag
 
     def cancel(self, job_id):
         self.calls.append(("cancel", job_id))
 
-    def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+    def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown",
+                 personal=False):
         self.calls.append(("midi", job_id, audio.name, requested, original))
+        self.personal = personal
         if self.fail_stage == "reject":
             (run / "stems").mkdir(parents=True, exist_ok=True)
             (run / "stems" / "vocals.wav").write_bytes(b"RIFF")

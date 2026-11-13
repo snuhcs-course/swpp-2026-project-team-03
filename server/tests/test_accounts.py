@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from rocky_server.accounts import DEMO_CODE, Accounts, hash_password, verify_password
+from rocky_server.accounts import OLD_DEMO_CODE, Accounts, hash_password, verify_password
 from rocky_server.app import create_app
 from rocky_server.jobs import JobStore
 
@@ -145,14 +145,55 @@ def test_outsiders_cannot_read_or_share(client):
     assert client.post("/bands", json={"name": "x", "instrument": "kazoo"}, headers=auth(a)).status_code == 422
 
 
-def test_demo_band_can_be_joined(client):
+def test_a_band_has_at_most_eight_members(client):
+    owner = sign_up(client, "owner@snu.ac.kr", "방장")
+    band = client.post("/bands", json={"name": "꽉 찬 밴드", "instrument": "guitar"}, headers=auth(owner)).json()
+    for i in range(7):
+        s = sign_up(client, f"m{i}@snu.ac.kr", f"멤버{i}")
+        r = client.post("/bands/join", json={"code": band["invite_code"], "instrument": "drums"}, headers=auth(s))
+        assert r.status_code == 200
+    ninth = sign_up(client, "late@snu.ac.kr", "늦은멤버")
+    r = client.post("/bands/join", json={"code": band["invite_code"], "instrument": "bass"}, headers=auth(ninth))
+    assert r.status_code == 409 and "최대 8명" in r.json()["detail"]
+
+
+def test_there_is_no_demo_band(client):
+    # the demo band (and its demo song that lived only inside the app) was removed on 2026-11-11
     a = sign_up(client)
-    r = client.post("/bands/join", json={"code": DEMO_CODE.lower(), "instrument": "bass"}, headers=auth(a)).json()
-    d = client.get(f"/bands/{r['id']}", headers=auth(a)).json()
-    assert [m["nickname"] for m in d["members"]] == ["지민", "수빈", "하늘", "락스타"]
-    assert [(s["work_id"], s["job_id"]) for s in d["scores"]] == [(1, None)]
-    # the demo members cannot log in
-    assert client.post("/auth/login", json={"email": "demo1@rocky.invalid", "password": ""}).status_code == 401
+    r = client.post("/bands/join", json={"code": OLD_DEMO_CODE.lower(), "instrument": "bass"}, headers=auth(a))
+    assert r.status_code == 404
+    assert client.get("/bands", headers=auth(a)).json() == []
+
+
+def test_old_demo_band_is_removed_from_an_existing_database(tmp_path):
+    import sqlite3
+    db = tmp_path / "rocky.db"
+    acc = Accounts(db)
+    real, _ = acc.sign_up("a@snu.ac.kr", "band2026", "에이", ["piano"])
+    acc.create_band(real, "밴드", "piano")
+    # what an older server had seeded: members without a password, their band and the demo song
+    t = 1_793_350_000_000
+    ids = [acc.db.execute("INSERT INTO users (email, nickname, instruments, terms_agreed_at, created_at)"
+                          " VALUES (?, ?, 'guitar', ?, ?)", (f"demo{i}@rocky.invalid", f"데모{i}", t, t)).lastrowid
+           for i in (1, 2, 3)]
+    band = acc.db.execute("INSERT INTO bands (name, invite_code, owner_id, created_at) VALUES ('소개원실 밴드', ?, ?, ?)",
+                          (OLD_DEMO_CODE, ids[0], t)).lastrowid
+    for uid in ids:
+        acc.db.execute("INSERT INTO band_members VALUES (?, ?, 'guitar', ?)", (band, uid, t))
+    acc.db.execute("INSERT INTO band_members VALUES (?, ?, 'piano', ?)", (band, real.id, t))  # a real user joined it
+    acc.db.execute("INSERT INTO shared_scores (band_id, work_id, job_id, title, instruments, work_date, original,"
+                   " shared_by, shared_at) VALUES (?, 1, NULL, '데모 곡', 'piano', '', '', ?, ?)", (band, ids[0], t))
+    acc.db.close()
+
+    again = Accounts(db)
+    count = lambda sql, *a: again.db.execute(sql, a).fetchone()[0]
+    assert count("SELECT COUNT(*) FROM bands WHERE invite_code = ?", OLD_DEMO_CODE) == 0
+    assert count("SELECT COUNT(*) FROM users WHERE email LIKE '%@rocky.invalid'") == 0
+    assert count("SELECT COUNT(*) FROM shared_scores") == 0
+    # the real member and their own band stay
+    assert again.login("a@snu.ac.kr", "band2026")[0].id == real.id
+    assert [b["band"]["name"] for b in again.bands_of(real)] == ["밴드"]
+    sqlite3.connect(db).close()
 
 
 def test_shared_job_is_not_deleted(client):
@@ -168,13 +209,24 @@ def test_shared_job_is_not_deleted(client):
     assert client.delete(f"/jobs/{job.id}").status_code == 200
 
 
+def test_personal_scores_are_not_shared_to_a_band(client):
+    store = client.app_state.store
+    solo = store.create("혼자 연습", "", ["bass"], mode="personal")
+    store.update(solo, state="complete")
+    a = sign_up(client)
+    band = client.post("/bands", json={"name": "밴드", "instrument": "bass"}, headers=auth(a)).json()
+    r = client.post(f"/bands/{band['id']}/scores", json={"work_id": 9, "job_id": solo.id, "title": "t"}, headers=auth(a))
+    assert r.status_code == 409
+    assert client.get(f"/bands/{band['id']}", headers=auth(a)).json()["scores"] == []
+
+
 def test_data_survives_a_restart(tmp_path):
     db = tmp_path / "rocky.db"
     acc = Accounts(db)
     user, _ = acc.sign_up("a@snu.ac.kr", "band2026", "에이", ["piano"])
     acc.create_band(user, "밴드", "piano")
     acc.db.close()
-    again = Accounts(db)  # the demo band is not added twice
+    again = Accounts(db)
     assert again.login("a@snu.ac.kr", "band2026")[0].id == user.id
     assert [b["band"]["name"] for b in again.bands_of(user)] == ["밴드"]
-    assert again.db.execute("SELECT COUNT(*) FROM bands WHERE invite_code = ?", (DEMO_CODE,)).fetchone()[0] == 1
+    assert again.db.execute("SELECT COUNT(*) FROM bands").fetchone()[0] == 1

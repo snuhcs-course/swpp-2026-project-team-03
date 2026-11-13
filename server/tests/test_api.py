@@ -267,10 +267,11 @@ def test_two_gpus_run_two_songs_at_once(tmp_path, monkeypatch):
     started, release = [], threading.Event()
 
     class SlowRunner(FakeRunner):
-        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown",
+                 personal=False):
             started.append(job_id)
             release.wait(timeout=10)
-            super().run_midi(job_id, audio, run, requested, log, note, original)
+            super().run_midi(job_id, audio, run, requested, log, note, original, personal)
 
     store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
     with TestClient(create_app(store, SlowRunner())) as client:  # starts the workers
@@ -327,14 +328,15 @@ def test_cancel_running_job_stops_it_before_next_song(tmp_path, monkeypatch):
     entered, released = threading.Event(), threading.Event()
 
     class BlockingRunner(FakeRunner):
-        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown",
+                 personal=False):
             if not entered.is_set():
                 (run / "stems").mkdir(parents=True)
                 (run / "stems" / "drums.wav").write_bytes(b"partial")
                 entered.set()
                 released.wait(5)
                 raise RuntimeError("stopped after cancellation")
-            super().run_midi(job_id, audio, run, requested, log, note, original)
+            super().run_midi(job_id, audio, run, requested, log, note, original, personal)
 
         def cancel(self, job_id):
             super().cancel(job_id)
@@ -368,6 +370,42 @@ def test_upload_records_original_and_lineup(setup):
     assert job.pipeline_original == "guitar1,drums"
     assert job.lineup == ["piano", "guitar", "guitar2"]
     assert job.requested == ["piano", "guitar"]
+
+
+def test_upload_keeps_the_mode(setup):
+    client, store, *_ = setup()
+    band = upload(client).json()["id"]
+    assert store.get(band).mode == "band"                      # old apps send no mode
+    r = client.post("/jobs", files={"file": ("s.mp3", b"ID3", "audio/mpeg")},
+                    data={"requested": "guitar", "lineup": "guitar,guitar2", "mode": "personal", "title": "t"})
+    assert r.status_code == 201
+    job_id = r.json()["id"]
+    assert store.get(job_id).mode == "personal"
+    assert client.get(f"/jobs/{job_id}").json()["mode"] == "personal"
+
+
+def test_solo_practice_runs_the_pipeline_in_personal_mode(setup):
+    client, store, runner, worker = setup()
+    worker.run(store.get(upload(client).json()["id"]))
+    assert runner.personal is False
+    r = client.post("/jobs", files={"file": ("s.wav", b"RIFF....WAVE", "audio/wav")},
+                    data={"requested": "bass", "lineup": "bass", "mode": "personal", "title": "t"})
+    worker.run(store.get(r.json()["id"]))
+    assert runner.personal is True
+    # a guitar-count redo sends the original lineup: no --personal (unified.py refuses it)
+    r = client.post("/jobs", files={"file": ("s.wav", b"RIFF....WAVE", "audio/wav")},
+                    data={"requested": "guitar", "lineup": "guitar", "original": "bass,guitar",
+                          "mode": "personal", "title": "t"})
+    worker.run(store.get(r.json()["id"]))
+    assert runner.personal is False
+
+
+@pytest.mark.parametrize("lineup, mode", [("piano,guitar", "personal"), ("bass", "solo")])
+def test_personal_takes_one_kind_of_instrument(setup, lineup, mode):
+    client, *_ = setup()
+    r = client.post("/jobs", files={"file": ("s.mp3", b"ID3", "audio/mpeg")},
+                    data={"requested": lineup, "lineup": lineup, "mode": mode, "title": "t"})
+    assert r.status_code == 422
 
 
 def test_status_shows_wait_note(setup):

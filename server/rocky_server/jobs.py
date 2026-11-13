@@ -49,6 +49,9 @@ class Job:
     retryable: bool = False             # POST /jobs/{id}/retry is worth calling
     retry_after_sec: int | None = None  # wait this long before retrying (None: right away)
     retry_from: str | None = None       # "pdf": only the PDF stage runs again; "gpu": from the stage that stopped
+    # "band": a score for every part of the user's band. "personal": solo practice, one instrument
+    # (guitar may be two). Personal scores are never shared to a band.
+    mode: str = "band"
 
 
 class JobStore:
@@ -84,12 +87,12 @@ class JobStore:
 
     def create(self, title: str, filename: str, requested: list[str],
                original: list[str] | None = None, lineup: list[str] | None = None,
-               pipeline_original: str = "unknown", pipeline_requested: str = "") -> Job:
+               pipeline_original: str = "unknown", pipeline_requested: str = "", mode: str = "band") -> Job:
         # "uploading" until the file is fully saved, so no worker picks it up early.
         job = Job(id=uuid.uuid4().hex[:12], title=title, filename=filename, requested=requested,
                   state="uploading", original=original or [], lineup=lineup or [],
                   pipeline_original=pipeline_original,
-                  pipeline_requested=pipeline_requested or ",".join(requested))
+                  pipeline_requested=pipeline_requested or ",".join(requested), mode=mode)
         self.save(job)
         return job
 
@@ -336,7 +339,10 @@ class Worker:
 
             if not (run / "full_score.mid").is_file():
                 self.runner.run_midi(job.id, audio, run, job.pipeline_requested, log, note=note,
-                                     original=job.pipeline_original)
+                                     original=job.pipeline_original,
+                                     # --personal needs an unknown original; a guitar-count redo
+                                     # sends the original, and then only those stems are transcribed
+                                     personal=job.mode == "personal" and job.pipeline_original == "unknown")
             if self._is_cancelling(job.id):
                 self._finish_cancel(job)
                 return

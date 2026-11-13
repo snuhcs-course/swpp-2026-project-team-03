@@ -74,7 +74,7 @@ class SubprocessRunner:
         self.midi_cmd = os.environ.get(
             "ROCKY_MIDI_CMD",
             "/data/rocky-unified/.venv/bin/python /data/pipeline/unified.py {audio} {run} "
-            "--original {original} --requested {requested} "
+            "--original {original} --requested {requested} {personal} "
             "--bsroformer-models-dir /data/bsrofo/models --bsroformer-lib-dir /data/bsrofo/pylib "
             "--resume --no-publish")
         self.pdf_cmd = os.environ.get(
@@ -101,9 +101,11 @@ class SubprocessRunner:
             self.cancelled.discard(job_id)
 
     def _run(self, job_id: str, template: str, audio: Path, run: Path, requested: str, log: Path,
-             original: str = "unknown") -> None:
+             original: str = "unknown", personal: bool = False) -> None:
+        # {personal}: solo practice, unified.py transcribes only the chosen stem when it is in the song
         cmd = template.format(audio=shlex.quote(str(audio)), run=shlex.quote(str(run)),
-                              requested=shlex.quote(requested), original=shlex.quote(original))
+                              requested=shlex.quote(requested), original=shlex.quote(original),
+                              personal="--personal" if personal else "")
         with log.open("a", encoding="utf-8") as out:
             with self.lock:
                 if job_id in self.cancelled:
@@ -120,8 +122,8 @@ class SubprocessRunner:
             raise RunnerError(f"command exited {code}; see {log.name}")
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
-                 note=lambda _msg: None, original: str = "unknown") -> None:
-        self._run(job_id, self.midi_cmd, audio, run, requested, log, original)
+                 note=lambda _msg: None, original: str = "unknown", personal: bool = False) -> None:
+        self._run(job_id, self.midi_cmd, audio, run, requested, log, original, personal)
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run(job_id, self.pdf_cmd, run, run, "", log)
@@ -226,7 +228,8 @@ class KubernetesRunner:
                        metadata=c.V1ObjectMeta(name=name, labels={"app": "rocky", "rocky-stage": name.split("-")[1]}),
                        spec=spec)
 
-    def midi_pod(self, job_id: str, audio: Path, run: Path, requested: str, original: str = "unknown"):
+    def midi_pod(self, job_id: str, audio: Path, run: Path, requested: str, original: str = "unknown",
+                 personal: bool = False):
         script = (
             "set -euo pipefail; "
             "export HF_HOME=/data/cache/hf TORCH_HOME=/data/cache/torch "
@@ -234,11 +237,12 @@ class KubernetesRunner:
             "UV_PYTHON_INSTALL_DIR=/data/cache/python XDG_CACHE_HOME=/data/cache/xdg; "
             'exec /data/rocky-unified/.venv/bin/python /data/pipeline/unified.py '
             '"$ROCKY_INPUT_AUDIO" "$ROCKY_OUTPUT_DIR" '
-            '--original "$ROCKY_ORIGINAL" --requested "$ROCKY_REQUESTED" '
+            '--original "$ROCKY_ORIGINAL" --requested "$ROCKY_REQUESTED" ${ROCKY_PERSONAL:+--personal} '
             '--bsroformer-models-dir /data/bsrofo/models --bsroformer-lib-dir /data/bsrofo/pylib '
             '--resume --no-publish')
         env = {"ROCKY_INPUT_AUDIO": str(audio), "ROCKY_OUTPUT_DIR": str(run),
                "ROCKY_ORIGINAL": original, "ROCKY_REQUESTED": requested,
+               "ROCKY_PERSONAL": "1" if personal else "",
                "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"}
         return self._pod(f"rocky-midi-{job_id}", self.pipeline_image, script, env,
                          {"cpu": "8", "memory": "32Gi", "nvidia.com/gpu": "1"})
@@ -345,8 +349,8 @@ class KubernetesRunner:
             return ""
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
-                 note=lambda _msg: None, original: str = "unknown") -> None:
-        self._run_pod(self.midi_pod(job_id, audio, run, requested, original), log, note)
+                 note=lambda _msg: None, original: str = "unknown", personal: bool = False) -> None:
+        self._run_pod(self.midi_pod(job_id, audio, run, requested, original, personal), log, note)
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run_pod(self.pdf_pod(job_id, run), log, note)

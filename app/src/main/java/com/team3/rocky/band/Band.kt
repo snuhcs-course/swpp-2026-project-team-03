@@ -1,6 +1,8 @@
 // AI-generated with Claude Code, 2026-10-31
 package com.team3.rocky.band
 
+import com.team3.rocky.tr
+
 import com.team3.rocky.Work
 import kotlin.random.Random
 
@@ -29,7 +31,7 @@ data class SharedScore(
     val sharedById: Long,
     val sharedByName: String,
     val sharedAt: Long,
-    /** 서버의 작업 번호. 다른 폰의 밴드원은 이 번호로 악보 파일을 받는다. 데모 곡이나 폰 안의 공유는 null. */
+    /** 서버의 작업 번호. 다른 폰의 밴드원은 이 번호로 악보 파일을 받는다. 폰 안의 공유(예전 버전)는 null. */
     val jobId: String? = null,
 )
 
@@ -59,6 +61,10 @@ sealed class BandResult {
 object BandRules {
     const val NAME_MAX = 20
     const val CODE_LENGTH = 6
+    /** 한 밴드의 최대 인원 (방장 포함). 서버 accounts.MEMBERS_MAX와 같다. */
+    const val MEMBERS_MAX = 8
+
+    fun fullMessage() = tr("이 밴드는 인원이 가득 찼어요 (최대 ${MEMBERS_MAX}명)", "This band is full (up to $MEMBERS_MAX members)")
 
     // 헷갈리기 쉬운 0/O, 1/I/L은 뺀다.
     const val CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -73,8 +79,8 @@ object BandRules {
     fun validateName(raw: String): String? {
         val name = raw.trim()
         return when {
-            name.isEmpty() -> "밴드 이름을 입력해 주세요"
-            length(name) > NAME_MAX -> "밴드 이름은 ${NAME_MAX}자까지 쓸 수 있어요"
+            name.isEmpty() -> tr("밴드 이름을 입력해 주세요", "Please enter a band name")
+            length(name) > NAME_MAX -> tr("밴드 이름은 ${NAME_MAX}자까지 쓸 수 있어요", "Band names can be up to $NAME_MAX characters")
             else -> null
         }
     }
@@ -86,8 +92,8 @@ object BandRules {
     fun validateCode(raw: String): String? {
         val code = normalizeCode(raw)
         return when {
-            code.isEmpty() -> "초대 코드를 입력해 주세요"
-            code.length != CODE_LENGTH || code.any { it !in CODE_CHARS } -> "초대 코드는 영문·숫자 ${CODE_LENGTH}자리예요"
+            code.isEmpty() -> tr("초대 코드를 입력해 주세요", "Please enter an invite code")
+            code.length != CODE_LENGTH || code.any { it !in CODE_CHARS } -> tr("초대 코드는 영문·숫자 ${CODE_LENGTH}자리예요", "Invite codes are $CODE_LENGTH letters or numbers")
             else -> null
         }
     }
