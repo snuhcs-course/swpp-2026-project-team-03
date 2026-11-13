@@ -292,8 +292,9 @@ class Runner:
         if not self.original_unknown:
             guitar_case(self.original_guitars, self.requested_guitars)
         # Solo practice (--personal): one requested instrument and an unknown
-        # original. Its stem (and drums) is transcribed first; see probe_requested.
-        # Band runs transcribe every stem as before.
+        # original. A bass, keyboard or drums solo transcribes its stem (and drums)
+        # first; see probe_requested. Guitar solos and band runs transcribe every
+        # stem as before, so the app's guitar-count redo gets the whole band.
         self.personal = bool(getattr(args, "personal", False))
         if self.personal and (not self.original_unknown or len(self.requested_parts) != 1):
             raise ValueError("--personal takes an unknown original and exactly one requested instrument")
@@ -412,25 +413,20 @@ class Runner:
     def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
                         transcribe_set: Callable[[tuple[str, ...], Path], None]
                         ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Solo practice: transcribe the chosen instrument's stem (and drums) first and gate it.
+        """Bass, keyboard or drums solo: transcribe that stem (and drums) first and gate it.
 
         Drums are always transcribed because drum sync aligns the score to them.
         A stem with notes left after the note gate (the sparse-stem rule of an
-        unknown original) is in the song. If every requested instrument is in
-        the song, nothing is generated, so only these stems are transcribed.
-        Otherwise the other stems are transcribed too: MIDI-GPT always gets the
-        whole band as context. Two requested guitars may need a generated second
-        guitar, which is known only after the guitar TAB; unless the stereo check
-        already shows two guitars, every stem is transcribed from the start.
+        unknown original) is in the song. Then nothing is generated, so only
+        these stems are transcribed. Otherwise the other stems are transcribed
+        too: MIDI-GPT always gets the whole band as context.
+        Guitar solos never come here: the app's guitar-count redo builds a known
+        original from the instruments the first run found, so that run must
+        transcribe every stem.
         Returns (stems to transcribe, stems the probe already transcribed).
         """
         requested = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts)
         wanted = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts or s == "drums")
-        if self.requested_guitars == 2 and not self.stereo_check(stems_dir).get("two_guitars"):
-            self.manifest["probe"] = {"skipped": "second guitar may be generated"}
-            self.manifest["transcribe_stems"] = list(TRANSCRIBE_STEMS)
-            atomic_json(self.manifest_path, self.manifest)
-            return TRANSCRIBE_STEMS, ()
         probe_file = self.out / "focus_probe.json"
         # The server shows transcription progress for these stems.
         self.manifest["transcribe_stems"] = list(wanted)
@@ -517,7 +513,7 @@ class Runner:
                         future.result()
 
         probed: tuple[str, ...] = ()
-        if self.personal:
+        if self.personal and not self.requested_guitars:
             transcribe_stems, probed = self.probe_requested(stems_dir, midi_dir, no_vocals, transcribe_set)
         stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
         todo = tuple(s for s in transcribe_stems if s not in probed)

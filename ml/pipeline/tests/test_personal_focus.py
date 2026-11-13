@@ -128,7 +128,7 @@ def transcribed(commands):
     return stems
 
 
-@pytest.mark.parametrize("requested", ["bass", "keyboard", "drums", "guitar1"])
+@pytest.mark.parametrize("requested", ["bass", "keyboard", "drums"])
 def test_instrument_in_the_song_is_the_only_stem_transcribed(tmp_path, monkeypatch, requested):
     runner, commands, result, focus = run_personal(tmp_path, monkeypatch, requested, in_song=True)
     assert sorted(transcribed(commands)) == sorted({focus, "drums"})  # drums for drum sync
@@ -175,11 +175,16 @@ def test_band_runs_transcribe_every_stem_as_before(tmp_path, monkeypatch, worker
     assert "probe" not in runner.manifest
     assert {unified.family(track) for track in result.instruments} == {"bass", "piano"}
 
-def test_two_requested_guitars_transcribe_every_stem_unless_two_are_panned(tmp_path, monkeypatch):
-    runner, commands, _, _ = run_personal(tmp_path, monkeypatch, "guitar2")
-    # one guitar in the song: the second is generated with the whole band as context
+@pytest.mark.parametrize("requested", ["guitar1", "guitar2"])
+def test_guitar_solo_transcribes_every_stem_for_the_guitar_count_redo(tmp_path, monkeypatch, requested):
+    # the redo builds a known original from what this run found, so it needs the whole band
+    runner, commands, result, _ = run_personal(tmp_path, monkeypatch, requested)
     assert sorted(transcribed(commands)) == ["bass", "drums", "guitar", "piano"]
     assert "focus_probe" not in runner.manifest["completed"]
-    assert runner.manifest["probe"] == {"skipped": "second guitar may be generated"}
-    midigpt = next(command for stage, command in commands if stage == "midigpt")
-    assert midigpt[3:midigpt.index("--out")] == ["guitar"]
+    assert "probe" not in runner.manifest
+    assert set(runner.manifest["original_parts"]) >= {"bass", "drums", "piano"}
+    assert {unified.family(track) for track in result.instruments} == {"guitar"}
+    if requested == "guitar2":
+        # one guitar in the song: the second is generated with the whole band as context
+        midigpt = next(command for stage, command in commands if stage == "midigpt")
+        assert midigpt[3:midigpt.index("--out")] == ["guitar"]

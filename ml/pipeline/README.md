@@ -46,19 +46,19 @@ original guitars for the same cases below:
 | 0 | 2 | rejected in this iteration |
 
 **Solo practice (`--personal`, contract 14).** The app's solo mode asks for
-one instrument with `--original unknown`. After separation, `focus_probe`
-transcribes that instrument's stem plus drums (drum sync needs the drum MIDI)
-and runs the note gate on the chosen stem with the unknown-original sparse
-rule. If notes remain, the instrument is in the song and nothing has to be
-generated: only these stems are transcribed and MIDI-GPT does not run. If the
-stem is empty or sparse, the remaining stems are transcribed too (the probe
-MIDI files are reused), so MIDI-GPT has the whole band as context. Two
-requested guitars may need a generated second guitar, which is known only
-after the guitar TAB; unless `guitar_stereo` already shows two panned guitars,
-every stem is transcribed from the start (`probe: {skipped}`). The manifest
-records `probe: {in_song, all_found}` and `transcribe_stems` for the server's
-progress. Band runs (no `--personal`) are unchanged and transcribe every stem
-when the original is unknown.
+one instrument with `--original unknown`. For a **bass, keyboard or drums**
+solo, `focus_probe` after separation transcribes that instrument's stem plus
+drums (drum sync needs the drum MIDI) and runs the note gate on the chosen
+stem with the unknown-original sparse rule. If notes remain, the instrument is
+in the song and nothing has to be generated: only these stems are transcribed
+and MIDI-GPT does not run. If the stem is empty or sparse, the remaining stems
+are transcribed too (the probe MIDI files are reused), so MIDI-GPT has the
+whole band as context. The manifest records `probe: {in_song, all_found}` and
+`transcribe_stems` for the server's progress. **Guitar solos** (1 or 2 guitars)
+skip the probe and transcribe every stem: the app's guitar-count redo builds a
+known original from the instruments this run found, so it needs the whole
+band. Band runs (no `--personal`) are unchanged and transcribe every stem when
+the original is unknown.
 
 Only requested parts absent from the declared original (or detected original
 when unknown) are generated. A generated second guitar keeps the original
