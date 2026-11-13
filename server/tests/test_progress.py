@@ -114,6 +114,18 @@ def test_only_declared_original_stems_are_waited_for(tmp_path):
     assert run_progress(tmp_path, 10)["stage"] == "BEATS"
 
 
+def test_solo_practice_waits_only_for_the_stems_it_transcribes(tmp_path):
+    # contract 14: the chosen stem is checked first, then only it (or all four) is transcribed
+    write_manifest(tmp_path, ["bs_roformer", "input_check"], transcribe_stems=["bass"],
+                   config={"original": "unknown"})
+    write_progress(tmp_path, "bass", 2, 4)
+    p = run_progress(tmp_path, 10)
+    assert p["stage"] == "TRANSCRIBE" and (p["completed"], p["total"]) == (2, 4)
+    write_manifest(tmp_path, ["bs_roformer", "input_check", "focus_probe", "muscriptor_batch"],
+                   transcribe_stems=["bass"], config={"original": "unknown"})
+    assert run_progress(tmp_path, 10)["stage"] == "BEATS"
+
+
 def test_contract_8_separation_stage_name(tmp_path):
     write_manifest(tmp_path, ["bs_roformer"])
     assert run_progress(tmp_path, 10)["stage"] == "TRANSCRIBE"

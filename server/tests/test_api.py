@@ -267,10 +267,11 @@ def test_two_gpus_run_two_songs_at_once(tmp_path, monkeypatch):
     started, release = [], threading.Event()
 
     class SlowRunner(FakeRunner):
-        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown",
+                 personal=False):
             started.append(job_id)
             release.wait(timeout=10)
-            super().run_midi(job_id, audio, run, requested, log, note, original)
+            super().run_midi(job_id, audio, run, requested, log, note, original, personal)
 
     store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
     with TestClient(create_app(store, SlowRunner())) as client:  # starts the workers
@@ -327,14 +328,15 @@ def test_cancel_running_job_stops_it_before_next_song(tmp_path, monkeypatch):
     entered, released = threading.Event(), threading.Event()
 
     class BlockingRunner(FakeRunner):
-        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+        def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown",
+                 personal=False):
             if not entered.is_set():
                 (run / "stems").mkdir(parents=True)
                 (run / "stems" / "drums.wav").write_bytes(b"partial")
                 entered.set()
                 released.wait(5)
                 raise RuntimeError("stopped after cancellation")
-            super().run_midi(job_id, audio, run, requested, log, note, original)
+            super().run_midi(job_id, audio, run, requested, log, note, original, personal)
 
         def cancel(self, job_id):
             super().cancel(job_id)
@@ -380,6 +382,16 @@ def test_upload_keeps_the_mode(setup):
     job_id = r.json()["id"]
     assert store.get(job_id).mode == "personal"
     assert client.get(f"/jobs/{job_id}").json()["mode"] == "personal"
+
+
+def test_solo_practice_runs_the_pipeline_in_personal_mode(setup):
+    client, store, runner, worker = setup()
+    worker.run(store.get(upload(client).json()["id"]))
+    assert runner.personal is False
+    r = client.post("/jobs", files={"file": ("s.wav", b"RIFF....WAVE", "audio/wav")},
+                    data={"requested": "bass", "lineup": "bass", "mode": "personal", "title": "t"})
+    worker.run(store.get(r.json()["id"]))
+    assert runner.personal is True
 
 
 @pytest.mark.parametrize("lineup, mode", [("piano,guitar", "personal"), ("bass", "solo")])

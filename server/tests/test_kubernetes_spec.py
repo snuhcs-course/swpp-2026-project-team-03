@@ -34,6 +34,14 @@ def test_midi_pod_matches_example_yaml():
     assert spec.volumes[0].persistent_volume_claim.claim_name == "muscriptor-data"
 
 
+def test_solo_practice_passes_personal_to_unified():
+    band = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass", "unknown")
+    solo = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass", "unknown", personal=True)
+    env = lambda pod: {e.name: e.value for e in pod.spec.containers[0].env}
+    assert "${ROCKY_PERSONAL:+--personal}" in solo.spec.containers[0].args[0]
+    assert env(solo)["ROCKY_PERSONAL"] == "1" and env(band)["ROCKY_PERSONAL"] == ""
+
+
 def test_pdf_pod_has_no_gpu():
     pod = runner().pdf_pod("abc123abc123", Path("/data/rocky-unified/runs/x"))
     c = pod.spec.containers[0]

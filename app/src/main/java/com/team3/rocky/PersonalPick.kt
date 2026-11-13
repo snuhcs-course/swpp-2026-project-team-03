@@ -87,6 +87,13 @@ fun PersonalPickScreen(
             }
             // 기타 대수에 따른 안내. 원곡 기타 대수와 맞추면 가장 치기 좋은 악보가 나온다.
             Demo.guitarNote(guitars)?.let { InfoNote(it); Spacer(Modifier.height(8.dp)) }
+            // 서버가 mode=personal 이면 고른 악기 stem만 먼저 채보해 보고, 곡에 있으면 그것만 채보한다.
+            Text(
+                tr("원곡에 있는 악기는 밴드용보다 채보시간이 단축돼요.",
+                    "If the song already has this instrument, it's transcribed faster than in band mode."),
+                fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(4.dp))
             Text(
                 tr("두 종류 이상의 악기 악보가 필요하면 홈에서 '밴드 합주용'으로 만들어 주세요.",
                     "Need scores for more than one instrument? Use 'Band rehearsal' on Home."),

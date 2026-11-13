@@ -339,7 +339,8 @@ class Worker:
 
             if not (run / "full_score.mid").is_file():
                 self.runner.run_midi(job.id, audio, run, job.pipeline_requested, log, note=note,
-                                     original=job.pipeline_original)
+                                     original=job.pipeline_original,
+                                     personal=job.mode == "personal")
             if self._is_cancelling(job.id):
                 self._finish_cancel(job)
                 return

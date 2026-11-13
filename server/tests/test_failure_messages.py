@@ -21,11 +21,12 @@ class ScriptedRunner(FakeRunner):
         super().__init__()
         self.midi_errors, self.pdf_errors = list(midi_errors), list(pdf_errors)
 
-    def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown"):
+    def run_midi(self, job_id, audio, run, requested, log, note=lambda _m: None, original="unknown",
+                 personal=False):
         if self.midi_errors:
             self.calls.append(("midi", job_id))
             raise self.midi_errors.pop(0)
-        super().run_midi(job_id, audio, run, requested, log, note, original)
+        super().run_midi(job_id, audio, run, requested, log, note, original, personal)
 
     def run_pdf(self, job_id, run, log, note=lambda _m: None):
         if self.pdf_errors:
