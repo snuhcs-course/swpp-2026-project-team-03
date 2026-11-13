@@ -291,9 +291,9 @@ class Runner:
             raise ValueError("Known original needs at least one band instrument for Beat This! and MIDI-GPT")
         if not self.original_unknown:
             guitar_case(self.original_guitars, self.requested_guitars)
-        # Solo practice: one instrument. Its stem is transcribed first; only when
-        # that instrument is not in the song are the other stems transcribed too,
-        # so MIDI-GPT can write the part from them.
+        # Solo practice: one requested instrument (checked here). With an unknown
+        # original, every run first transcribes only the requested stems; see
+        # probe_requested.
         self.personal = bool(getattr(args, "personal", False))
         if self.personal and (not self.original_unknown or len(self.requested_parts) != 1):
             raise ValueError("--personal takes an unknown original and exactly one requested instrument")
@@ -401,34 +401,40 @@ class Runner:
         self.manifest["status"] = "complete"
         atomic_json(self.manifest_path, self.manifest)
 
-    def probe_focus(self, focus: str, stems_dir: Path, midi_dir: Path, no_vocals: Path,
-                    stem_command: Callable[[str], list[str]]) -> tuple[str, ...]:
-        """Solo practice: transcribe the chosen instrument's stem and gate it.
+    def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
+                        transcribe_set: Callable[[tuple[str, ...], Path], None]) -> tuple[str, ...]:
+        """Original unknown: transcribe the requested instruments' stems first and gate them.
 
-        If notes are left after the note gate (the same sparse-stem rule as an
-        unknown original), the instrument is in the song and is the only stem
-        transcribed. Otherwise every stem is transcribed and MIDI-GPT writes the
-        part. Returns the stems to transcribe; the focus MIDI is reused.
+        A stem with notes left after the note gate (the sparse-stem rule of an
+        unknown original) is in the song. If every requested instrument is in
+        the song, only those stems are transcribed and MIDI-GPT has nothing to
+        write. Otherwise the other stems are transcribed too, so MIDI-GPT gets
+        the whole band as context for the missing parts. The probe MIDI files
+        are reused. Returns the stems to transcribe.
         """
+        wanted = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts)
         probe_file = self.out / "focus_probe.json"
         # The server shows transcription progress for these stems.
-        self.manifest["transcribe_stems"] = [focus]
+        self.manifest["transcribe_stems"] = list(wanted)
         atomic_json(self.manifest_path, self.manifest)
 
         def probe():
             import soundfile as sf
-            self.command(f"muscriptor_{focus}", stem_command(focus))
+            transcribe_set(wanted, midi_dir / "probe_jobs.json")
             duration = float(sf.info(str(no_vocals)).duration)
-            report = gate_stem(midi_dir / f"{focus}.mid", stems_dir / f"{focus}.wav", focus,
-                               self.out / "focus_probe" / f"{focus}.mid", self.gates, family,
-                               declared=False, original_unknown=True, duration_sec=duration)
-            atomic_json(probe_file, {"stem": focus, "in_song": report["notes_final"] > 0,
-                                     "gate": report})
-        self.stage("focus_probe", [probe_file, midi_dir / f"{focus}.mid"], probe,
-                   validate=lambda: valid_midi(midi_dir / f"{focus}.mid"))
-        in_song = bool(json.loads(probe_file.read_text(encoding="utf-8"))["in_song"])
-        stems = (focus,) if in_song else TRANSCRIBE_STEMS
-        self.manifest["personal_focus"] = {"stem": focus, "in_song": in_song}
+            found = {}
+            for stem in wanted:
+                report = gate_stem(midi_dir / f"{stem}.mid", stems_dir / f"{stem}.wav", stem,
+                                   self.out / "focus_probe" / f"{stem}.mid", self.gates, family,
+                                   declared=False, original_unknown=True, duration_sec=duration)
+                found[stem] = {"in_song": report["notes_final"] > 0, "gate": report}
+            atomic_json(probe_file, {"stems": found})
+        self.stage("focus_probe", [probe_file, *(midi_dir / f"{s}.mid" for s in wanted)], probe,
+                   validate=lambda: all(valid_midi(midi_dir / f"{s}.mid") for s in wanted))
+        found = json.loads(probe_file.read_text(encoding="utf-8"))["stems"]
+        in_song = {stem: bool(found[stem]["in_song"]) for stem in wanted}
+        stems = wanted if all(in_song.values()) else TRANSCRIBE_STEMS
+        self.manifest["probe"] = {"in_song": in_song, "all_found": all(in_song.values())}
         self.manifest["transcribe_stems"] = list(stems)
         atomic_json(self.manifest_path, self.manifest)
         return stems
@@ -470,17 +476,9 @@ class Runner:
                            "--instruments", HINTS[stem], "--progress",
                            str(midi_dir / f"{stem}.progress.jsonl"), "--resume-existing"]
 
-        probed: tuple[str, ...] = ()
-        if self.personal:
-            focus = next(iter(self.requested_parts))
-            transcribe_stems = self.probe_focus(focus, stems_dir, midi_dir, no_vocals, stem_command)
-            probed = (focus,)
-        stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
-        todo = tuple(s for s in transcribe_stems if s not in probed)
-        jobs_file = midi_dir / "transcription_jobs.json"
-        def transcribe():
+        def transcribe_set(todo: tuple[str, ...], jobs_file: Path) -> None:
             atomic_json(jobs_file, [{"stem": stem, "audio": str(stems_dir / f"{stem}.wav"),
-                                     "output": str(stem_midis[stem]),
+                                     "output": str(midi_dir / f"{stem}.mid"),
                                      "instruments": HINTS.get(stem),
                                      "progress": str(midi_dir / f"{stem}.progress.jsonl")}
                                     for stem in todo])
@@ -499,6 +497,16 @@ class Runner:
                         futures.append(pool.submit(self.command, f"muscriptor_{stem}", stem_command(stem)))
                     for future in futures:
                         future.result()
+
+        probed: tuple[str, ...] = ()
+        if self.original_unknown and self.requested_parts:
+            transcribe_stems = self.probe_requested(stems_dir, midi_dir, no_vocals, transcribe_set)
+            probed = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts)
+        stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
+        todo = tuple(s for s in transcribe_stems if s not in probed)
+        jobs_file = midi_dir / "transcription_jobs.json"
+        def transcribe():
+            transcribe_set(todo, jobs_file)
         if transcribe_stems:
             self.stage("muscriptor_batch", list(stem_midis.values()), transcribe,
                        validate=lambda: all(valid_midi(path) for path in stem_midis.values()))

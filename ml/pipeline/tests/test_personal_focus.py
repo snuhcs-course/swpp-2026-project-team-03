@@ -1,4 +1,7 @@
-"""Solo practice (--personal): transcribe only the chosen stem when it is in the song."""
+"""Original unknown: transcribe only the requested stems when they are all in the song.
+
+Solo practice (--personal) asks for one instrument; a band asks for several.
+"""
 
 import json
 from pathlib import Path
@@ -27,11 +30,11 @@ def one_track(part, start=0.0, notes=1):
     return score
 
 
-def run_personal(tmp_path, monkeypatch, requested, *, in_song, workers=1):
+def run_personal(tmp_path, monkeypatch, requested, *, in_song=True, workers=1, personal=True, absent=()):
     audio = tmp_path / "song.wav"
     sf.write(str(audio), np.zeros((16000, 2), dtype="float32"), 8000, subtype="FLOAT")
     args = SimpleNamespace(audio=audio, output_dir=tmp_path / "run", original="unknown",
-                           requested=requested, personal=True, model="large",
+                           requested=requested, personal=personal, model="large",
                            midigpt_model="yellow_medium", device="cpu", beat_checkpoint="checkpoint",
                            seed=0, resume=False, modules_root=tmp_path / "modules",
                            model_python=Path(sys.executable), tab_python=Path(sys.executable),
@@ -76,7 +79,8 @@ def run_personal(tmp_path, monkeypatch, requested, *, in_song, workers=1):
         if output.is_file() and output.stat().st_size:
             return  # --resume-existing
         # A stem with no notes is an instrument that is not in the song.
-        one_track(stem, notes=1 if (stem != focus or in_song) else 0).write(str(output))
+        missing = set(absent) | (set() if in_song else {focus})
+        one_track(stem, notes=0 if stem in missing else 1).write(str(output))
 
     def fake_command(stage, command, env=None):
         commands.append((stage, command))
@@ -129,7 +133,7 @@ def test_instrument_in_the_song_is_the_only_stem_transcribed(tmp_path, monkeypat
     runner, commands, result, focus = run_personal(tmp_path, monkeypatch, requested, in_song=True)
     assert transcribed(commands) == [focus]
     assert "midigpt" not in [stage for stage, _ in commands]
-    assert runner.manifest["personal_focus"] == {"stem": focus, "in_song": True}
+    assert runner.manifest["probe"] == {"in_song": {focus: True}, "all_found": True}
     assert runner.manifest["transcribe_stems"] == [focus]
     assert runner.manifest["generated_targets"] == []
     assert {unified.family(track) for track in result.instruments} == {focus}
@@ -145,7 +149,7 @@ def test_instrument_not_in_the_song_is_generated_from_the_other_stems(tmp_path, 
     assert transcribed(commands)[0] == "bass"
     midigpt = next(command for stage, command in commands if stage == "midigpt")
     assert midigpt[3:midigpt.index("--out")] == ["bass"]
-    assert runner.manifest["personal_focus"] == {"stem": "bass", "in_song": False}
+    assert runner.manifest["probe"] == {"in_song": {"bass": False}, "all_found": False}
     assert runner.manifest["transcribe_stems"] == ["drums", "bass", "guitar", "piano"]
     assert runner.manifest["generated_targets"] == ["bass"]
     assert {unified.family(track) for track in result.instruments} == {"bass"}
@@ -158,3 +162,28 @@ def test_personal_needs_one_instrument_and_unknown_original(tmp_path, capsys):
         with pytest.raises(SystemExit):
             cli([str(audio), str(tmp_path / "run"), "--personal", "--no-publish", *extra])
         assert "--personal" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_band_with_every_requested_part_in_the_song_transcribes_only_those(tmp_path, monkeypatch, workers):
+    runner, commands, result, _ = run_personal(tmp_path, monkeypatch, "bass,drums,guitar1",
+                                               personal=False, workers=workers)
+    assert sorted(transcribed(commands)) == ["bass", "drums", "guitar"]
+    assert "midigpt" not in [stage for stage, _ in commands]
+    assert runner.manifest["transcribe_stems"] == ["drums", "bass", "guitar"]
+    assert {unified.family(track) for track in result.instruments} == {"bass", "drums", "guitar"}
+
+
+def test_band_with_a_part_missing_from_the_song_transcribes_all_and_generates_it(tmp_path, monkeypatch):
+    runner, commands, result, _ = run_personal(tmp_path, monkeypatch, "bass,drums,guitar1",
+                                               personal=False, absent=("bass",))
+    # requested stems first (each once), then piano for MIDI-GPT context
+    stems = transcribed(commands)
+    assert sorted(stems[:3]) == ["bass", "drums", "guitar"] and stems[3:] == ["piano"]
+    midigpt = next(command for stage, command in commands if stage == "midigpt")
+    assert midigpt[3:midigpt.index("--out")] == ["bass"]
+    assert runner.manifest["probe"] == {"in_song": {"drums": True, "bass": False, "guitar": True},
+                                        "all_found": False}
+    assert runner.manifest["generated_targets"] == ["bass"]
+    assert {unified.family(track) for track in result.instruments} == {"bass", "drums", "guitar"}
+

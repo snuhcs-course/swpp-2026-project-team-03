@@ -45,16 +45,21 @@ original guitars for the same cases below:
 | 0 | 1 | MIDI-GPT generates one guitar |
 | 0 | 2 | rejected in this iteration |
 
-**Solo practice (`--personal`, contract 14).** The app's solo mode asks for
-one instrument with `--original unknown`. After separation, `focus_probe`
-transcribes only that instrument's stem and runs the note gate on it with the
-unknown-original sparse rule. If notes remain, the instrument is in the song:
-it is the only stem transcribed, and MIDI-GPT does not run, so the job skips
-three of the four MuScriptor stems. If the stem is empty or sparse, the other
-three stems are transcribed (the probe MIDI is reused) and MIDI-GPT writes the
-part from them, as for the full band. The manifest records
-`personal_focus: {stem, in_song}` and `transcribe_stems` for the server's
-progress.
+**Requested stems first (contract 14).** When the original is unknown, the
+`focus_probe` stage after separation transcribes only the requested
+instruments' stems and runs the note gate on them with the unknown-original
+sparse rule. If every requested instrument keeps notes, it is in the song:
+only those stems are transcribed and MIDI-GPT does not run (for example a band
+of guitar, bass and drums skips the piano stem). If any requested instrument is
+empty or sparse, the remaining stems are transcribed too (the probe MIDI files
+are reused) and MIDI-GPT writes the missing parts with the whole band as
+context. The manifest records `probe: {in_song, all_found}` and
+`transcribe_stems` for the server's progress. A known original (the app's
+guitar-count redo) skips the probe and transcribes the declared stems as
+before. The app's solo mode adds `--personal`, which only checks that one
+instrument was requested. Unrequested stems are no longer transcribed when all
+requested parts are found, so drum sync has no drum MIDI unless drums were
+requested; beat detection still uses `no_vocals.wav`.
 
 Only requested parts absent from the declared original (or detected original
 when unknown) are generated. A generated second guitar keeps the original

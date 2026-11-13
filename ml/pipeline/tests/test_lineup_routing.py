@@ -28,11 +28,13 @@ def one_track(part, start=0.0):
 @pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers,stereo_two", [
     ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1, False),
     ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1, False),
-    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1, False),
-    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2, False),
+    # original unknown: the requested stems are checked first; guitar is in the song,
+    # so it is the only stem transcribed
+    ("unknown", "guitar1", True, {"guitar"}, 1, False, 1, False),
+    ("unknown", "guitar2", False, {"guitar"}, 2, True, 2, False),
     ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1, False),
     # two guitars panned apart: the stereo check forces a split, no MIDI-GPT guitar
-    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, False, 1, True),
+    ("unknown", "guitar2", False, {"guitar"}, 2, False, 1, True),
 ])
 def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, auto_split,
                                     expected_stems, expected_guitars, generated, workers, stereo_two):
@@ -133,8 +135,9 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     if workers > 1:
         assert {stage.removeprefix("muscriptor_") for stage, _ in commands
                 if stage.startswith("muscriptor_")} == expected_stems
-    jobs_path = runner.out / "stem_midi" / "transcription_jobs.json"
-    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+    jobs = [job for name in ("probe_jobs.json", "transcription_jobs.json")
+            if (path := runner.out / "stem_midi" / name).is_file()
+            for job in json.loads(path.read_text(encoding="utf-8"))]
     assert {job["stem"] for job in jobs} == expected_stems
     if batch:
         assert "--model" in batch[0] and batch[0][batch[0].index("--model") + 1] == "large"
