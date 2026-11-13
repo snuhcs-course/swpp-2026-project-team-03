@@ -26,7 +26,7 @@ PIPELINE_TO_APP = {
     **{f"muscriptor_{s}": "TRANSCRIBE" for s in TRANSCRIBE_STEMS},
     "muscriptor_batch": "TRANSCRIBE",  # contract 10: all stems in one stage
     "note_gate": "TRANSCRIBE",  # contract 11: drops notes in resting stems
-    "focus_probe": "TRANSCRIBE",  # contract 14: solo practice transcribes the chosen stem first
+    "focus_probe": "TRANSCRIBE",  # contract 14: the requested stems are transcribed first
     "merge_stems": "BEATS",
     "beat_this": "BEATS",
     "align": "BEATS",
@@ -57,8 +57,8 @@ def last_progress_line(path: Path) -> dict | None:
 def stems_to_transcribe(manifest: dict) -> tuple[str, ...]:
     """unified.py transcribes only the declared original instruments (all four when unknown).
 
-    Solo practice (contract 14) records the stems it decided on in `transcribe_stems`:
-    the chosen one while it checks the song, then that one or all four.
+    Contract 14 records the stems it decided on in `transcribe_stems`: the requested
+    ones while it checks the song, then those or all four.
     """
     recorded = manifest.get("transcribe_stems")
     if isinstance(recorded, list) and recorded:
