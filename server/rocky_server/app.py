@@ -43,7 +43,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, U
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .accounts import AccountError, Accounts, User
-from .jobs import JobStore, Worker
+from .jobs import JobStore, RetryRefused, Worker
 from .lineup import APP_PARTS, LineupError, pipeline_args
 from .progress import allowed_paths, result_files, run_progress
 from .runners import make_runner
@@ -149,7 +149,9 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         job = find(job_id)
         body = {"id": job.id, "title": job.title, "requested": job.requested, "state": job.state,
                 "queue_position": worker.queue_position(job.id), "error": job.error, "note": job.note,
-                "reason": job.reason}
+                "reason": job.reason, "error_code": job.error_code, "message": job.user_message,
+                "retryable": job.retryable, "retry_after_sec": job.retry_after_sec,
+                "retry_from": job.retry_from}
         if job.state == "queued":
             body.update(stage="SEPARATE", completed=0, total=1, fraction=0.0, eta_sec=None)
         elif job.state == "complete":
@@ -158,6 +160,16 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             elapsed = time.time() - job.started_at if job.started_at else None
             body.update(run_progress(store.run_dir(job.id), elapsed))
         return body
+
+    @app.post("/jobs/{job_id}/retry", dependencies=[Depends(check_key)])
+    def retry_job(job_id: str) -> dict:
+        """Run a failed song again under the same id. A run with full_score.mid only runs the
+        PDF stage again; otherwise unified.py --resume skips the stages that already finished."""
+        find(job_id)
+        try:
+            return worker.retry(job_id)
+        except RetryRefused as refused:
+            raise HTTPException(refused.status, refused.detail)
 
     @app.post("/jobs/{job_id}/cancel", dependencies=[Depends(check_key)])
     def cancel_job(job_id: str) -> dict:
