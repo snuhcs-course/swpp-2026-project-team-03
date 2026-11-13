@@ -45,22 +45,20 @@ original guitars for the same cases below:
 | 0 | 1 | MIDI-GPT generates one guitar |
 | 0 | 2 | rejected in this iteration |
 
-**Requested stems first (contract 14).** When the original is unknown, the
-`focus_probe` stage after separation transcribes the requested instruments'
-stems plus drums (drum sync always needs the drum MIDI) and runs the note gate
-on the requested ones with the unknown-original sparse rule. If every
-requested instrument keeps notes, nothing has to be generated: only these
-stems are transcribed and MIDI-GPT does not run (for example a band of
-keyboard and bass skips the guitar stem). If any requested instrument is empty
-or sparse, the remaining stems are transcribed too (the probe MIDI files are
-reused), so MIDI-GPT always has the whole band as context. Two requested
-guitars may need a generated second guitar, which is known only after the
-guitar TAB; unless `guitar_stereo` already shows two panned guitars, every
-stem is transcribed from the start (`probe: {skipped}`). The manifest records
-`probe: {in_song, all_found}` and `transcribe_stems` for the server's progress.
-A known original (the app's guitar-count redo) skips the probe and
-transcribes the declared stems as before. The app's solo mode adds
-`--personal`, which only checks that one instrument was requested.
+**Solo practice (`--personal`, contract 14).** The app's solo mode asks for
+one instrument with `--original unknown`. After separation, `focus_probe`
+transcribes that instrument's stem plus drums (drum sync needs the drum MIDI)
+and runs the note gate on the chosen stem with the unknown-original sparse
+rule. If notes remain, the instrument is in the song and nothing has to be
+generated: only these stems are transcribed and MIDI-GPT does not run. If the
+stem is empty or sparse, the remaining stems are transcribed too (the probe
+MIDI files are reused), so MIDI-GPT has the whole band as context. Two
+requested guitars may need a generated second guitar, which is known only
+after the guitar TAB; unless `guitar_stereo` already shows two panned guitars,
+every stem is transcribed from the start (`probe: {skipped}`). The manifest
+records `probe: {in_song, all_found}` and `transcribe_stems` for the server's
+progress. Band runs (no `--personal`) are unchanged and transcribe every stem
+when the original is unknown.
 
 Only requested parts absent from the declared original (or detected original
 when unknown) are generated. A generated second guitar keeps the original

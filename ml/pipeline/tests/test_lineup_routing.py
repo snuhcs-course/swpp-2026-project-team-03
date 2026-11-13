@@ -28,14 +28,11 @@ def one_track(part, start=0.0):
 @pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers,stereo_two", [
     ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1, False),
     ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1, False),
-    # original unknown: the requested stems and drums are checked first; guitar is in
-    # the song, so only guitar and drums are transcribed. Two requested guitars without
-    # two panned guitars may need a generated second guitar: every stem.
-    ("unknown", "guitar1", True, {"drums", "guitar"}, 1, False, 1, False),
+    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1, False),
     ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2, False),
     ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1, False),
     # two guitars panned apart: the stereo check forces a split, no MIDI-GPT guitar
-    ("unknown", "guitar2", False, {"drums", "guitar"}, 2, False, 1, True),
+    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, False, 1, True),
 ])
 def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, auto_split,
                                     expected_stems, expected_guitars, generated, workers, stereo_two):

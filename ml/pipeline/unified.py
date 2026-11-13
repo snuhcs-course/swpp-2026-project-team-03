@@ -291,9 +291,9 @@ class Runner:
             raise ValueError("Known original needs at least one band instrument for Beat This! and MIDI-GPT")
         if not self.original_unknown:
             guitar_case(self.original_guitars, self.requested_guitars)
-        # Solo practice: one requested instrument (checked here). With an unknown
-        # original, every run first transcribes only the requested stems; see
-        # probe_requested.
+        # Solo practice (--personal): one requested instrument and an unknown
+        # original. Its stem (and drums) is transcribed first; see probe_requested.
+        # Band runs transcribe every stem as before.
         self.personal = bool(getattr(args, "personal", False))
         if self.personal and (not self.original_unknown or len(self.requested_parts) != 1):
             raise ValueError("--personal takes an unknown original and exactly one requested instrument")
@@ -412,7 +412,7 @@ class Runner:
     def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
                         transcribe_set: Callable[[tuple[str, ...], Path], None]
                         ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Original unknown: transcribe the requested stems (and drums) first and gate them.
+        """Solo practice: transcribe the chosen instrument's stem (and drums) first and gate it.
 
         Drums are always transcribed because drum sync aligns the score to them.
         A stem with notes left after the note gate (the sparse-stem rule of an
@@ -517,7 +517,7 @@ class Runner:
                         future.result()
 
         probed: tuple[str, ...] = ()
-        if self.original_unknown and self.requested_parts:
+        if self.personal:
             transcribe_stems, probed = self.probe_requested(stems_dir, midi_dir, no_vocals, transcribe_set)
         stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
         todo = tuple(s for s in transcribe_stems if s not in probed)
