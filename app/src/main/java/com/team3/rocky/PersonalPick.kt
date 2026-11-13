@@ -87,9 +87,9 @@ fun PersonalPickScreen(
             }
             // 기타 대수에 따른 안내. 원곡 기타 대수와 맞추면 가장 치기 좋은 악보가 나온다.
             Demo.guitarNote(guitars)?.let { InfoNote(it); Spacer(Modifier.height(8.dp)) }
-            // 서버가 mode=personal 이면 고른 악기 stem(+드럼)만 먼저 채보해 보고, 곡에 있으면 그것만 채보한다.
-            // 기타 2대는 두 번째 기타를 AI로 만들 수 있어 처음부터 모두 채보하므로 이 문장을 띄우지 않는다.
-            if (guitars != 2) {
+            // 서버가 mode=personal 이면 베이스·키보드·드럼은 그 악기 stem(+드럼)만 먼저 채보해 보고, 곡에 있으면 그것만 채보한다.
+            // 기타는 1대·2대 모두 처음부터 4개 악기를 다 채보하므로(기타 대수 다시 만들기에 밴드 전체가 필요) 이 문장을 띄우지 않는다.
+            if (guitars == 0) {
                 Text(
                     tr("원곡에 있는 악기는 밴드용보다 채보시간이 단축돼요.",
                         "If the song already has this instrument, it's transcribed faster than in band mode."),

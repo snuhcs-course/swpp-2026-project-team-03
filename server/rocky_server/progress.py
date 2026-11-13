@@ -57,8 +57,9 @@ def last_progress_line(path: Path) -> dict | None:
 def stems_to_transcribe(manifest: dict) -> tuple[str, ...]:
     """unified.py transcribes only the declared original instruments (all four when unknown).
 
-    Solo practice (contract 14) records the stems it decided on in `transcribe_stems`:
-    the chosen one and drums while it checks the song, then those or all four.
+    A bass, keyboard or drums solo (contract 14) records the stems it decided on in
+    `transcribe_stems`: the chosen one and drums while it checks the song, then those or
+    all four. Guitar solos and band runs record none and transcribe all four.
     """
     recorded = manifest.get("transcribe_stems")
     if isinstance(recorded, list) and recorded:
