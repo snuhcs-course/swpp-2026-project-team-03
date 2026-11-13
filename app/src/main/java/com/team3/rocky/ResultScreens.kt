@@ -552,26 +552,30 @@ fun ResultScreen(
         }
         // 원곡 기타 대수는 모델이 판단한다. 기타 파트가 이상해 보이면 대수를 직접 골라 처음부터 다시 만들 수 있다.
         if (Demo.guitarCount(work.instruments.toSet()) > 0) {
+            // 한 줄짜리 눌리는 띠: 왼쪽 질문, 오른쪽 주황 동작. 줄 전체를 눌러도 된다.
             Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
+                Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp))
+                    .background(cs.surfaceVariant.copy(alpha = 0.6f))
+                    .clickable { player.pause(); playing = false; guitarDialog = true }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                InstrumentIcon("guitar", cs.onSurfaceVariant, size = 16.dp)
+                Spacer(Modifier.width(8.dp))
                 Text(
                     tr("기타 파트가 이상한가요?", "Guitar parts look off?"),
                     fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { player.pause(); playing = false; guitarDialog = true }, contentPadding = TightButtonPadding) {
-                    Text(tr("기타 대수 바꿔서 다시 만들기", "Remake with a guitar count"), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                }
+                Spacer(Modifier.width(8.dp))
+                Text(tr("기타 대수 바꿔서 다시 만들기 ›", "Remake with a guitar count ›"), fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold, color = cs.primary, maxLines = 1)
             }
-        } else {
-            Spacer(Modifier.height(8.dp))
         }
         Text(
             tr("밴드 곡이 아니면 악보가 부정확할 수 있어요", "Less accurate for non-band songs"),
             fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
         Spacer(Modifier.height(10.dp))
         // 아래: 악보. 화면 양옆 끝까지, 아래에서 올라온 종이처럼.

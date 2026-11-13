@@ -1,6 +1,8 @@
 // AI-generated with Claude Code, 2026-11-13
 package com.team3.rocky
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.widthIn
 import android.app.Activity
 import android.content.Context
 import androidx.compose.foundation.Canvas
@@ -15,7 +17,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -180,6 +181,9 @@ fun TermsScreen(onAgree: () -> Unit) {
     }
 }
 
+/** 안내 그림 칸 높이 (모든 장 같음). */
+private val GUIDE_ART = 190.dp
+
 /** 안내 슬라이드 한 장. */
 private class GuideSlide(val title: String, val body: String, val art: DrawScope.(Color, Color) -> Unit)
 
@@ -198,7 +202,7 @@ private fun guideSlides() = listOf(
     ) { fg, soft -> artBackground(fg, soft) },
     GuideSlide(
         tr("악보를 받아요", "Get your scores"),
-        tr("원곡에 있는 파트는 그대로 옮기고, 없는 파트는 AI가 새로 만들어요(✨). 밴드 합주용 악보는 밴드에 공유해 멤버와 함께 볼 수 있어요.", "Parts in the song are transcribed; missing parts are made with AI (✨). Share band scores with your band to view together."),
+        tr("원곡에 있는 파트는 그대로 옮기고, 없는 파트는 AI가 만들어요(✨). 밴드 합주용 악보는 밴드와 함께 볼 수 있어요.", "Parts in the song are transcribed; missing parts are made with AI (✨). Share band scores with your band to view together."),
     ) { fg, soft -> artScores(fg, soft) },
 )
 
@@ -216,9 +220,10 @@ fun OnboardingDialog(onDone: () -> Unit) {
     var never by remember { mutableStateOf(FirstRun.guideOff(ctx)) }
     fun close() { if (never) FirstRun.setGuideOff(ctx); onDone() }
 
+    // 모든 장이 같은 크기로 보이게: 창 너비는 최대 360dp, 그림·제목(2줄)·설명(4줄) 칸 높이를 고정한다.
     Dialog(onDismissRequest = { close() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            Modifier.padding(horizontal = 20.dp).widthIn(max = 360.dp).fillMaxWidth(),
             shape = RoundedCornerShape(28.dp), color = cs.surface,
         ) {
             Column(Modifier.padding(top = 8.dp, bottom = 18.dp)) {
@@ -230,19 +235,25 @@ fun OnboardingDialog(onDone: () -> Unit) {
                     val slide = slides[i]
                     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
-                            Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp))
+                            Modifier.fillMaxWidth().height(GUIDE_ART).clip(RoundedCornerShape(24.dp))
                                 .background(Brush.verticalGradient(listOf(cs.primary.copy(alpha = 0.20f), cs.primary.copy(alpha = 0.06f)))),
                             contentAlignment = Alignment.Center,
                         ) {
                             val fg = cs.primary
                             val soft = cs.onSurface
-                            Canvas(Modifier.size(170.dp).semantics { contentDescription = slide.title }) { slide.art(this, fg, soft) }
+                            Canvas(Modifier.size(GUIDE_ART - 30.dp).semantics { contentDescription = slide.title }) { slide.art(this, fg, soft) }
                         }
-                        Spacer(Modifier.height(22.dp))
-                        Text(slide.title, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(8.dp))
-                        Text(slide.body, fontSize = 14.sp, lineHeight = 21.sp, color = cs.onSurfaceVariant,
-                            textAlign = TextAlign.Center, modifier = Modifier.heightIn(min = 88.dp))
+                        Spacer(Modifier.height(20.dp))
+                        // 제목은 두 줄 칸, 설명은 네 줄 칸. 짧은 장도 같은 높이를 차지해서 넘겨도 창 크기가 그대로다.
+                        Box(Modifier.fillMaxWidth().height(58.dp), contentAlignment = Alignment.Center) {
+                            Text(slide.title, fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold,
+                                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.fillMaxWidth().height(84.dp), contentAlignment = Alignment.TopCenter) {
+                            Text(slide.body, fontSize = 14.sp, lineHeight = 21.sp, color = cs.onSurfaceVariant,
+                                textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 // 몇 번째 장인지 점으로
@@ -265,11 +276,13 @@ fun OnboardingDialog(onDone: () -> Unit) {
                         Text(tr("다시 보지 않기", "Don't show again"), fontSize = 13.sp, color = cs.onSurfaceVariant)
                     }
                     val last = pager.currentPage == slides.lastIndex
+                    // '다음'과 '시작하기'가 같은 너비라 마지막 장에서도 버튼이 움직이지 않는다.
                     Button(
                         shape = ButtonShape,
                         onClick = { if (last) close() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
-                        modifier = Modifier.height(48.dp),
-                    ) { Text(if (last) tr("시작하기", "Get started") else tr("다음", "Next"), fontWeight = FontWeight.Bold) }
+                        modifier = Modifier.height(48.dp).width(116.dp),
+                        contentPadding = TightButtonPadding,
+                    ) { Text(if (last) tr("시작하기", "Start") else tr("다음", "Next"), fontWeight = FontWeight.Bold, maxLines = 1) }
                 }
             }
         }
