@@ -370,6 +370,26 @@ def test_upload_records_original_and_lineup(setup):
     assert job.requested == ["piano", "guitar"]
 
 
+def test_upload_keeps_the_mode(setup):
+    client, store, *_ = setup()
+    band = upload(client).json()["id"]
+    assert store.get(band).mode == "band"                      # old apps send no mode
+    r = client.post("/jobs", files={"file": ("s.mp3", b"ID3", "audio/mpeg")},
+                    data={"requested": "guitar", "lineup": "guitar,guitar2", "mode": "personal", "title": "t"})
+    assert r.status_code == 201
+    job_id = r.json()["id"]
+    assert store.get(job_id).mode == "personal"
+    assert client.get(f"/jobs/{job_id}").json()["mode"] == "personal"
+
+
+@pytest.mark.parametrize("lineup, mode", [("piano,guitar", "personal"), ("bass", "solo")])
+def test_personal_takes_one_kind_of_instrument(setup, lineup, mode):
+    client, *_ = setup()
+    r = client.post("/jobs", files={"file": ("s.mp3", b"ID3", "audio/mpeg")},
+                    data={"requested": lineup, "lineup": lineup, "mode": mode, "title": "t"})
+    assert r.status_code == 422
+
+
 def test_status_shows_wait_note(setup):
     client, store, *_ = setup()
     job_id = upload(client).json()["id"]

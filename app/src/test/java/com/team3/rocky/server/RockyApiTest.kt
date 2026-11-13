@@ -57,6 +57,11 @@ class RockyApiTest {
 
     private fun api(key: String = "secret") = RockyApi("http://127.0.0.1:${http.address.port}/", key)
 
+    @Test fun uploadSendsSoloMode() {
+        api().upload("RIFF".byteInputStream(), "a.mp3", "a", listOf("guitar"), lineup = listOf("guitar", "guitar2"), mode = "personal")
+        assertTrue(lastBody.contains("name=\"mode\"\r\n\r\npersonal\r\n"))
+    }
+
     @Test fun uploadSendsMultipartWithKey() {
         val id = api().upload(
             "RIFFdata".byteInputStream(), "밤을 달리다.mp3", "밤을 달리다", listOf("piano", "guitar"),
@@ -69,6 +74,7 @@ class RockyApiTest {
         assertTrue(lastBody.contains("name=\"title\"\r\n\r\n밤을 달리다\r\n"))
         assertTrue(lastBody.contains("name=\"original\"\r\n\r\nguitar\r\n"))
         assertTrue(lastBody.contains("name=\"lineup\"\r\n\r\npiano,guitar,guitar2\r\n"))
+        assertTrue(lastBody.contains("name=\"mode\"\r\n\r\nband\r\n"))   // 기본은 밴드 합주용
         // 한글뿐인 이름은 영문 부분이 비므로 song.mp3로 보낸다 (" .mp3"는 서버가 확장자 없는 파일로 보고 거절했다).
         assertTrue(lastBody.contains("filename=\"song.mp3\""))
         assertTrue(lastBody.contains("filename*=UTF-8''%EB%B0%A4"))

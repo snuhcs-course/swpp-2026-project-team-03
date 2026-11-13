@@ -209,6 +209,17 @@ def test_shared_job_is_not_deleted(client):
     assert client.delete(f"/jobs/{job.id}").status_code == 200
 
 
+def test_personal_scores_are_not_shared_to_a_band(client):
+    store = client.app_state.store
+    solo = store.create("혼자 연습", "", ["bass"], mode="personal")
+    store.update(solo, state="complete")
+    a = sign_up(client)
+    band = client.post("/bands", json={"name": "밴드", "instrument": "bass"}, headers=auth(a)).json()
+    r = client.post(f"/bands/{band['id']}/scores", json={"work_id": 9, "job_id": solo.id, "title": "t"}, headers=auth(a))
+    assert r.status_code == 409
+    assert client.get(f"/bands/{band['id']}", headers=auth(a)).json()["scores"] == []
+
+
 def test_data_survives_a_restart(tmp_path):
     db = tmp_path / "rocky.db"
     acc = Accounts(db)

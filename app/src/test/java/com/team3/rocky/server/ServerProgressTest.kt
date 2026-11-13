@@ -32,7 +32,7 @@ class ServerProgressTest {
         }
         override fun upload(
             input: InputStream, fileName: String, title: String, requested: List<String>,
-            original: List<String>, lineup: List<String>,
+            original: List<String>, lineup: List<String>, mode: String,
         ) = "job"
         override fun cancel(jobId: String) = "cancelled"
         override fun result(jobId: String) = throw UnsupportedOperationException()

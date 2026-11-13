@@ -32,9 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * 개인 연습용 1단계: 내가 연습할 악기 고르기 (2x2 칸, 여러 개 고를 수 있음).
+ * 개인 연습용 1단계: 내가 연습할 악기 고르기 (2x2 칸, **한 종류만**. 기타는 1~2대).
  * 고른 악기의 악보만 만든다. 원곡에 없는 악기는 밴드 합주용처럼 AI가 만든다.
  * 기타는 원곡 기타 대수에 맞춰 1~2대를 고르고, 아래에 대수에 따른 안내를 보여준다.
+ * 두 종류 이상이 필요하면 밴드 합주용을 쓰라고 안내한다.
  */
 @Composable
 fun PersonalPickScreen(
@@ -70,7 +71,7 @@ fun PersonalPickScreen(
             Text(tr("어떤 악기를 연습하나요?", "Which instruments are you practicing?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
-            Text(tr("내가 연주할 악기를 모두 골라 주세요 · 고른 악기의 악보만 만들어요", "Pick every instrument you play · we make scores just for those"),
+            Text(tr("연습할 악기 하나를 골라 주세요. 그 악기의 악보만 만들어요.", "Pick the one instrument you practice. We make just its score."),
                 fontSize = 14.sp, color = cs.onSurfaceVariant, lineHeight = 20.sp)
             Spacer(Modifier.height(20.dp))
             Demo.INSTRUMENTS.chunked(2).forEach { row ->
@@ -85,7 +86,12 @@ fun PersonalPickScreen(
                 Spacer(Modifier.height(12.dp))
             }
             // 기타 대수에 따른 안내. 원곡 기타 대수와 맞추면 가장 치기 좋은 악보가 나온다.
-            Demo.personalGuitarNote(guitars)?.let { InfoNote(it) }
+            Demo.guitarNote(guitars)?.let { InfoNote(it); Spacer(Modifier.height(8.dp)) }
+            Text(
+                tr("두 종류 이상의 악기 악보가 필요하면 홈에서 '밴드 합주용'으로 만들어 주세요.",
+                    "Need scores for more than one instrument? Use 'Band rehearsal' on Home."),
+                fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
+            )
             Spacer(Modifier.height(16.dp))
         }
     }

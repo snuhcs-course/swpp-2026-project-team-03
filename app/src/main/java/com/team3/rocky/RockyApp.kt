@@ -304,7 +304,7 @@ fun RockyApp() {
                     onTab = { tab = it },
                     onAccount = { go(Screen.Account) },
                     // 회원 정보에 적은 악기를 새 악보의 기본 구성으로 쓴다.
-                    onPersonal = { newScore(Demo.lineupOf(u.instruments), personalMode = true) },
+                    onPersonal = { newScore(Demo.soloPreset(Demo.lineupOf(u.instruments)), personalMode = true) },
                     onBand = { newScore(Demo.lineupOf(u.instruments), personalMode = false) },
                     onOpenJob = { job -> go(Screen.Result(job.toWork(), jobId = job.id)) },
                     onOpenWork = { go(Screen.Result(it)) },
@@ -321,7 +321,7 @@ fun RockyApp() {
                 ) else null
                 if (personal) PersonalPickScreen(
                     picked = lineup,
-                    onToggle = { lineup = Demo.toggleLineup(lineup, it) },
+                    onToggle = { lineup = Demo.soloPick(lineup, it) },
                     onGuitars = { lineup = Demo.setGuitarCount(lineup, it) },
                     onBack = { back() },
                     onNext = { go(Screen.Upload) },

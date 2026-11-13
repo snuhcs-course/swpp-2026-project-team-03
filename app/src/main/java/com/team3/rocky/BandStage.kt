@@ -155,6 +155,11 @@ fun BandStageScreen(
                 fontSize = 14.sp, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(18.dp))
             Stage(lineup, guitars, onTap = { tap(it) })
+            // 기타 대수에 따른 안내 (개인 연습용과 같은 문구).
+            Demo.guitarNote(guitars)?.let {
+                Spacer(Modifier.height(12.dp))
+                InfoNote(it)
+            }
             Spacer(Modifier.height(16.dp))
         }
     }

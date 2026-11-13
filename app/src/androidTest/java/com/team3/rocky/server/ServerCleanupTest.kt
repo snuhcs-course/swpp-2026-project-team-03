@@ -32,7 +32,7 @@ class ServerCleanupTest {
         }
         override fun upload(
             input: InputStream, fileName: String, title: String, requested: List<String>,
-            original: List<String>, lineup: List<String>,
+            original: List<String>, lineup: List<String>, mode: String,
         ) = throw UnsupportedOperationException()
         override fun status(jobId: String) = throw UnsupportedOperationException()
         override fun cancel(jobId: String) = throw UnsupportedOperationException()

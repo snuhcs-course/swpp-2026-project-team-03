@@ -210,7 +210,8 @@ object ScoreJobs {
                     // lineup·original은 앱 이름 그대로(guitar2 = 기타 2대) 보내고,
                     // 서버가 unified.py 형식(keyboard,bass,guitar1|guitar2,drums / unknown)으로 바꾼다.
                     server.upload(it, audio.fileName, job.title, requestedParts(job.lineup),
-                        original = job.original, lineup = job.lineup).also { id -> job.serverId = id }
+                        original = job.original, lineup = job.lineup,
+                        mode = if (job.personal) "personal" else "band").also { id -> job.serverId = id }
                 }
             }
         }

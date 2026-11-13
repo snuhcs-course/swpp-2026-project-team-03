@@ -58,8 +58,25 @@ class LineupTest {
     // ----- 개인 연습용 기타 안내 -----
 
     @Test fun soloGuitarNoteDependsOnTheCount() {
-        assertEquals(null, Demo.personalGuitarNote(0))
-        assertTrue(Demo.personalGuitarNote(1)!!.contains("두 기타가 한 악보로 합쳐져"))
-        assertTrue(Demo.personalGuitarNote(2)!!.contains("AI가 새로 만들어요"))
+        assertEquals(null, Demo.guitarNote(0))
+        assertTrue(Demo.guitarNote(1)!!.contains("두 기타가 한 악보로 합쳐져"))
+        assertTrue(Demo.guitarNote(2)!!.contains("AI가 새로 만들어요"))
+    }
+
+    // ----- 개인 연습용: 악기 한 종류만 -----
+
+    @Test fun soloPicksOneKindOfInstrument() {
+        var s = Demo.soloPick(emptySet(), "bass"); assertEquals(setOf("bass"), s)
+        s = Demo.soloPick(s, "piano"); assertEquals(setOf("piano"), s)          // 다른 악기를 누르면 바뀐다
+        s = Demo.soloPick(s, "guitar"); assertEquals(setOf("guitar"), s)
+        s = Demo.setGuitarCount(s, 2); assertEquals(2, Demo.guitarCount(s))      // 기타만 2대까지
+        assertEquals(setOf("drums"), Demo.soloPick(s, "drums"))
+        assertEquals(emptySet<String>(), Demo.soloPick(s, "guitar"))             // 고른 것을 다시 누르면 비운다
+    }
+
+    @Test fun soloStartsWithTheFirstProfileInstrument() {
+        assertEquals(setOf("piano"), Demo.soloPreset(setOf("bass", "piano")))
+        assertEquals(setOf("guitar"), Demo.soloPreset(setOf("guitar", "guitar2")))
+        assertEquals(emptySet<String>(), Demo.soloPreset(emptySet()))
     }
 }

@@ -53,6 +53,8 @@ AUDIO_EXT = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
 CHUNK = 1024 * 1024
 
 
+MODES = ("band", "personal")
+
 def create_app(store: JobStore | None = None, runner=None, start_worker: bool = True,
                accounts: Accounts | None = None) -> FastAPI:
     store = store or JobStore(Path(os.environ.get("ROCKY_HOME", "/data/rocky-unified/app")),
@@ -104,7 +106,8 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
 
     @app.post("/jobs", status_code=201, dependencies=[Depends(check_key)])
     async def create_job(file: UploadFile = File(...), requested: str = Form(""),
-                         title: str = Form(""), original: str = Form(""), lineup: str = Form("")) -> dict:
+                         title: str = Form(""), original: str = Form(""), lineup: str = Form(""),
+                         mode: str = Form("band")) -> dict:
         parts = [p.strip() for p in requested.split(",") if p.strip()]
         if len(parts) != len(set(parts)) or any(p not in INSTRUMENTS for p in parts):
             raise HTTPException(422, f"requested must be distinct names from {','.join(INSTRUMENTS)}")
@@ -112,6 +115,13 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         # original: what the user heard in the song, same names; empty = "I don't know".
         app_lineup = [p.strip() for p in lineup.split(",") if p.strip() in APP_PARTS] or parts
         orig = [p.strip() for p in original.split(",") if p.strip() in APP_PARTS]
+        # mode: "band" (every part of the band) or "personal" (solo practice: one kind of instrument,
+        # guitar may be one or two). Old apps send nothing, which is band.
+        mode = mode.strip() or "band"
+        if mode not in MODES:
+            raise HTTPException(422, f"mode must be one of {','.join(MODES)}")
+        if mode == "personal" and len({"guitar" if p == "guitar2" else p for p in app_lineup}) != 1:
+            raise HTTPException(422, "personal practice takes exactly one kind of instrument (up to two guitars)")
         try:
             pipe_original, pipe_requested = pipeline_args(app_lineup, orig)
         except LineupError as exc:
@@ -121,7 +131,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(415, f"audio must be one of {' '.join(AUDIO_EXT)}")
         job = store.create(title.strip()[:120] or Path(file.filename or "song").stem, "", parts,
                            original=orig, lineup=app_lineup,
-                           pipeline_original=pipe_original, pipeline_requested=pipe_requested)
+                           pipeline_original=pipe_original, pipeline_requested=pipe_requested, mode=mode)
         target = store.inputs / f"{job.id}{ext}"
         size = 0
         with target.open("wb") as out:
@@ -151,7 +161,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
                 "queue_position": worker.queue_position(job.id), "error": job.error, "note": job.note,
                 "reason": job.reason, "error_code": job.error_code, "message": job.user_message,
                 "retryable": job.retryable, "retry_after_sec": job.retry_after_sec,
-                "retry_from": job.retry_from}
+                "retry_from": job.retry_from, "mode": job.mode}
         if job.state == "queued":
             body.update(stage="SEPARATE", completed=0, total=1, fraction=0.0, eta_sec=None)
         elif job.state == "complete":
@@ -210,7 +220,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         job = find(job_id)
         if job.state != "complete":
             raise HTTPException(409, f"job is {job.state}")
-        return {"id": job.id, "title": job.title, **result_files(store.run_dir(job.id))}
+        return {"id": job.id, "title": job.title, "mode": job.mode, **result_files(store.run_dir(job.id))}
 
     @app.get("/jobs/{job_id}/files/{rel:path}", dependencies=[Depends(check_key)])
     def job_file(job_id: str, rel: str):
@@ -405,6 +415,10 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def share_score(band_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
         if "work_id" not in body:
             raise HTTPException(422, "work_id is required")
+        # solo practice scores stay with their owner
+        shared_job = store.get(str(body.get("job_id"))) if body.get("job_id") else None
+        if shared_job is not None and shared_job.mode == "personal":
+            raise HTTPException(409, "개인 연습용 악보는 밴드에 공유할 수 없어요")
         return {"created": accounts.share(user, band_id, body)}
 
     @app.patch("/bands/{band_id}/scores/{score_id}", dependencies=keyed)

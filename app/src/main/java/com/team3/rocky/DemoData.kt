@@ -33,10 +33,24 @@ object Demo {
      * 앱 이름(guitar2 = 두 번째 기타)으로, 서버가 unified.py --original 형식으로 바꾼다.
      */
     /**
-     * 개인 연습용에서 기타 대수를 골랐을 때 아래에 보여줄 안내. 원곡 기타 대수와 같게 고르면 가장 치기 좋다.
+     * 개인 연습용은 악기 한 종류만 (기타는 1~2대). 다른 악기를 누르면 그 악기로 바뀌고,
+     * 고른 악기를 다시 누르면 비운다.
+     */
+    fun soloPick(current: Set<String>, inst: String): Set<String> = when {
+        inst == "guitar" -> if (guitarCount(current) > 0) emptySet() else setOf("guitar")
+        inst in current -> emptySet()
+        else -> setOf(inst)
+    }
+
+    /** 개인 연습용의 처음 고를 악기: 회원 정보의 첫 악기 하나 (기타면 1대). */
+    fun soloPreset(parts: Set<String>): Set<String> =
+        SCORE_ORDER.firstOrNull { it in parts }?.let { if (it == GUITAR2) setOf("guitar") else setOf(it) } ?: emptySet()
+
+    /**
+     * 기타 대수를 골랐을 때 아래에 보여줄 안내 (개인 연습용·밴드 합주용 모두). 원곡 기타 대수와 같게 고르면 가장 치기 좋다.
      * 기타를 안 골랐으면 null.
      */
-    fun personalGuitarNote(guitars: Int): String? = when (guitars) {
+    fun guitarNote(guitars: Int): String? = when (guitars) {
         1 -> tr(
             "원곡에 기타가 두 대인 경우 두 기타가 한 악보로 합쳐져서, 연주하기 어려운 악보가 나올 수 있어요.",
             "If the song has two guitars, both are merged into one score, which can be hard to play.",

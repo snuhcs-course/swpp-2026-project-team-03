@@ -22,10 +22,11 @@ interface ScoreServer {
      * @param requested 우리 밴드 구성 (piano·guitar·bass·drums, 기타 2대여도 guitar 하나) → unified.py --requested
      * @param original 사용자가 고른 원곡 구성. 모르면 빈 목록 (서버가 채보 결과로 판단)
      * @param lineup 앱의 밴드 구성 그대로 (guitar2 포함). 서버는 기록만 한다
+     * @param mode "band"(밴드 합주용) 또는 "personal"(개인 연습용: 악기 한 종류, 기타는 2대까지. 밴드에 공유 안 됨)
      */
     fun upload(
         input: InputStream, fileName: String, title: String, requested: List<String>,
-        original: List<String> = emptyList(), lineup: List<String> = requested,
+        original: List<String> = emptyList(), lineup: List<String> = requested, mode: String = "band",
     ): String
     fun status(jobId: String): JobStatus
     /** Returns the server state: cancelling, cancelled, or already complete. */
@@ -79,7 +80,7 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
 
     override fun upload(
         input: InputStream, fileName: String, title: String, requested: List<String>,
-        original: List<String>, lineup: List<String>,
+        original: List<String>, lineup: List<String>, mode: String,
     ): String {
         val boundary = "rocky-" + UUID.randomUUID()
         val c = open("/jobs", "POST", readTimeoutMs = 120_000)
@@ -94,6 +95,7 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
             field("requested", requested.joinToString(","))
             field("original", original.joinToString(","))
             field("lineup", lineup.joinToString(","))
+            field("mode", mode)
             field("title", title)
             // 한글 파일 이름도 깨지지 않게 filename*(RFC 5987)도 같이 보낸다.
             val ascii = asciiFileName(fileName)
