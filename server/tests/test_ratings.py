@@ -56,33 +56,3 @@ def test_rating_needs_the_api_key(client):  # noqa: F811
     del client.headers["X-Rocky-Key"]
     assert client.get("/ratings").status_code == 401
     assert client.put(f"/jobs/{job}/rating", json={"stars": 3}).status_code == 401
-
-
-def test_popup_comment_is_saved_and_kept_when_only_stars_change(client):  # noqa: F811
-    job = finished_job(client)
-    r = client.put(f"/jobs/{job}/rating", json={"stars": 3, "comment": "  베이스가\n좀 틀려요  "})
-    assert r.status_code == 200
-    assert client.get("/ratings").json()["ratings"][0]["comment"] == "베이스가 좀 틀려요"
-    client.put(f"/jobs/{job}/rating", json={"stars": 4})          # stars under the last page: no comment
-    item = client.get("/ratings").json()["ratings"][0]
-    assert (item["stars"], item["comment"]) == (4, "베이스가 좀 틀려요")
-    client.put(f"/jobs/{job}/rating", json={"stars": 4, "comment": ""})  # cleared in the popup
-    assert client.get("/ratings").json()["ratings"][0]["comment"] == ""
-    assert client.put(f"/jobs/{job}/rating", json={"stars": 4, "comment": 7}).status_code == 422
-
-
-def test_old_ratings_table_gets_the_comment_column(tmp_path):
-    import sqlite3
-    from rocky_server.accounts import Accounts
-    path = tmp_path / "accounts.db"
-    db = sqlite3.connect(path)
-    db.execute("""CREATE TABLE ratings (job_id TEXT NOT NULL, rater INTEGER NOT NULL DEFAULT 0,
-                  stars INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', instruments TEXT NOT NULL DEFAULT '',
-                  rated_at INTEGER NOT NULL, PRIMARY KEY (job_id, rater))""")
-    db.execute("INSERT INTO ratings VALUES ('abc', 0, 5, 't', '', 1)")
-    db.commit()
-    db.close()
-    accounts = Accounts(path)
-    assert accounts.ratings()["ratings"][0]["comment"] == ""
-    accounts.rate("abc", 2, None, comment="좋아요")
-    assert accounts.ratings()["ratings"][0]["comment"] == "좋아요"

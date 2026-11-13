@@ -203,14 +203,13 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(404, "no such job")
         return {"id": job_id, "deleted": outcome == "deleted", "pending": outcome == "pending"}
 
-    # ---- star ratings (app: the stars under the last score page, and a popup with an optional comment) ----
+    # ---- star ratings (app: the stars under the last score page) ----
     @app.put("/jobs/{job_id}/rating", dependencies=[Depends(check_key)])
     def rate_job(job_id: str, body: dict = Body(...), authorization: str | None = Header(default=None)) -> dict:
         find(job_id)
         token = (authorization or "").removeprefix("Bearer ").strip()
         rater = accounts.user_for_token(token) if token else None
-        return accounts.rate(job_id, body.get("stars"), rater, str(body.get("title", "")),
-                             body.get("instruments") or [], body.get("comment"))
+        return accounts.rate(job_id, body.get("stars"), rater, str(body.get("title", "")), body.get("instruments") or [])
 
     @app.get("/ratings", dependencies=[Depends(check_key)])
     def all_ratings() -> dict:
