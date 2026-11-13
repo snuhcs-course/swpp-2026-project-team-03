@@ -401,18 +401,36 @@ class Runner:
         self.manifest["status"] = "complete"
         atomic_json(self.manifest_path, self.manifest)
 
-    def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
-                        transcribe_set: Callable[[tuple[str, ...], Path], None]) -> tuple[str, ...]:
-        """Original unknown: transcribe the requested instruments' stems first and gate them.
+    def stereo_check(self, stems_dir: Path) -> dict:
+        """Two guitars panned apart? Run once; the probe and the guitar TAB both use it."""
+        stereo_file = self.out / "guitar_stereo.json"
+        if not ("guitar_stereo" in self.manifest["completed"] and stereo_file.is_file()):
+            self.stage("guitar_stereo", [stereo_file], lambda: atomic_json(
+                stereo_file, guitar_stereo(stems_dir / "guitar.wav", self.gates)))
+        return json.loads(stereo_file.read_text(encoding="utf-8"))
 
+    def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
+                        transcribe_set: Callable[[tuple[str, ...], Path], None]
+                        ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Original unknown: transcribe the requested stems (and drums) first and gate them.
+
+        Drums are always transcribed because drum sync aligns the score to them.
         A stem with notes left after the note gate (the sparse-stem rule of an
         unknown original) is in the song. If every requested instrument is in
-        the song, only those stems are transcribed and MIDI-GPT has nothing to
-        write. Otherwise the other stems are transcribed too, so MIDI-GPT gets
-        the whole band as context for the missing parts. The probe MIDI files
-        are reused. Returns the stems to transcribe.
+        the song, nothing is generated, so only these stems are transcribed.
+        Otherwise the other stems are transcribed too: MIDI-GPT always gets the
+        whole band as context. Two requested guitars may need a generated second
+        guitar, which is known only after the guitar TAB; unless the stereo check
+        already shows two guitars, every stem is transcribed from the start.
+        Returns (stems to transcribe, stems the probe already transcribed).
         """
-        wanted = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts)
+        requested = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts)
+        wanted = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts or s == "drums")
+        if self.requested_guitars == 2 and not self.stereo_check(stems_dir).get("two_guitars"):
+            self.manifest["probe"] = {"skipped": "second guitar may be generated"}
+            self.manifest["transcribe_stems"] = list(TRANSCRIBE_STEMS)
+            atomic_json(self.manifest_path, self.manifest)
+            return TRANSCRIBE_STEMS, ()
         probe_file = self.out / "focus_probe.json"
         # The server shows transcription progress for these stems.
         self.manifest["transcribe_stems"] = list(wanted)
@@ -423,7 +441,7 @@ class Runner:
             transcribe_set(wanted, midi_dir / "probe_jobs.json")
             duration = float(sf.info(str(no_vocals)).duration)
             found = {}
-            for stem in wanted:
+            for stem in requested:
                 report = gate_stem(midi_dir / f"{stem}.mid", stems_dir / f"{stem}.wav", stem,
                                    self.out / "focus_probe" / f"{stem}.mid", self.gates, family,
                                    declared=False, original_unknown=True, duration_sec=duration)
@@ -432,12 +450,12 @@ class Runner:
         self.stage("focus_probe", [probe_file, *(midi_dir / f"{s}.mid" for s in wanted)], probe,
                    validate=lambda: all(valid_midi(midi_dir / f"{s}.mid") for s in wanted))
         found = json.loads(probe_file.read_text(encoding="utf-8"))["stems"]
-        in_song = {stem: bool(found[stem]["in_song"]) for stem in wanted}
+        in_song = {stem: bool(found[stem]["in_song"]) for stem in requested}
         stems = wanted if all(in_song.values()) else TRANSCRIBE_STEMS
         self.manifest["probe"] = {"in_song": in_song, "all_found": all(in_song.values())}
         self.manifest["transcribe_stems"] = list(stems)
         atomic_json(self.manifest_path, self.manifest)
-        return stems
+        return stems, wanted
 
     def run(self) -> Path:
         stems_dir = self.out / "stems"
@@ -500,8 +518,7 @@ class Runner:
 
         probed: tuple[str, ...] = ()
         if self.original_unknown and self.requested_parts:
-            transcribe_stems = self.probe_requested(stems_dir, midi_dir, no_vocals, transcribe_set)
-            probed = tuple(s for s in TRANSCRIBE_STEMS if s in self.requested_parts)
+            transcribe_stems, probed = self.probe_requested(stems_dir, midi_dir, no_vocals, transcribe_set)
         stem_midis = {s: midi_dir / f"{s}.mid" for s in transcribe_stems}
         todo = tuple(s for s in transcribe_stems if s not in probed)
         jobs_file = midi_dir / "transcription_jobs.json"
@@ -584,10 +601,7 @@ class Runner:
             if self.original_unknown:
                 # Two guitars panned apart can play the same register and chords
                 # (21 Guns), which the chord rule in skyline_tab cannot see.
-                stereo_file = self.out / "guitar_stereo.json"
-                self.stage("guitar_stereo", [stereo_file], lambda: atomic_json(
-                    stereo_file, guitar_stereo(stems_dir / "guitar.wav", self.gates)))
-                stereo = json.loads(stereo_file.read_text(encoding="utf-8"))
+                stereo = self.stereo_check(stems_dir)
                 self.manifest["guitar_stereo"] = stereo
                 if stereo.get("two_guitars"):
                     split = "always"

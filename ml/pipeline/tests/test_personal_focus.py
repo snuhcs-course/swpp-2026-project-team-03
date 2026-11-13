@@ -131,12 +131,13 @@ def transcribed(commands):
 @pytest.mark.parametrize("requested", ["bass", "keyboard", "drums", "guitar1"])
 def test_instrument_in_the_song_is_the_only_stem_transcribed(tmp_path, monkeypatch, requested):
     runner, commands, result, focus = run_personal(tmp_path, monkeypatch, requested, in_song=True)
-    assert transcribed(commands) == [focus]
+    assert sorted(transcribed(commands)) == sorted({focus, "drums"})  # drums for drum sync
     assert "midigpt" not in [stage for stage, _ in commands]
     assert runner.manifest["probe"] == {"in_song": {focus: True}, "all_found": True}
-    assert runner.manifest["transcribe_stems"] == [focus]
+    assert runner.manifest["transcribe_stems"] == [s for s in ("drums", "bass", "guitar", "piano")
+                                                   if s in (focus, "drums")]
     assert runner.manifest["generated_targets"] == []
-    assert {unified.family(track) for track in result.instruments} == {focus}
+    assert {unified.family(track) for track in result.instruments} == {focus}  # drums removed
     assert "focus_probe" in runner.manifest["completed"]
 
 
@@ -144,9 +145,9 @@ def test_instrument_in_the_song_is_the_only_stem_transcribed(tmp_path, monkeypat
 def test_instrument_not_in_the_song_is_generated_from_the_other_stems(tmp_path, monkeypatch, workers):
     runner, commands, result, focus = run_personal(tmp_path, monkeypatch, "bass", in_song=False,
                                                    workers=workers)
-    # the focus stem is transcribed once (the probe), then the other three
-    assert sorted(transcribed(commands)) == ["bass", "drums", "guitar", "piano"]
-    assert transcribed(commands)[0] == "bass"
+    # bass and drums are transcribed once (the probe), then the other two
+    stems = transcribed(commands)
+    assert sorted(stems[:2]) == ["bass", "drums"] and sorted(stems[2:]) == ["guitar", "piano"]
     midigpt = next(command for stage, command in commands if stage == "midigpt")
     assert midigpt[3:midigpt.index("--out")] == ["bass"]
     assert runner.manifest["probe"] == {"in_song": {"bass": False}, "all_found": False}
@@ -187,3 +188,21 @@ def test_band_with_a_part_missing_from_the_song_transcribes_all_and_generates_it
     assert runner.manifest["generated_targets"] == ["bass"]
     assert {unified.family(track) for track in result.instruments} == {"bass", "drums", "guitar"}
 
+
+
+def test_band_without_drums_still_transcribes_drums_for_drum_sync(tmp_path, monkeypatch):
+    runner, commands, result, _ = run_personal(tmp_path, monkeypatch, "keyboard,bass",
+                                               personal=False)
+    assert sorted(transcribed(commands)) == ["bass", "drums", "piano"]
+    assert "midigpt" not in [stage for stage, _ in commands]
+    assert {unified.family(track) for track in result.instruments} == {"bass", "piano"}
+
+
+def test_two_requested_guitars_transcribe_every_stem_unless_two_are_panned(tmp_path, monkeypatch):
+    runner, commands, _, _ = run_personal(tmp_path, monkeypatch, "guitar2,bass", personal=False)
+    # one guitar in the song: the second is generated with the whole band as context
+    assert sorted(transcribed(commands)) == ["bass", "drums", "guitar", "piano"]
+    assert "focus_probe" not in runner.manifest["completed"]
+    assert runner.manifest["probe"] == {"skipped": "second guitar may be generated"}
+    midigpt = next(command for stage, command in commands if stage == "midigpt")
+    assert midigpt[3:midigpt.index("--out")] == ["guitar"]

@@ -46,20 +46,21 @@ original guitars for the same cases below:
 | 0 | 2 | rejected in this iteration |
 
 **Requested stems first (contract 14).** When the original is unknown, the
-`focus_probe` stage after separation transcribes only the requested
-instruments' stems and runs the note gate on them with the unknown-original
-sparse rule. If every requested instrument keeps notes, it is in the song:
-only those stems are transcribed and MIDI-GPT does not run (for example a band
-of guitar, bass and drums skips the piano stem). If any requested instrument is
-empty or sparse, the remaining stems are transcribed too (the probe MIDI files
-are reused) and MIDI-GPT writes the missing parts with the whole band as
-context. The manifest records `probe: {in_song, all_found}` and
-`transcribe_stems` for the server's progress. A known original (the app's
-guitar-count redo) skips the probe and transcribes the declared stems as
-before. The app's solo mode adds `--personal`, which only checks that one
-instrument was requested. Unrequested stems are no longer transcribed when all
-requested parts are found, so drum sync has no drum MIDI unless drums were
-requested; beat detection still uses `no_vocals.wav`.
+`focus_probe` stage after separation transcribes the requested instruments'
+stems plus drums (drum sync always needs the drum MIDI) and runs the note gate
+on the requested ones with the unknown-original sparse rule. If every
+requested instrument keeps notes, nothing has to be generated: only these
+stems are transcribed and MIDI-GPT does not run (for example a band of
+keyboard and bass skips the guitar stem). If any requested instrument is empty
+or sparse, the remaining stems are transcribed too (the probe MIDI files are
+reused), so MIDI-GPT always has the whole band as context. Two requested
+guitars may need a generated second guitar, which is known only after the
+guitar TAB; unless `guitar_stereo` already shows two panned guitars, every
+stem is transcribed from the start (`probe: {skipped}`). The manifest records
+`probe: {in_song, all_found}` and `transcribe_stems` for the server's progress.
+A known original (the app's guitar-count redo) skips the probe and
+transcribes the declared stems as before. The app's solo mode adds
+`--personal`, which only checks that one instrument was requested.
 
 Only requested parts absent from the declared original (or detected original
 when unknown) are generated. A generated second guitar keeps the original
