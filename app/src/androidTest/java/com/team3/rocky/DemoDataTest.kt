@@ -50,6 +50,18 @@ class DemoDataTest {
         assertEquals(listOf(2L), WorkStore.load(ctx).map { it.id })
     }
 
+    @Test fun soloPracticeWorkKeepsItsModeAndSongFile() {
+        val solo = Work(7, "夜に駆ける", listOf("guitar"), "2026.11.13 23:00", personal = true, audio = "content://media/song/7")
+        WorkStore.add(ctx, solo)
+        WorkStore.add(ctx, Work(8, "Band song", listOf("drums", "bass"), "2026.11.13 23:01"))
+        val loaded = WorkStore.load(ctx).associateBy { it.id }
+        assertTrue(loaded.getValue(7).personal)
+        assertEquals("content://media/song/7", loaded.getValue(7).audio)
+        assertEquals("夜に駆ける", loaded.getValue(7).title)
+        assertFalse(loaded.getValue(8).personal)
+        assertEquals(null, loaded.getValue(8).audio)
+    }
+
     @Test fun fileNamesAreMadeSafe() {
         assertEquals("a b c", safeFileName("a/b:c"))
         assertEquals("ROCKY", safeFileName("  "))

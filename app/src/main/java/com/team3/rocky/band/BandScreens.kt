@@ -497,7 +497,8 @@ fun PickScoreScreen(user: User, repo: BandRepository, bandId: Long, onBack: () -
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val works = remember { WorkStore.load(ctx) }
+    // 개인 연습용 악보는 밴드에 공유하지 않는다.
+    val works = remember { WorkStore.load(ctx).filter { !it.personal } }
 
     Page(tr("악보 공유", "Share a score"), onBack) {
         Text(tr("보관함에서 악보를\n골라주세요", "Pick a score\nfrom your library"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)

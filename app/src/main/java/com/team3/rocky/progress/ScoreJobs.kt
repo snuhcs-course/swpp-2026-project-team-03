@@ -45,6 +45,8 @@ class ScoreJob(
     val lineup: List<String>,
     original: List<String>,
     val audio: AudioFile,
+    /** 개인 연습용 (내가 연주할 악기만). false면 밴드 합주용. */
+    val personal: Boolean = false,
 ) {
     var progress by mutableStateOf<JobProgress?>(null)
         internal set
@@ -100,6 +102,8 @@ class ScoreJob(
         date = SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.KOREA).format(Date(id)),
         original = original,
         unrecognized = unrecognized,
+        personal = personal,
+        audio = audio.uri.toString(),
     )
 }
 
@@ -126,8 +130,9 @@ object ScoreJobs {
 
     fun start(
         ctx: Context, title: String, lineup: List<String>, original: List<String>, audio: AudioFile,
+        personal: Boolean = false,
     ): ScoreJob {
-        val job = ScoreJob(System.currentTimeMillis(), title, lineup, original, audio)
+        val job = ScoreJob(System.currentTimeMillis(), title, lineup, original, audio, personal)
         jobs.add(0, job)
         launch(ctx.applicationContext, job)
         return job

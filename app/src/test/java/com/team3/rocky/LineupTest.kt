@@ -2,6 +2,7 @@
 package com.team3.rocky
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LineupTest {
@@ -52,5 +53,13 @@ class LineupTest {
 
     @Test fun redoIgnoresNamesTheAppDoesNotKnow() {
         assertEquals(listOf("guitar"), Demo.redoOriginal(listOf("vocals", "other"), 1))
+    }
+
+    // ----- 개인 연습용 기타 안내 -----
+
+    @Test fun soloGuitarNoteDependsOnTheCount() {
+        assertEquals(null, Demo.personalGuitarNote(0))
+        assertTrue(Demo.personalGuitarNote(1)!!.contains("두 기타가 한 악보로 합쳐져"))
+        assertTrue(Demo.personalGuitarNote(2)!!.contains("AI가 새로 만들어요"))
     }
 }

@@ -170,6 +170,8 @@ fun RockyApp() {
     var lineup by remember { mutableStateOf(setOf<String>()) }
     // '기타 대수 바꿔서 다시 만들기' 중이면 그 정보. 보통 새 악보는 null (원곡 악기는 모델이 판단).
     var redo by remember { mutableStateOf<GuitarRedo?>(null) }
+    // 개인 연습용(내가 연주할 악기만)인지, 밴드 합주용인지.
+    var personal by remember { mutableStateOf(false) }
     // 프로필 사진을 바꾸면 숫자를 올려서 다시 읽게 한다.
     var photoVersion by remember { mutableIntStateOf(0) }
     val appScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -183,9 +185,13 @@ fun RockyApp() {
         while (stack.size > 1) stack.removeAt(0)
     }
     fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main) }
-    fun newScore(preset: Set<String>) { redo = null; lineup = preset; go(Screen.Lineup) }
-    // 기타 대수를 고른 뒤: 우리 밴드 구성(지난번 그대로 채워 둠)과 곡 올리기를 거쳐 처음부터 다시 만든다.
-    fun redoGuitars(work: Work, plan: GuitarRedo) { redo = plan; lineup = work.instruments.toSet(); go(Screen.Lineup) }
+    fun newScore(preset: Set<String>, personalMode: Boolean = false) {
+        redo = null; personal = personalMode; lineup = preset; go(Screen.Lineup)
+    }
+    // 기타 대수를 고른 뒤: 악기 고르기(지난번 그대로 채워 둠)와 곡 올리기를 거쳐 처음부터 다시 만든다.
+    fun redoGuitars(work: Work, plan: GuitarRedo) {
+        redo = plan; personal = work.personal; lineup = work.instruments.toSet(); go(Screen.Lineup)
+    }
     // 안드로이드 13 이상: 앱을 안 보는 동안 멈추면 알림으로 알리려면 허용이 필요하다. 악보를 만들기 시작할 때 묻는다.
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun openTab(t: Tab) { tab = t; restart(Screen.Main) }
@@ -263,7 +269,7 @@ fun RockyApp() {
                     TextButton(onClick = {
                         val j = stoppedJob; ScoreJobs.stopped = null
                         // 같은 우리 밴드 구성으로 채워 두고 1단계부터. 거절된 곡이면 다른 곡을 고르면 된다.
-                        newScore(j.lineup.toSet())
+                        newScore(j.lineup.toSet(), j.personal)
                     }) { Text(tr("새로 만들기", "New score")) }
                 }
             },
@@ -298,7 +304,8 @@ fun RockyApp() {
                     onTab = { tab = it },
                     onAccount = { go(Screen.Account) },
                     // 회원 정보에 적은 악기를 새 악보의 기본 구성으로 쓴다.
-                    onNew = { newScore(Demo.lineupOf(u.instruments)) },
+                    onPersonal = { newScore(Demo.lineupOf(u.instruments), personalMode = true) },
+                    onBand = { newScore(Demo.lineupOf(u.instruments), personalMode = false) },
                     onOpenJob = { job -> go(Screen.Result(job.toWork(), jobId = job.id)) },
                     onOpenWork = { go(Screen.Result(it)) },
                     onOpenBand = { go(Screen.BandDetail(it)) },
@@ -312,7 +319,15 @@ fun RockyApp() {
                     "원곡에 기타가 없으면 기타는 1대까지만 만들 수 있어요. 기타 2를 빼 주세요.",
                     "With no guitar in the song, only one guitar part can be made. Remove Guitar 2.",
                 ) else null
-                BandStageScreen(
+                if (personal) PersonalPickScreen(
+                    picked = lineup,
+                    onToggle = { lineup = Demo.toggleLineup(lineup, it) },
+                    onGuitars = { lineup = Demo.setGuitarCount(lineup, it) },
+                    onBack = { back() },
+                    onNext = { go(Screen.Upload) },
+                    notice = plan?.let { guitarRedoNotice(it) },
+                    blocked = blocked,
+                ) else BandStageScreen(
                     lineup = lineup,
                     onChange = { lineup = it },
                     onBack = { back() },
@@ -327,7 +342,7 @@ fun RockyApp() {
                 onStart = { title, audio ->
                     // 원곡 악기는 묻지 않는다: 보통은 비워서 보내고(모델이 판단),
                     // 기타 대수를 바꿔 다시 만들 때만 모델이 찾은 악기 + 고른 기타 대수를 보낸다.
-                    ScoreJobs.start(ctx, title, Demo.ordered(lineup), redo?.original.orEmpty(), audio = audio)
+                    ScoreJobs.start(ctx, title, Demo.ordered(lineup), redo?.original.orEmpty(), audio = audio, personal = personal)
                     redo = null
                     if (JobNotifier.needsPermission(ctx)) askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     openTab(Tab.PROGRESS)
@@ -357,7 +372,7 @@ fun RockyApp() {
                     onOpenScore = { score, part -> openShared(score, part) },
                     onShareScore = { go(Screen.PickScore(s.bandId)) },
                     // 밴드 멤버들이 맡은 파트를 새 악보의 기본 구성으로 쓴다.
-                    onNewScore = { parts -> newScore(Demo.lineupOf(parts)) },
+                    onNewScore = { parts -> newScore(Demo.lineupOf(parts), personalMode = false) },
                     onLeft = { back() },
                 )
             }
@@ -507,7 +522,8 @@ fun MainTabs(
     photoVersion: Int,
     onTab: (Tab) -> Unit,
     onAccount: () -> Unit,
-    onNew: () -> Unit,
+    onPersonal: () -> Unit,
+    onBand: () -> Unit,
     onOpenJob: (ScoreJob) -> Unit,
     onOpenWork: (Work) -> Unit,
     onOpenBand: (Long) -> Unit,
@@ -542,8 +558,8 @@ fun MainTabs(
     ) { pad ->
         val inner = Modifier.padding(pad).consumeWindowInsets(pad)
         when (tab) {
-            Tab.NEW -> HomeTab(user, photoVersion, inner, onAccount, onNew)
-            Tab.PROGRESS -> ProgressTab(inner, onOpenJob, onNew)
+            Tab.NEW -> HomeTab(user, photoVersion, inner, onAccount, onPersonal, onBand)
+            Tab.PROGRESS -> ProgressTab(inner, onOpenJob, onNew = { onTab(Tab.NEW) })
             Tab.STORAGE -> StorageTab(inner, onOpenWork)
             Tab.BANDS -> BandListScreen(user, bands, onBack = null, onOpen = onOpenBand, onAdd = onAddBand, modifier = inner)
         }
@@ -594,7 +610,8 @@ fun HomeTab(
     photoVersion: Int,
     modifier: Modifier,
     onAccount: () -> Unit,
-    onNew: () -> Unit,
+    onPersonal: () -> Unit,
+    onBand: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -623,7 +640,18 @@ fun HomeTab(
             fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp,
         )
         Spacer(Modifier.height(24.dp))
-        NewScoreButton(onNew)
+        // 새 악보는 두 가지: 혼자 연습할 내 악기만 / 밴드 전원의 파트.
+        ModeButton(
+            title = tr("개인 연습용", "Solo practice"),
+            sub = tr("내가 연주할 악기의 악보만 받아요", "Scores just for the instruments you play"),
+            primary = true, icon = { c -> PersonIcon(c) }, onClick = onPersonal,
+        )
+        Spacer(Modifier.height(12.dp))
+        ModeButton(
+            title = tr("밴드 합주용", "Band rehearsal"),
+            sub = tr("우리 밴드 파트별 악보를 받아요", "A score for every part in your band"),
+            primary = false, icon = { c -> BandIcon(c) }, onClick = onBand,
+        )
 
         // 처음 쓰는 사람을 위한 순서 안내. 평소에는 접어 두고 눌러서 편다.
         Spacer(Modifier.height(16.dp))
@@ -639,12 +667,12 @@ fun HomeTab(
             }
             if (howOpen) {
                 Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 8.dp)) {
-                    HowStep("1", tr("우리 밴드 악기 고르기", "Pick your band's instruments"),
-                        tr("우리 밴드에 있는 악기를 골라요", "Choose the instruments your band plays"))
+                    HowStep("1", tr("연습 방식과 악기 고르기", "Pick a mode and instruments"),
+                        tr("혼자면 내 악기, 합주면 우리 밴드 악기를 골라요", "Your instruments, or your band's"))
                     HowStep("2", tr("곡 올리기", "Upload a song"),
                         tr("MP3나 WAV 파일을 올려요", "Upload an MP3 or WAV file"))
                     HowStep("3", tr("나만의 악보 받기", "Get your own scores"),
-                        tr("우리 밴드 파트별 악보가 나와요", "Get a score for each part in your band"), last = true)
+                        tr("고른 악기마다 악보가 나와요", "A score for each instrument you picked"), last = true)
                     TextButton(onClick = { guide = true }) {
                         Text(tr("처음 안내 다시 보기", "See the intro again"), fontSize = 13.sp, color = cs.primary)
                     }
@@ -655,33 +683,62 @@ fun HomeTab(
     }
 }
 
-/** 홈의 큰 '새 악보 만들기' 버튼. */
+/** 홈의 큰 새 악보 버튼 (개인 연습용 / 밴드 합주용). [primary]면 주황 바탕. */
 @Composable
-private fun NewScoreButton(onClick: () -> Unit) {
+private fun ModeButton(title: String, sub: String, primary: Boolean, icon: @Composable (Color) -> Unit, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(24.dp)
+    val bg = if (primary) cs.primary else cs.surface
+    val fg = if (primary) cs.onPrimary else cs.onSurface
     Column(
-        Modifier.fillMaxWidth().heightIn(min = 168.dp)
-            .card(shape, cs, bg = cs.primary, line = cs.primary)
+        Modifier.fillMaxWidth().heightIn(min = 140.dp)
+            .card(shape, cs, bg = bg, line = if (primary) cs.primary else cs.outlineVariant)
             .clickable(onClick = onClick)
-            .semantics { contentDescription = tr("새 악보 만들기", "Make a new score") }
+            .semantics { contentDescription = title }
             .padding(22.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Box(
-                Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.onPrimary.copy(alpha = 0.14f)),
+                Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (primary) fg.copy(alpha = 0.14f) else cs.primary.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,
-            ) { Text("＋", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = cs.onPrimary) }
+            ) { icon(if (primary) fg else cs.primary) }
             Spacer(Modifier.weight(1f))
-            Text("→", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = cs.onPrimary)
+            Text("→", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = if (primary) fg else cs.primary)
         }
-        Spacer(Modifier.height(18.dp))
-        Text(tr("새 악보 만들기", "Make a new score"), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold,
-            color = cs.onPrimary, letterSpacing = (-0.4).sp)
-        Spacer(Modifier.height(4.dp))
-        Text(tr("곡을 올리면 우리 밴드 파트별 악보가 나와요", "Upload a song, get a score for every part"),
-            fontSize = 14.sp, color = cs.onPrimary.copy(alpha = 0.8f), lineHeight = 19.sp)
+        Spacer(Modifier.height(14.dp))
+        Text(title, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = fg, letterSpacing = (-0.4).sp)
+        Spacer(Modifier.height(3.dp))
+        Text(sub, fontSize = 14.sp, color = fg.copy(alpha = 0.78f), lineHeight = 19.sp)
+    }
+}
+
+/** 한 사람 (개인 연습용). */
+@Composable
+private fun PersonIcon(color: Color) {
+    Canvas(Modifier.size(26.dp)) {
+        val u = size.minDimension / 24f
+        val s = Stroke(width = 2f * u, cap = StrokeCap.Round)
+        drawCircle(color, 4f * u, Offset(12 * u, 8 * u), style = s)
+        drawArc(color, 180f, 180f, false, Offset(4.5f * u, 14 * u), Size(15 * u, 13 * u), style = s)
+        // 헤드폰
+        drawArc(color, 200f, 140f, false, Offset(6 * u, 2.2f * u), Size(12 * u, 12 * u), style = Stroke(1.6f * u, cap = StrokeCap.Round))
+    }
+}
+
+/** 여러 사람 (밴드 합주용). */
+@Composable
+private fun BandIcon(color: Color) {
+    Canvas(Modifier.size(26.dp)) {
+        val u = size.minDimension / 24f
+        val s = Stroke(width = 1.9f * u, cap = StrokeCap.Round)
+        drawCircle(color, 3.2f * u, Offset(12 * u, 7.5f * u), style = s)
+        drawArc(color, 180f, 180f, false, Offset(6 * u, 13 * u), Size(12 * u, 11 * u), style = s)
+        drawCircle(color, 2.5f * u, Offset(4.8f * u, 10 * u), style = s)
+        drawArc(color, 200f, 120f, false, Offset(0.8f * u, 15 * u), Size(8 * u, 8 * u), style = s)
+        drawCircle(color, 2.5f * u, Offset(19.2f * u, 10 * u), style = s)
+        drawArc(color, 220f, 120f, false, Offset(15.2f * u, 15 * u), Size(8 * u, 8 * u), style = s)
     }
 }
 
@@ -749,6 +806,9 @@ fun retryCountdown(job: ScoreJob): Int {
     return ((job.retryAt - now + 999) / 1000).coerceAtLeast(0).toInt()
 }
 
+/** 개인 연습용 / 밴드 합주용 이름 (카드·보관함 줄에 붙인다). */
+fun modeLabel(personal: Boolean) = if (personal) tr("개인 연습", "Solo") else tr("밴드 합주", "Band")
+
 /** 기타 대수를 바꿔 다시 만들 때 1·2단계 위에 보여줄 안내. */
 fun guitarRedoNotice(plan: GuitarRedo): String {
     val n = when (plan.guitars) { 0 -> tr("없음", "none"); 1 -> tr("1대", "1"); else -> tr("2대", "2") }
@@ -792,7 +852,7 @@ fun WorkRow(w: Work, onClick: () -> Unit, trailing: @Composable RowScope.() -> U
         Column(Modifier.weight(1f)) {
             Text(w.title, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
-            Text(Demo.labels(w.instruments), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1)
+            Text(modeLabel(w.personal) + " · " + Demo.labels(w.instruments), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1)
             Text(w.date, fontSize = 12.sp, color = cs.onSurfaceVariant)
         }
         trailing()
@@ -814,7 +874,7 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
             )
             Spacer(Modifier.height(20.dp))
             OutlinedButton(shape = ButtonShape, onClick = onNew, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text(tr("새 악보 만들기", "Make a new score"))
+                Text(tr("홈에서 새 악보 만들기", "Make a new score from Home"))
             }
         } else {
             InfoNote(tr("ROCKY는 백그라운드에서 돌아가요. 다른 앱을 써도 계속 만들고, 다 되거나 실패하면 알려 드려요.",
@@ -867,7 +927,7 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
                 "${(shown * 100).toInt()}%", fontSize = 22.sp, fontWeight = FontWeight.Black, color = cs.primary,
             )
         }
-        Text(Demo.labels(job.lineup), fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1)
+        Text(modeLabel(job.personal) + " · " + Demo.labels(job.lineup), fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(10.dp))
         Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(cs.surfaceVariant)) {
             Box(Modifier.fillMaxWidth(shown).height(8.dp).background(if (job.failed) cs.error else cs.primary))

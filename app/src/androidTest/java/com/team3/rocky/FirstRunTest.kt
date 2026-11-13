@@ -38,7 +38,7 @@ class FirstRunTest {
         assertTrue(FirstRun.termsAgreed(ctx))
 
         // 안내 슬라이드: 다음으로 넘기고, 다시 보지 않기를 골라 닫는다.
-        rule.waitUntil(5_000) { rule.onAllNodes(hasText("우리 밴드 악기를 골라요")).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("연습 방식과 악기를 골라요")).fetchSemanticsNodes().isNotEmpty() }
         assertFalse(FirstRun.guideOff(ctx))
         rule.onNodeWithText("다음").performClick()
         rule.waitUntil(5_000) { rule.onAllNodes(hasText("곡을 올려요")).fetchSemanticsNodes().isNotEmpty() }

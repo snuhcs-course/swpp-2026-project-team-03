@@ -184,20 +184,20 @@ private class GuideSlide(val title: String, val body: String, val art: DrawScope
 
 private fun guideSlides() = listOf(
     GuideSlide(
-        tr("우리 밴드 악기를 골라요", "Pick your band's instruments"),
-        tr("무대에서 우리 밴드에 있는 악기를 눌러요.\n기타는 2대까지 고를 수 있어요.", "Tap the instruments your band has on the stage.\nUp to two guitars."),
+        tr("연습 방식과 악기를 골라요", "Pick how you practice"),
+        tr("혼자 연습할 땐 '개인 연습용'으로 내 악기만,\n합주할 땐 '밴드 합주용'으로 우리 밴드 악기를 골라요.", "Solo practice: just your instruments.\nBand rehearsal: every instrument in your band."),
     ) { fg, soft -> artBand(fg, soft) },
     GuideSlide(
         tr("곡을 올려요", "Upload the song"),
         tr("MP3나 WAV 파일을 고르면 끝이에요.\n원곡에 어떤 악기가 있는지는 ROCKY가 들어 보고 알아서 판단해요.", "Pick an MP3 or WAV file and you're done.\nROCKY listens and works out the song's instruments."),
     ) { fg, soft -> artUpload(fg, soft) },
     GuideSlide(
-        tr("백그라운드에서 만들어요", "We make it in the background"),
+        tr("ROCKY가 당신을 위한 악보를 만들어요", "ROCKY makes scores just for you"),
         tr("다른 앱을 써도 ROCKY가 계속 만들어요.\n다 되거나 문제가 생기면 알림으로 알려 드려요.", "Use other apps while ROCKY works.\nWe'll notify you when it's done or if something goes wrong."),
     ) { fg, soft -> artBackground(fg, soft) },
     GuideSlide(
-        tr("우리 밴드 악보를 받아요", "Get your band's scores"),
-        tr("원곡에 있는 파트는 그대로 옮기고, 없는 파트는 AI가 새로 만들어요(✨).\n밴드에 공유하면 멤버와 함께 볼 수 있어요.", "Parts in the song are transcribed; missing parts are made with AI (✨).\nShare with your band to view together."),
+        tr("악보를 받아요", "Get your scores"),
+        tr("원곡에 있는 파트는 그대로 옮기고, 없는 파트는 AI가 새로 만들어요(✨).\n밴드 합주용 악보는 밴드에 공유해 멤버와 함께 볼 수 있어요.", "Parts in the song are transcribed; missing parts are made with AI (✨).\nShare band scores with your band to view together."),
     ) { fg, soft -> artScores(fg, soft) },
 )
 

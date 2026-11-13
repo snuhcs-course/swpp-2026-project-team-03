@@ -171,8 +171,32 @@ fun ResultScreen(
     var follow by remember { mutableStateOf(true) }
     DisposableEffect(Unit) { onDispose { player.release() } }
 
+    // 개인 연습용의 '전체'는 올린 원곡 파일을 그대로 들려준다 (이 폰에 파일이 있고, 키를 바꾸지 않았을 때).
+    // 원곡을 열 수 없으면 악보로 합성한 소리로 대신한다.
+    var originalPlaying by remember { mutableStateOf(false) }
+    fun originalSong(base: String): android.net.Uri? =
+        work.audio?.takeIf { work.personal && base == Demo.BAND && (local?.semitones ?: 0) == 0 }?.let { android.net.Uri.parse(it) }
+
     /** 선택한 파트의 음원을 준비한다. 위치는 그대로 이어서 재생할 수 있게 [startAt]으로 옮긴다. */
     fun load(base: String, startAt: Int): Boolean {
+        val song = originalSong(base)
+        if (song != null) {
+            val ok = runCatching {
+                player.reset()
+                player.setDataSource(ctx, song)
+                player.prepare()
+            }.isSuccess
+            if (ok) {
+                originalPlaying = true
+                player.setOnCompletionListener { playing = false; position = 0; player.seekTo(0) }
+                duration = player.duration
+                player.seekTo(startAt.coerceIn(0, duration))
+                position = startAt.coerceIn(0, duration)
+                loadedBase = base
+                return true
+            }
+        }
+        originalPlaying = false
         // 서버 결과는 악보로 합성한 MP3(없으면 MIDI)를 들려준다.
         val path = local?.audio(serverPart(base))?.absolutePath
         if (path == null) {
@@ -320,7 +344,7 @@ fun ResultScreen(
 
     val playerBar: @Composable (Boolean) -> Unit = { flat ->
         val who = selectedPart?.let { tr("${Demo.label(it, work.instruments)}만", "${Demo.label(it, work.instruments)} only") }
-            ?: tr("밴드 전체", "Full band")
+            ?: if (originalPlaying || (loadedBase == null && originalSong(Demo.BAND) != null)) tr("원곡", "Original song") else tr("밴드 전체", "Full band")
         // 몇 번째 마디인지 (MIDI로 셀 수 있을 때)
         val bar = clock?.let { c -> tr(" · ${(currentMeasure ?: 0) + 1}/${c.count}마디", " · bar ${(currentMeasure ?: 0) + 1}/${c.count}") }.orEmpty()
         val listening = who + bar
@@ -455,7 +479,8 @@ fun ResultScreen(
                     enabled = !saved,
                     onClick = { menuOpen = false; saveToLibrary() },
                 )
-                DropdownMenuItem(
+                // 개인 연습용 악보는 밴드에 공유하지 않는다.
+                if (!work.personal) DropdownMenuItem(
                     text = { Text(tr("밴드에 공유", "Share with a band")) },
                     onClick = { menuOpen = false; onShareToBand() },
                 )
@@ -504,7 +529,7 @@ fun ResultScreen(
                     .padding(start = 12.dp, end = 12.dp, top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                PartChip(null, tr("전체", "All"), selectedPart == null, ai = false) { selectPart(null) }
+                PartChip(null, if (work.personal) tr("전체 · 원곡", "All · original") else tr("전체", "All"), selectedPart == null, ai = false) { selectPart(null) }
                 chipParts.forEach { inst ->
                     val mark = when {
                         inst in warn -> "⚠️ "

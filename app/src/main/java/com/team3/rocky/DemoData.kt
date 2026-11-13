@@ -32,6 +32,22 @@ object Demo {
      * '기타 대수 바꿔서 다시 만들기'의 원곡 구성: 모델이 찾은 원곡 악기 중 기타 아닌 것 + 사용자가 고른 기타 대수.
      * 앱 이름(guitar2 = 두 번째 기타)으로, 서버가 unified.py --original 형식으로 바꾼다.
      */
+    /**
+     * 개인 연습용에서 기타 대수를 골랐을 때 아래에 보여줄 안내. 원곡 기타 대수와 같게 고르면 가장 치기 좋다.
+     * 기타를 안 골랐으면 null.
+     */
+    fun personalGuitarNote(guitars: Int): String? = when (guitars) {
+        1 -> tr(
+            "원곡에 기타가 두 대라면 두 기타가 한 악보로 합쳐져서, 혼자 치기엔 조금 어려울 수 있어요.",
+            "If the song has two guitars, both are merged into one score, which can be a bit hard to play alone.",
+        )
+        2 -> tr(
+            "원곡에 기타가 한 대라면 두 번째 기타 악보는 AI가 새로 만들어요(✨).",
+            "If the song has one guitar, the second guitar score is made with AI (✨).",
+        )
+        else -> null
+    }
+
     fun redoOriginal(found: List<String>, guitars: Int): List<String> {
         val others = found.filter { it in NON_GUITAR }
         val g = when (guitars) { 0 -> emptyList(); 1 -> listOf("guitar"); else -> listOf("guitar", GUITAR2) }
@@ -155,6 +171,10 @@ data class Work(
     val original: List<String> = emptyList(),
     /** 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트 (⚠️) */
     val unrecognized: List<String> = emptyList(),
+    /** 개인 연습용 (내가 연주할 악기만). false면 밴드 합주용. 개인용은 밴드에 공유하지 않는다. */
+    val personal: Boolean = false,
+    /** 올린 곡 파일 (content:// 주소). 개인 연습용의 '전체'는 이 원곡을 들려준다. 이 폰에서만 열린다. */
+    val audio: String? = null,
 ) {
     val aiGenerated: Set<String> get() = Demo.aiGenerated(instruments, original) - unrecognized.toSet()
 }
@@ -177,6 +197,8 @@ object WorkStore {
                 date = p[3],
                 original = p.getOrNull(4).orEmpty().split(",").filter { it.isNotBlank() },
                 unrecognized = p.getOrNull(5).orEmpty().split(",").filter { it.isNotBlank() },
+                personal = p.getOrNull(6) == "1",
+                audio = p.getOrNull(7)?.takeIf { it.isNotBlank() },
             )
         }
     }
@@ -192,7 +214,7 @@ object WorkStore {
         val raw = list.joinToString("\n") {
             val title = it.title.replace("\t", " ").replace("\n", " ")
             "${it.id}\t$title\t${it.instruments.joinToString(",")}\t${it.date}\t${it.original.joinToString(",")}" +
-                "\t${it.unrecognized.joinToString(",")}"
+                "\t${it.unrecognized.joinToString(",")}\t${if (it.personal) "1" else "0"}\t${it.audio.orEmpty()}"
         }
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(key(ctx), raw).apply()
     }
