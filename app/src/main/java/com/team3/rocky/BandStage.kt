@@ -86,6 +86,10 @@ fun BandStageScreen(
     onChange: (Set<String>) -> Unit,
     onBack: () -> Unit,
     onNext: () -> Unit,
+    /** 제목 위에 보여줄 안내 (기타 대수 바꿔서 다시 만들 때). */
+    notice: String? = null,
+    /** 이 구성으로는 만들 수 없는 이유. 있으면 '다음'을 막고 아래에 보여준다. */
+    blocked: String? = null,
 ) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -106,7 +110,7 @@ fun BandStageScreen(
     val picked = SUMMARY_ORDER.filter { it in lineup }
     val names = picked.map { spotLabel(it) }
 
-    Page(tr("1 / 3단계", "Step 1 of 3"), onBack, actions = { StepBars(1) }, bottom = {
+    Page(tr("1 / 2단계", "Step 1 of 2"), onBack, actions = { StepBars(1) }, bottom = {
         Column {
             // 고른 악기 요약
             Row(
@@ -128,14 +132,22 @@ fun BandStageScreen(
                 Text("${names.size}", fontSize = 22.sp, fontWeight = FontWeight.Black)
                 Text(tr("개", ""), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.onSurfaceVariant)
             }
+            if (blocked != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(blocked, fontSize = 13.sp, color = cs.error, lineHeight = 18.sp)
+            }
             Spacer(Modifier.height(12.dp))
             Button(shape = ButtonShape,
-                onClick = onNext, enabled = lineup.isNotEmpty(),
+                onClick = onNext, enabled = lineup.isNotEmpty() && blocked == null,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
             ) { Text(tr("다음", "Next"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
         }
     }) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            if (notice != null) {
+                InfoNote(notice, strong = true)
+                Spacer(Modifier.height(14.dp))
+            }
             Text(tr("우리 밴드에\n어떤 악기가 있나요?", "What instruments\nare in your band?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
@@ -281,7 +293,7 @@ private fun InstrumentSpot(spot: StageSpot, state: SpotState, onClick: () -> Uni
 
 /** 오른쪽 위 단계 막대. [current]번째까지 주황. */
 @Composable
-fun StepBars(current: Int, total: Int = 3) {
+fun StepBars(current: Int, total: Int = 2) {
     val cs = MaterialTheme.colorScheme
     Row(Modifier.padding(end = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         repeat(total) { i ->

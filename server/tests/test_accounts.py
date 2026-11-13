@@ -145,6 +145,18 @@ def test_outsiders_cannot_read_or_share(client):
     assert client.post("/bands", json={"name": "x", "instrument": "kazoo"}, headers=auth(a)).status_code == 422
 
 
+def test_a_band_has_at_most_eight_members(client):
+    owner = sign_up(client, "owner@snu.ac.kr", "방장")
+    band = client.post("/bands", json={"name": "꽉 찬 밴드", "instrument": "guitar"}, headers=auth(owner)).json()
+    for i in range(7):
+        s = sign_up(client, f"m{i}@snu.ac.kr", f"멤버{i}")
+        r = client.post("/bands/join", json={"code": band["invite_code"], "instrument": "drums"}, headers=auth(s))
+        assert r.status_code == 200
+    ninth = sign_up(client, "late@snu.ac.kr", "늦은멤버")
+    r = client.post("/bands/join", json={"code": band["invite_code"], "instrument": "bass"}, headers=auth(ninth))
+    assert r.status_code == 409 and "최대 8명" in r.json()["detail"]
+
+
 def test_there_is_no_demo_band(client):
     # the demo band (and its demo song that lived only inside the app) was removed on 2026-11-11
     a = sign_up(client)

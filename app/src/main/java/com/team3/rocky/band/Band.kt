@@ -61,6 +61,10 @@ sealed class BandResult {
 object BandRules {
     const val NAME_MAX = 20
     const val CODE_LENGTH = 6
+    /** 한 밴드의 최대 인원 (방장 포함). 서버 accounts.MEMBERS_MAX와 같다. */
+    const val MEMBERS_MAX = 8
+
+    fun fullMessage() = tr("이 밴드는 인원이 가득 찼어요 (최대 ${MEMBERS_MAX}명)", "This band is full (up to $MEMBERS_MAX members)")
 
     // 헷갈리기 쉬운 0/O, 1/I/L은 뺀다.
     const val CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"

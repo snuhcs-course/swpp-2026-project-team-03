@@ -98,4 +98,14 @@ class LocalBandRepositoryTest {
         repo.leave(friend, band.id)
         assertNull(repo.detail(band.id))
     }
+
+    @Test fun aBandHasAtMostEightMembers() = runBlocking {
+        val band = (repo.create(me, "꽉 찬 밴드", "bass") as BandResult.Success).band
+        (2L..8L).forEach { id ->
+            assertTrue(repo.join(user(100 + id, "멤버$id", "drums"), band.inviteCode, "drums") is BandResult.Success)
+        }
+        val ninth = repo.join(user(200, "늦은멤버", "piano"), band.inviteCode, "piano")
+        assertTrue(ninth is BandResult.Failure)
+        assertTrue((ninth as BandResult.Failure).message.contains("최대 ${BandRules.MEMBERS_MAX}명"))
+    }
 }

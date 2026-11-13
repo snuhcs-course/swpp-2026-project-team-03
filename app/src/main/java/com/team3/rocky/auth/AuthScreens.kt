@@ -624,29 +624,20 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-// 시연용 요약문. 정식 약관은 서비스 공개 전에 따로 작성해야 한다.
-private fun terms() = if (AppSettings.lang == Lang.EN) "Terms of service" to """
-    1. ROCKY turns songs you upload into band scores (piano, drums, bass, guitar) and uses AI to write parts the song doesn't have.
-    2. Upload only songs you have the right to use. Scores are for personal practice and non-commercial use.
-    3. AI-made scores may differ from the original song, and ROCKY does not guarantee their accuracy.
-    4. Using someone else's account or disrupting the service is not allowed.
-""".trimIndent() else "서비스 이용약관" to """
-    1. ROCKY는 사용자가 올린 음원을 밴드 악보(피아노·드럼·베이스·기타)로 바꾸고, 원곡에 없는 악기 파트를 AI로 만들어 줍니다.
-    2. 사용자는 본인이 이용 권리를 가진 음원만 올려야 하며, 만든 악보는 개인 연습과 비상업적 목적으로만 쓸 수 있습니다.
-    3. AI가 만든 채보·편곡 결과는 원곡과 다를 수 있으며, ROCKY는 결과의 정확성을 보증하지 않습니다.
-    4. 다른 사람의 계정을 쓰거나 서비스를 방해하는 행위는 금지됩니다.
-""".trimIndent()
+// 처음 켤 때 동의한 이용 약관과 같은 내용 (Onboarding.kt termsItems). 정식 약관은 서비스 공개 전에 따로 작성해야 한다.
+private fun terms() = tr("서비스 이용약관", "Terms of service") to
+    com.team3.rocky.termsItems().joinToString("\n\n") { "${it.title}\n${it.body}" }
 
 private fun privacy() = if (AppSettings.lang == Lang.EN) "Privacy policy" to """
     • What we collect: email, password (stored encrypted so it can't be recovered), nickname, instrument (optional), profile photo (optional), time of agreement
     • Why: to identify you and log you in, keep your score library, and preset new scores
     • How long: until you delete your account
-    • This version keeps your account only on this phone and sends it nowhere else.
+    • Your account is stored on the ROCKY server so you can log in on any phone and share scores with your band.
     • You may refuse, but then you can't sign up.
 """.trimIndent() else "개인정보 수집·이용" to """
     • 수집 항목: 이메일, 비밀번호(복원할 수 없는 형태로 암호화해 저장), 닉네임, 연주하는 파트(선택), 프로필 사진(선택), 약관 동의 시각
     • 이용 목적: 회원 식별과 로그인, 악보 보관함 제공, 악보 만들기 기본 설정
     • 보관 기간: 회원 탈퇴 시까지
-    • 현재 버전은 회원 정보를 이 기기 안에만 저장하며 외부로 보내지 않습니다.
+    • 회원 정보는 ROCKY 서버에 저장되어, 다른 휴대폰에서 로그인하고 밴드와 악보를 공유하는 데 쓰입니다.
     • 동의를 거부할 수 있으나, 거부하면 가입할 수 없습니다.
 """.trimIndent()

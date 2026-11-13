@@ -12,10 +12,25 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * 서버에서 작업이 실패했을 때. message는 서버가 알려준 실패 이유.
- * reason이 있으면 서버 오류가 아니라 입력 거부(밴드 곡이 아님 등)이고, message는 사용자용 안내다.
+ * 서버에서 작업이 실패했을 때. message는 서버의 개발자용 실패 이유 (사용자에게 보여주지 않는다).
+ * reason이 있으면 서버 오류가 아니라 입력 거부(밴드 곡이 아님 등)다.
+ * 나머지는 #25의 실패 정보: 종류, 사용자용 안내, 같은 곡으로 다시 시도할 수 있는지, 기다릴 시간, 어디부터 다시 하는지.
  */
-class JobFailedException(message: String, val reason: String? = null) : Exception(message)
+class JobFailedException(
+    message: String,
+    val reason: String? = null,
+    val errorCode: String? = null,
+    val userMessage: String? = null,
+    val retryable: Boolean? = null,
+    val retryAfterSec: Int? = null,
+    val retryFrom: String? = null,
+) : Exception(message) {
+    companion object {
+        fun of(s: JobStatus) = JobFailedException(
+            s.error ?: "알 수 없는 오류", s.reason, s.errorCode, s.message, s.retryable, s.retryAfterSec, s.retryFrom,
+        )
+    }
+}
 class JobCancelledException : Exception()
 
 /**
@@ -48,7 +63,7 @@ class ServerProgress(
             if (status != null) {
                 onStatus(status)
                 if (status.isCancelled) throw JobCancelledException()
-                if (status.isFailed) throw JobFailedException(status.error ?: "알 수 없는 오류", status.reason)
+                if (status.isFailed) throw JobFailedException.of(status)
                 emit(status.toProgress())
                 if (status.isDone) return@flow
             }

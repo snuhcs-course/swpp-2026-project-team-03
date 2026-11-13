@@ -71,6 +71,7 @@ class LocalBandRepository(
         val band = db.findBandByCode(BandRules.normalizeCode(code))
             ?: return@io BandResult.Failure(tr("이 초대 코드로 된 밴드가 없어요", "No band has this invite code"))
         if (db.isMember(band.id, user.id)) return@io BandResult.Failure(tr("이미 참여 중인 밴드예요", "You're already in this band"))
+        if (db.members(band.id, band.ownerId).size >= BandRules.MEMBERS_MAX) return@io BandResult.Failure(BandRules.fullMessage())
         db.insertMember(band.id, user.id, user.nickname, instrument, clock())
         BandResult.Success(band)
     }

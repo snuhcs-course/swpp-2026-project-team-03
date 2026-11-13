@@ -37,6 +37,11 @@ interface ScoreServer {
         throw UnsupportedOperationException("key change is unavailable")
     fun downloadTransposed(jobId: String, semitones: Int, path: String, dest: File): Unit =
         throw UnsupportedOperationException("key change is unavailable")
+    /**
+     * 실패한 곡을 같은 작업 번호로 다시 돌린다 (POST /jobs/{id}/retry). 음원을 다시 올리지 않는다.
+     * 409: 다시 시도할 수 없는 실패, 410: 서버에 올린 음원이 없어서 처음부터 다시 올려야 함 (ApiException).
+     */
+    fun retry(jobId: String): Unit = throw UnsupportedOperationException("retry is unavailable")
     /** 서버에 남은 작업과 결과 파일을 지운다. 이미 없으면 그대로 성공으로 본다. */
     fun delete(jobId: String)
 }
@@ -106,6 +111,10 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
     override fun cancel(jobId: String): String = ApiJson.jobState(open("/jobs/$jobId/cancel", "POST").body())
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
+
+    override fun retry(jobId: String) {
+        open("/jobs/$jobId/retry", "POST").body()
+    }
 
     override fun transpose(jobId: String, semitones: Int): JobResult {
         val path = "/jobs/$jobId/transpositions/$semitones"

@@ -289,7 +289,12 @@ fun BandDetailScreen(
             }
 
             Spacer(Modifier.height(28.dp))
-            SectionTitle(tr("멤버", "Members"), d.members.size)
+            SectionTitle(tr("멤버", "Members"), d.members.size, max = BandRules.MEMBERS_MAX)
+            if (d.members.size >= BandRules.MEMBERS_MAX) {
+                Text(tr("인원이 가득 찼어요. 새 멤버는 참여할 수 없어요.", "The band is full. No one else can join."),
+                    fontSize = 13.sp, color = cs.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+            }
             d.members.forEach { m ->
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -542,12 +547,13 @@ private fun Loading() {
 }
 
 @Composable
-private fun SectionTitle(text: String, count: Int) {
+private fun SectionTitle(text: String, count: Int, max: Int? = null) {
     val cs = MaterialTheme.colorScheme
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(6.dp))
         Text("$count", fontSize = 16.sp, color = cs.primary, fontWeight = FontWeight.Bold)
+        if (max != null) Text(" / $max", fontSize = 15.sp, color = cs.onSurfaceVariant)
     }
     Spacer(Modifier.height(6.dp))
 }

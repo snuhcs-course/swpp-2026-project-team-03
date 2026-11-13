@@ -181,6 +181,9 @@ def result_files(run: Path) -> dict:
         "instruments": parts,
         "original_parts": manifest.get("original_parts", []),
         "generated_parts": manifest.get("generated_targets", []),
+        # how many guitars the pipeline heard in the song (null when it could not tell). The app
+        # shows it next to "regenerate with a different guitar count"
+        "original_guitars": manifest.get("original_guitars_inferred"),
         # parts the user said are in the song but whose stem barely sounds (contract 11);
         # the app warns that these scores may be empty or inaccurate
         "faint_parts": manifest.get("faint_parts", []),

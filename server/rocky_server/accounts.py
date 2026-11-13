@@ -27,6 +27,7 @@ BAND_PARTS = ("piano", "drums", "bass", "guitar", "guitar2", "vocal")
 CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
 CODE_LENGTH = 6
 NAME_MAX = 20
+MEMBERS_MAX = 8  # a band (owner included) has at most this many members
 OLD_DEMO_CODE = "BAND33"  # the removed demo band; see Accounts._remove_old_demo
 ITERATIONS = 120_000
 
@@ -342,6 +343,9 @@ class Accounts:
                 raise AccountError(404, "이 초대 코드로 된 밴드가 없어요", "code")
             if self._one("SELECT 1 FROM band_members WHERE band_id = ? AND user_id = ?", band["id"], user.id):
                 raise AccountError(409, "이미 참여 중인 밴드예요", "code")
+            members = self._one("SELECT COUNT(*) AS n FROM band_members WHERE band_id = ?", band["id"])["n"]
+            if members >= MEMBERS_MAX:
+                raise AccountError(409, f"이 밴드는 인원이 가득 찼어요 (최대 {MEMBERS_MAX}명)", "code")
             self.db.execute("INSERT INTO band_members VALUES (?, ?, ?, ?)",
                             (band["id"], user.id, instrument, self.clock()))
             return self._band_json(band)

@@ -26,6 +26,9 @@ class AuthFlowTest {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         ctx.deleteDatabase(UserDatabase.DB_NAME)
         ctx.getSharedPreferences("rocky_session", Context.MODE_PRIVATE).edit().clear().commit()
+        // 처음 켤 때의 약관 동의와 안내는 FirstRunTest에서 본다. 여기서는 이미 지난 상태로 시작한다.
+        com.team3.rocky.FirstRun.agreeTerms(ctx)
+        com.team3.rocky.FirstRun.setGuideOff(ctx)
     }
 
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()

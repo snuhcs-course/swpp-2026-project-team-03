@@ -23,6 +23,19 @@ data class JobStatus(
      * 이때 error는 사용자에게 바로 보여줄 수 있는 안내 문장이다.
      */
     val reason: String? = null,
+    /**
+     * 서버 처리 실패의 종류 (#25): pdf_network, timeout, no_agent, pipeline_error, upload_interrupted.
+     * 옛 서버는 보내지 않는다 (null).
+     */
+    val errorCode: String? = null,
+    /** 서버가 만든 사용자용 안내 (한국어). 앱은 errorCode로 직접 문장을 고르고, 모르는 코드일 때만 쓴다. */
+    val message: String? = null,
+    /** POST /jobs/{id}/retry로 같은 곡을 다시 돌릴 수 있는지. 옛 서버는 null. */
+    val retryable: Boolean? = null,
+    /** 다시 시도하기 전에 기다릴 시간(초). null이면 바로. */
+    val retryAfterSec: Int? = null,
+    /** 다시 시도하면 어디부터 하는지: "pdf"(악보 파일만, 1~2분) 또는 "gpu"(멈춘 단계부터). */
+    val retryFrom: String? = null,
 ) {
     val isRejected get() = isFailed && reason != null
 
@@ -53,10 +66,12 @@ data class JobResult(
     val faintParts: List<String> = emptyList(),
     /**
      * 사용자가 원곡에 없다고 했지만(고르지 않았지만) 원곡에서 소리가 뚜렷한 악기 (manifest의 undeclared_parts).
-     * faintParts의 반대 경우. '원곡 악기를 다르게 고른 것 같아요' 안내에 쓴다.
+     * faintParts의 반대 경우. 지금 앱은 원곡 악기를 묻지 않아서 쓰지 않는다 (서버가 보내면 읽기만 한다).
      * 파이프라인이 아직 이 값을 만들지 않으면 비어 있다.
      */
     val undeclaredParts: List<String> = emptyList(),
+    /** 파이프라인이 원곡에서 들은 기타 대수 (0~2). 모르면 null. '기타 대수 바꿔서 다시 만들기'에 보여준다. */
+    val originalGuitars: Int? = null,
 )
 
 object ApiJson {
@@ -73,6 +88,11 @@ object ApiJson {
             error = o.stringOrNull("error"),
             note = o.stringOrNull("note"),
             reason = o.stringOrNull("reason"),
+            errorCode = o.stringOrNull("error_code"),
+            message = o.stringOrNull("message"),
+            retryable = if (o.has("retryable") && !o.isNull("retryable")) o.getBoolean("retryable") else null,
+            retryAfterSec = o.intOrNull("retry_after_sec"),
+            retryFrom = o.stringOrNull("retry_from"),
         )
     }
 
@@ -88,6 +108,7 @@ object ApiJson {
             generatedParts = o.strings("generated_parts"),
             faintParts = o.strings("faint_parts"),
             undeclaredParts = o.strings("undeclared_parts"),
+            originalGuitars = o.intOrNull("original_guitars"),
         )
     }
 

@@ -12,7 +12,6 @@ import androidx.compose.ui.test.printToString
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.team3.rocky.ExportScreen
 import com.team3.rocky.ResultScreen
 import com.team3.rocky.RockyTheme
 import com.team3.rocky.progress.AudioFile
@@ -82,7 +81,7 @@ class ServerEndToEndTest {
 
         // 결과 화면: 서버 PDF가 그림으로 보인다
         val work = job.toWork()
-        compose.setContent { RockyTheme { ResultScreen(work, onBack = {}, onSaved = {}, onExport = {}, onShareToBand = {}) } }
+        compose.setContent { RockyTheme { ResultScreen(work, onBack = {}, onSaved = {}, onShareToBand = {}) } }
         // Advance the Compose clock so ResultScreen's LaunchedEffect starts PDF rendering.
         compose.waitForIdle()
         try {
@@ -93,21 +92,6 @@ class ServerEndToEndTest {
         }
         // 칩은 옆으로 넘겨 보는 줄이라 화면 밖에 있을 수 있어서 있는지만 본다.
         compose.onNodeWithText("✨ 피아노").assertExists()
-    }
-
-    @Test fun exportListsServerFiles() {
-        lateinit var job: ScoreJob
-        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            job = ScoreJobs.start(ctx, "E2E 내보내기", listOf("drums", "guitar"), listOf("drums", "guitar"), song())
-        }
-        waitFor(job)
-        assertNull("작업 실패: ${job.error}", job.error)
-        val work = job.toWork()
-        compose.setContent { RockyTheme { ExportScreen(work, onBack = {}) } }
-        assertTrue(compose.onAllNodesWithText("MIDI").fetchSemanticsNodes().isNotEmpty())
-        assertTrue(compose.onAllNodesWithText("음원").fetchSemanticsNodes().isNotEmpty())
-        compose.onNodeWithText("휴대폰에 저장").assertIsDisplayed()
-        compose.onNodeWithText("다른 앱으로 보내기").assertIsDisplayed()
     }
 
     @Test fun unreachableServerFailsWithMessage() {

@@ -50,13 +50,6 @@ object ScoreStore {
 
     fun dir(ctx: Context, workId: Long) = File(ctx.filesDir, "scores/$workId")
 
-    /** 공유용으로 캐시 폴더(FileProvider의 share/)에 [outName]으로 복사한다. */
-    fun toShare(ctx: Context, file: File, outName: String): File {
-        val out = File(File(ctx.cacheDir, "share").apply { mkdirs() }, outName)
-        file.copyTo(out, overwrite = true)
-        return out
-    }
-
     fun load(ctx: Context, workId: Long): LocalScore? {
         val root = dir(ctx, workId)
         val offset = File(root, ACTIVE).takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()

@@ -7,7 +7,6 @@ import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.core.content.FileProvider
 import com.team3.rocky.auth.AuthRepository
 import java.io.File
 
@@ -25,6 +24,19 @@ object Demo {
 
     /** 밴드 구성 화면에 보이는 악기. 기타는 두 번 누르면 두 대(guitar + guitar2)가 된다. */
     val INSTRUMENTS = listOf("piano", "drums", "bass", "guitar")
+
+    /** 기타가 아닌 악기. '기타 대수 바꿔서 다시 만들기'에서 모델이 찾은 그대로 원곡 구성으로 보낸다. */
+    val NON_GUITAR = listOf("piano", "drums", "bass")
+
+    /**
+     * '기타 대수 바꿔서 다시 만들기'의 원곡 구성: 모델이 찾은 원곡 악기 중 기타 아닌 것 + 사용자가 고른 기타 대수.
+     * 앱 이름(guitar2 = 두 번째 기타)으로, 서버가 unified.py --original 형식으로 바꾼다.
+     */
+    fun redoOriginal(found: List<String>, guitars: Int): List<String> {
+        val others = found.filter { it in NON_GUITAR }
+        val g = when (guitars) { 0 -> emptyList(); 1 -> listOf("guitar"); else -> listOf("guitar", GUITAR2) }
+        return ordered(others + g)
+    }
 
     /** 악보가 나오는 순서. */
     val SCORE_ORDER = listOf("piano", "drums", "bass", "guitar", GUITAR2)
@@ -87,16 +99,6 @@ object Demo {
         val set = faint.filter { it in INSTRUMENTS }.toMutableSet()
         if ("guitar" in set && GUITAR2 in lineup && GUITAR2 in claimed) set += GUITAR2
         return ordered(set.filter { it in lineup && it in claimed })
-    }
-
-    /**
-     * [faintParts]의 반대: 사용자가 '원곡에 없다'고 했는데(고르지 않았는데) 원곡에서 소리가 뚜렷한 악기.
-     * 서버가 [undeclared]로 알려 준다. 우리 밴드에 있는 악기만 본다 (그 파트를 원곡에서 옮기지 않고 새로 만들었기 때문).
-     * '잘 모르겠어요'([claimed]가 비어 있음)면 서버가 직접 판단했으므로 해당 없음.
-     */
-    fun overlookedParts(lineup: List<String>, claimed: List<String>, undeclared: List<String>): List<String> {
-        if (claimed.isEmpty()) return emptyList()
-        return ordered(undeclared.filter { it in INSTRUMENTS && it in lineup && it !in claimed })
     }
 
     /** 원곡에 없어서 AI가 새로 만드는 파트. 원곡 구성을 모르는 예전 작업은 피아노만 그렇게 본다. */
@@ -226,29 +228,3 @@ fun fileName(ctx: Context, uri: Uri): String {
 /** 파일 이름에 쓸 수 없는 글자를 지운다. */
 fun safeFileName(s: String) = s.replace(Regex("[\\\\/:*?\"<>|\\t\\n]"), " ").trim().take(60).ifEmpty { "ROCKY" }
 
-private fun mime(name: String) = when (name.substringAfterLast('.').lowercase()) {
-    "pdf" -> "application/pdf"
-    "mid", "midi" -> "audio/midi"
-    "mp3" -> "audio/mpeg"
-    "png" -> "image/png"
-    else -> "*/*"
-}
-
-/** 파일들을 카카오톡·메일·드라이브 등으로 공유 */
-fun shareFiles(ctx: Context, files: List<File>) {
-    if (files.isEmpty()) return
-    val uris = ArrayList<Uri>(files.map { FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", it) })
-    val intent = if (uris.size == 1) {
-        Intent(Intent.ACTION_SEND).apply {
-            type = mime(files[0].name)
-            putExtra(Intent.EXTRA_STREAM, uris[0])
-        }
-    } else {
-        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "*/*"
-            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-        }
-    }
-    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    ctx.startActivity(Intent.createChooser(intent, tr("악보 보내기", "Send scores")))
-}

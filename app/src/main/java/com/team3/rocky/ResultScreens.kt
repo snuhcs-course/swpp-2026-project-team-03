@@ -118,8 +118,9 @@ fun ResultScreen(
     work: Work,
     onBack: () -> Unit,
     onSaved: () -> Unit,
-    onExport: () -> Unit,
     onShareToBand: () -> Unit,
+    /** '기타 대수 바꿔서 다시 만들기'에서 대수를 고르면 불린다 → 우리 밴드 구성·곡 올리기부터 다시. */
+    onRedoGuitars: (GuitarRedo) -> Unit = {},
     myPart: String? = null,
 ) {
     val ctx = LocalContext.current
@@ -131,6 +132,16 @@ fun ResultScreen(
     var local by remember(work.id) { mutableStateOf(ScoreStore.load(ctx, work.id)) }
     var changingKey by remember { mutableStateOf(false) }
     var keyDialog by remember { mutableStateOf(false) }
+    var guitarDialog by remember { mutableStateOf(false) }
+    if (guitarDialog) {
+        GuitarCountDialog(
+            heard = local?.result?.originalGuitars,
+            // 모델이 찾은 원곡 악기 중 기타 아닌 것. 다시 만들 때 그대로 원곡 구성으로 보낸다.
+            others = (local?.result?.originalParts ?: work.original).filter { it in Demo.NON_GUITAR }.distinct(),
+            onDismiss = { guitarDialog = false },
+            onNext = { plan -> guitarDialog = false; onRedoGuitars(plan.copy(title = work.title)) },
+        )
+    }
     // 대화상자에서 고른 키. '바꾸기'를 눌러야 서버가 한 번만 다시 만든다 (+반 키를 두 번 눌러도 한 번).
     var targetKey by remember(work.id) { mutableIntStateOf(local?.semitones ?: 0) }
     // 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트. 칩을 누르면 무슨 뜻인지 3초 동안 보여준다.
@@ -448,11 +459,6 @@ fun ResultScreen(
                     text = { Text(tr("밴드에 공유", "Share with a band")) },
                     onClick = { menuOpen = false; onShareToBand() },
                 )
-                DropdownMenuItem(
-                    text = { Text(tr("내보내기", "Export")) },
-                    enabled = !changingKey,
-                    onClick = { menuOpen = false; player.pause(); playing = false; onExport() },
-                )
                 // 키 바꾸기는 서버에 남아 있는 결과로 다시 만들어서, 보관함에 저장한 악보만 된다.
                 DropdownMenuItem(
                     text = {
@@ -519,10 +525,28 @@ fun ResultScreen(
             HorizontalDivider(color = cs.outlineVariant, modifier = Modifier.padding(top = 12.dp))
             Box(Modifier.padding(start = 2.dp, top = 4.dp, bottom = 4.dp)) { playerBar(true) }
         }
+        // 원곡 기타 대수는 모델이 판단한다. 기타 파트가 이상해 보이면 대수를 직접 골라 처음부터 다시 만들 수 있다.
+        if (Demo.guitarCount(work.instruments.toSet()) > 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tr("기타 파트가 이상한가요?", "Guitar parts look off?"),
+                    fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { player.pause(); playing = false; guitarDialog = true }, contentPadding = TightButtonPadding) {
+                    Text(tr("기타 대수 바꿔서 다시 만들기", "Remake with a guitar count"), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        } else {
+            Spacer(Modifier.height(8.dp))
+        }
         Text(
             tr("밴드 곡이 아니면 악보가 부정확할 수 있어요", "Less accurate for non-band songs"),
             fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(10.dp))
         // 아래: 악보. 화면 양옆 끝까지, 아래에서 올라온 종이처럼.
@@ -830,146 +854,68 @@ private fun PartChip(
     }
 }
 
-// ---------- 6. 파일 받기 (휴대폰에 저장 · 다른 앱으로 보내기) ----------
-private class ExportItem(val key: String, val label: String, val format: String, val make: () -> File?)
-
-private fun bandName() = tr("밴드 전체", "Full band")
-private fun scoreLabel() = tr("악보", "Score")
-private fun audioLabel() = tr("음원", "Audio")
-
+// ---------- 5-1. 기타 대수 바꿔서 다시 만들기 ----------
+/**
+ * 원곡에 기타가 몇 대인지(0~2) 고르는 창. 모델이 들은 대수([heard])를 함께 보여준다.
+ * 고르면 [GuitarRedo]를 넘기고, 앱은 우리 밴드 구성·곡 올리기부터 다시 만든다.
+ * [others]가 비어 있으면(모델이 기타 말고 아무것도 못 찾음) '없음'은 고를 수 없다: 원곡 구성이 비면 서버가 다시 '모름'으로 판단해서.
+ */
 @Composable
-fun ExportScreen(work: Work, onBack: () -> Unit) {
-    val ctx = LocalContext.current
+fun GuitarCountDialog(heard: Int?, others: List<String>, onDismiss: () -> Unit, onNext: (GuitarRedo) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val scope = rememberCoroutineScope()
-    val title = safeFileName(work.title)
-    val local = remember(work.id) { ScoreStore.load(ctx, work.id) }
-
-    // 폰에 받아 둔 파일이 없으면 내보낼 것도 없다.
-    val bandItems = remember { local?.let { serverBandItems(ctx, it, title) }.orEmpty() }
-    val partItems = remember { local?.let { serverPartItems(ctx, it, work, title) }.orEmpty() }
-    val checked = remember { mutableStateMapOf<String, Boolean>().apply { put("band.pdf", true) } }
-    var busy by remember { mutableStateOf(false) }
-    val count = (bandItems + partItems.values.flatten()).count { checked[it.key] == true }
-
-    /** 고른 파일을 만든 뒤 [use]에 넘긴다 (휴대폰 저장 또는 공유). */
-    fun withFiles(use: suspend (List<File>) -> Unit) {
-        busy = true
-        scope.launch {
-            val items = (bandItems + partItems.values.flatten()).filter { checked[it.key] == true }
-            val files = try {
-                withContext(Dispatchers.IO) { items.mapNotNull { it.make() } }
-            } catch (e: Exception) {
-                Toast.makeText(ctx, tr("파일을 만들지 못했어요", "Couldn't prepare the files"), Toast.LENGTH_SHORT).show()
-                emptyList()
-            }
-            if (files.isNotEmpty()) use(files)
-            busy = false
-        }
-    }
-
-    fun saveToPhone() = withFiles { files ->
-        val n = withContext(Dispatchers.IO) { PhoneSaver.save(ctx, files) }
-        val msg = if (n > 0) tr("${n}개 파일을 저장했어요 · ${PhoneSaver.folderLabel()}", "Saved $n ${plural(n, "file", "files")} · ${PhoneSaver.folderLabel()}")
-        else tr("휴대폰에 저장하지 못했어요", "Couldn't save to your phone")
-        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
-    }
-
-    // 안드로이드 8~9는 저장 권한을 먼저 받는다.
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) saveToPhone()
-        else Toast.makeText(ctx, tr("저장하려면 저장 공간 권한이 필요해요", "Storage permission is needed to save"), Toast.LENGTH_LONG).show()
-    }
-
-    Page(tr("내보내기", "Export"), onBack, bottom = {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(shape = ButtonShape,
-                onClick = { withFiles { shareFiles(ctx, it) } },
-                enabled = count > 0 && !busy,
-                modifier = Modifier.weight(1f).height(56.dp), contentPadding = TightButtonPadding,
-            ) { Text(tr("다른 앱으로 보내기", "Send"), maxLines = 1, fontSize = 15.sp) }
-            Button(shape = ButtonShape,
-                onClick = {
-                    if (PhoneSaver.needsPermission(ctx)) permission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    else saveToPhone()
-                },
-                enabled = count > 0 && !busy,
-                modifier = Modifier.weight(1.2f).height(56.dp), contentPadding = TightButtonPadding,
-            ) {
-                if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = cs.onPrimary)
-                else Text(tr("휴대폰에 저장", "Save to phone"), maxLines = 1, fontSize = 15.sp)
-            }
-        }
-    }) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text(tr("내보낼 파일", "Files to export"), fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                if (count > 0) tr("${count}개 골랐어요 · 저장하면 ${PhoneSaver.folderLabel()}", "$count selected · saved to ${PhoneSaver.folderLabel()}")
-                else tr("파일을 골라주세요", "Pick files"),
-                fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(bandName(), fontWeight = FontWeight.Bold, color = cs.primary, fontSize = 14.sp)
-            Spacer(Modifier.height(6.dp))
-            bandItems.forEach { ExportRow(it, checked) }
-            if (bandItems.isEmpty()) Text(tr("밴드 전체 파일이 없어요", "No full-band files"), color = cs.onSurfaceVariant)
-
-            partItems.forEach { (inst, items) ->
-                Spacer(Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    InstrumentIcon(inst, cs.primary, size = 18.dp)
-                    Spacer(Modifier.width(6.dp))
-                    Text(Demo.label(inst, work.instruments), fontWeight = FontWeight.Bold, color = cs.primary, fontSize = 14.sp)
-                    if (inst in work.unrecognized) Text("  ⚠️ " + tr("소리 적음", "Barely audible"), fontSize = 12.sp, color = cs.secondary)
-                    else if (inst in work.aiGenerated) Text("  ✨ " + tr("AI 생성", "AI-made"), fontSize = 12.sp, color = cs.secondary)
+    var pick by remember { mutableStateOf<Int?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(tr("원곡에 기타가 몇 대 있나요?", "How many guitars are in the song?")) },
+        text = {
+            Column {
+                Text(
+                    when (heard) {
+                        null -> tr("기타 대수를 바꾸면 그 대수로 기타 파트를 다시 나눠요.", "We'll split the guitar parts again with your count.")
+                        0 -> tr("지금 악보는 원곡에 기타가 없다고 보고 만들었어요.", "These scores assumed the song has no guitar.")
+                        else -> tr("지금 악보는 원곡 기타를 ${heard}대로 보고 만들었어요.", "These scores assumed $heard guitar${if (heard > 1) "s" else ""} in the song.")
+                    },
+                    fontSize = 14.sp, lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0, 1, 2).forEach { n ->
+                        val on = pick == n
+                        val enabled = n != heard && !(n == 0 && others.isEmpty())
+                        val shape = RoundedCornerShape(14.dp)
+                        Column(
+                            Modifier.weight(1f).height(72.dp).clip(shape)
+                                .background(if (on) cs.primary else cs.surfaceVariant.copy(alpha = if (enabled) 1f else 0.4f))
+                                .clickable(enabled = enabled) { pick = n }
+                                .semantics { contentDescription = tr("원곡 기타 ${n}대", "$n guitars in the song") },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(
+                                when (n) { 0 -> tr("없음", "None"); 1 -> tr("1대", "1"); else -> tr("2대", "2") },
+                                fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                                color = when { on -> cs.onPrimary; enabled -> cs.onSurface; else -> cs.onSurfaceVariant.copy(alpha = 0.5f) },
+                            )
+                            if (n == heard) Text(tr("지금", "Now"), fontSize = 11.sp, color = cs.onSurfaceVariant)
+                        }
+                    }
                 }
-                Spacer(Modifier.height(6.dp))
-                items.forEach { ExportRow(it, checked) }
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    tr(
+                        "고른 대수로 처음부터 다시 만들어요 (10분쯤). 서버에 곡 파일을 남기지 않아서, 우리 밴드 악기를 확인하고 같은 곡 파일을 한 번 더 올려 주세요. 지금 악보는 그대로 남아요.",
+                        "It starts over with your count (about 10 min). We don't keep song files, so check your band and pick the same file again. These scores stay.",
+                    ),
+                    fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
+                )
             }
-            Spacer(Modifier.height(16.dp))
-        }
-    }
-}
-
-@Composable
-private fun ExportRow(item: ExportItem, checked: MutableMap<String, Boolean>) {
-    val cs = MaterialTheme.colorScheme
-    val on = checked[item.key] == true
-    Row(
-        Modifier.fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .card(RoundedCornerShape(14.dp), cs)
-            .border(BorderStroke(1.dp, if (on) cs.primary else Color.Transparent), RoundedCornerShape(14.dp))
-            .clickable { checked[item.key] = !on }
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(checked = on, onCheckedChange = { checked[item.key] = it })
-        Text(item.label, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.weight(1f))
-        Text(item.format, fontSize = 12.sp, color = cs.primary, modifier = Modifier.padding(end = 12.dp))
-    }
-}
-
-// ----- 서버에서 받은 결과 파일 -----
-private fun serverBandItems(ctx: android.content.Context, local: LocalScore, title: String): List<ExportItem> {
-    val band = bandName()
-    return listOfNotNull(
-        local.pdf(null)?.let { f -> ExportItem("band.pdf", scoreLabel(), "PDF") { ScoreStore.toShare(ctx, f, "${title}_$band.pdf") } },
-        local.midi(null)?.let { f -> ExportItem("band.mid", "MIDI", "MID") { ScoreStore.toShare(ctx, f, "${title}_$band.mid") } },
-        local.mp3(null)?.let { f -> ExportItem("band.mp3", audioLabel(), "MP3") { ScoreStore.toShare(ctx, f, "${title}_$band.mp3") } },
+        },
+        confirmButton = {
+            TextButton(enabled = pick != null, onClick = {
+                val n = pick ?: return@TextButton
+                onNext(GuitarRedo(title = "", guitars = n, original = Demo.redoOriginal(others, n)))
+            }) { Text(tr("다음", "Next")) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("취소", "Cancel")) } },
     )
 }
-
-private fun serverPartItems(
-    ctx: android.content.Context, local: LocalScore, work: Work, title: String,
-): Map<String, List<ExportItem>> =
-    work.instruments.associateWith { inst ->
-        val name = Demo.label(inst, work.instruments)
-        listOfNotNull(
-            local.pdf(inst)?.let { f -> ExportItem("$inst.pdf", scoreLabel(), "PDF") { ScoreStore.toShare(ctx, f, "${title}_$name.pdf") } },
-            local.midi(inst)?.let { f -> ExportItem("$inst.mid", "MIDI", "MID") { ScoreStore.toShare(ctx, f, "${title}_$name.mid") } },
-            local.mp3(inst)?.let { f -> ExportItem("$inst.mp3", audioLabel(), "MP3") { ScoreStore.toShare(ctx, f, "${title}_$name.mp3") } },
-        )
-    }.filterValues { it.isNotEmpty() }

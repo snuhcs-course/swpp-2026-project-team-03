@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.team3.rocky.Demo
+import com.team3.rocky.Lang
+import com.team3.rocky.AppSettings
 import com.team3.rocky.Work
 import com.team3.rocky.tr
 import com.team3.rocky.server.ApiException
@@ -64,17 +66,25 @@ class ScoreJob(
     /** 서버가 입력을 거부했는지 (밴드 곡이 아님 등). 다시 시도해도 같은 결과라 '다시 시도'를 보여주지 않는다. */
     var rejected by mutableStateOf(false)
         internal set
+    /**
+     * 실패했을 때 이 곡 그대로 '다시 시도'할 수 있는지. false면 목록에서 빠지고 '새로 만들기'(밴드 구성·곡 올리기부터)만 남는다.
+     */
+    var retryable by mutableStateOf(false)
+        internal set
+    /** '다시 시도'를 누를 수 있게 되는 시각 (System.currentTimeMillis). 서버가 기다리라고 하면(PDF 준비 실패 60초) 그만큼 뒤. */
+    var retryAt by mutableStateOf(0L)
+        internal set
+    /** 서버에서 처리하다 실패했는지. 그러면 다시 시도할 때 POST /jobs/{id}/retry로 같은 곡을 다시 돌린다. */
+    internal var serverFailed = false
     @Volatile internal var cancelRequested = false
-    /** 사용자가 고른 원곡 구성 그대로 (비어 있으면 '잘 모르겠어요'). ⚠️ 판단에 쓴다. */
+    /**
+     * 원곡 구성으로 보낸 것. 보통은 비어 있고(모델이 판단), '기타 대수 바꿔서 다시 만들기'일 때만
+     * 모델이 찾은 원곡 악기 + 사용자가 고른 기타 대수가 들어 있다. ⚠️ 판단에 쓴다.
+     */
     val claimed: List<String> = original
-    /** 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트 (⚠️) */
+    /** 원곡에 있다고 보냈지만 원곡에서 소리가 거의 들리지 않은 파트 (⚠️) */
     var unrecognized by mutableStateOf<List<String>>(emptyList())
         internal set
-    /** 원곡에 없다고 했지만(고르지 않았지만) 원곡에서 소리가 뚜렷했던 파트 */
-    var overlooked by mutableStateOf<List<String>>(emptyList())
-        internal set
-    /** 원곡 악기를 실제와 다르게 고른 것 같은지. 그러면 '악기 다시 선택'을 권한다. */
-    val instrumentDoubt get() = unrecognized.isNotEmpty() || overlooked.isNotEmpty()
     /** 서버 작업 번호. 업로드가 끝나면 생긴다 */
     @Volatile internal var serverId: String? = null
     internal var runner: Job? = null
@@ -106,7 +116,10 @@ object ScoreJobs {
     /** 앱 화면이 보이는 중인지 (MainActivity가 알려 준다). 안 보일 때 멈추면 휴대폰 알림을 보낸다. */
     @Volatile var appVisible = false
 
-    /** 방금 멈춘 곡. 앱 안에서 팝업으로 한 번 알리고, 닫으면 null로 돌린다. */
+    /**
+     * 방금 실패한 곡. 앱 안에서 팝업으로 한 번 알리고, 닫으면 null로 돌린다.
+     * 다시 시도할 수 없는 곡은 이미 목록에서 빠졌고, 팝업에서 '새로 만들기'를 누를 수 있다.
+     */
     var stopped by mutableStateOf<ScoreJob?>(null)
 
     val runningCount get() = jobs.count { !it.done && !it.failed }
@@ -121,44 +134,61 @@ object ScoreJobs {
     }
 
     /**
-     * 실패한 작업을 다시 시도한다.
-     * 인터넷이 끊겨서 실패했으면 서버에서 돌던 작업에 다시 붙고,
-     * 서버에서 처리하다 실패했으면(같은 실패가 반복되므로) 음원을 처음부터 다시 올린다.
+     * 실패한 작업을 이 곡 그대로 다시 시도한다 ([ScoreJob.retryable]일 때만).
+     * - 서버에서 처리하다 실패했으면 같은 작업 번호로 다시 돌린다 (POST /jobs/{id}/retry, 음원을 다시 올리지 않음).
+     *   서버가 끝난 단계는 건너뛰고 멈춘 단계부터 (채보가 끝났으면 PDF만) 다시 한다.
+     * - 인터넷이 끊겨서 실패했으면 서버에서 돌던 작업에 다시 붙고, 아직 올리지 못했으면 다시 올린다.
      */
-    fun retry(ctx: Context, job: ScoreJob) {
+    fun retry(ctx: Context, job: ScoreJob, now: Long = System.currentTimeMillis()) {
+        if (!job.retryable || now < job.retryAt) return
         job.runner?.cancel()
+        val onServer = job.serverFailed && job.serverId != null
         job.error = null
         job.rejected = false
+        job.serverFailed = false
         if (stopped === job) stopped = null
         JobNotifier.clear(ctx.applicationContext, job)
-        // 처음부터 다시 만들면 진행 막대도 0%부터 다시 시작한다.
+        // 아직 서버에 올라가지 않은 곡이면 진행 막대도 0%부터 다시 시작한다.
         if (job.serverId == null) { job.progress = null; job.bar.reset() }
-        launch(ctx.applicationContext, job)
+        launch(ctx.applicationContext, job, retryOnServer = onServer)
     }
 
-    private fun launch(app: Context, job: ScoreJob) {
+    private fun launch(app: Context, job: ScoreJob, retryOnServer: Boolean = false) {
         if (job !in jobs) return
         job.runner = scope.launch {
             try {
+                if (retryOnServer) {
+                    job.phase = tr("다시 시도하는 중", "Retrying")
+                    withContext(Dispatchers.IO) { serverFactory(app).retry(job.serverId!!) }
+                }
                 runOnServer(app, job, job.audio)
-                // 그사이 사용자가 지웠거나 '악기 다시 선택'으로 바꾼 곡이면 알리지 않는다.
-                if (job in jobs) Toast.makeText(
-                    app, tr("'${job.title}' 악보가 완성됐어요", "'${job.title}' is ready"), Toast.LENGTH_LONG,
-                ).show()
+                // 그사이 사용자가 지운 곡이면 알리지 않는다. 앱을 안 보고 있으면 휴대폰 알림으로.
+                if (job in jobs) {
+                    if (appVisible) Toast.makeText(
+                        app, tr("'${job.title}' 악보가 완성됐어요", "'${job.title}' is ready"), Toast.LENGTH_LONG,
+                    ).show() else JobNotifier.ready(app, job)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: JobCancelledException) {
                 jobs.remove(job)
             } catch (e: Exception) {
                 job.phase = null
-                // 서버에서 실패했거나 서버가 작업을 잃어버렸으면, 다시 시도할 때 새로 올린다.
-                if (e is JobFailedException || (e is ApiException && e.code == 404)) job.serverId = null
+                val f = classify(e)
                 job.rejected = e is JobFailedException && e.reason != null
-                val reason = failureMessage(e)
-                job.error = reason
-                // 멈춘 것을 알린다: 앱 안에서는 팝업, 앱을 안 보고 있으면 휴대폰 알림도.
+                job.serverFailed = e is JobFailedException
+                job.retryable = f.retry
+                job.retryAt = System.currentTimeMillis() + (f.waitSec ?: 0) * 1000L
+                job.error = f.message
+                if (!f.retry) {
+                    // 이 곡 그대로는 다시 할 수 없다: 목록에서 빼고, 서버에 남은 실패 기록도 지운다.
+                    // 팝업의 '새로 만들기'로 밴드 구성·곡 올리기부터 다시 한다.
+                    jobs.remove(job)
+                    job.serverId?.let { ServerCleanup.deleteWork(app, job.id, it) }
+                }
+                // 실패를 알린다: 앱 안에서는 팝업, 앱을 안 보고 있으면 휴대폰 알림도.
                 stopped = job
-                if (!appVisible) JobNotifier.stopped(app, job, reason)
+                if (!appVisible) JobNotifier.stopped(app, job, f.message)
             }
         }
     }
@@ -187,12 +217,12 @@ object ScoreJobs {
         job.bar.started()
         val id = job.serverId!!
         val tracker = ServerProgress(server, maxMissed = 90, onStatus = { st ->
-            // 서버의 note는 영어·개발 용어일 수 있어서 보여주지 않고, 사용자가 알 것만 적는다.
+            // 서버의 note는 개발 용어일 수 있어서 그대로 보여주지 않고, 사용자가 알 것만 바꿔 적는다.
             job.phase = when {
                 st.state == "queued" && (st.queuePosition ?: 0) > 1 ->
                     tr("대기 중 · 앞에 ${st.queuePosition!! - 1}곡", "Waiting · ${st.queuePosition!! - 1} ahead")
                 st.state == "queued" -> tr("곧 시작해요", "Starting soon")
-                else -> null
+                else -> noteText(st.note)
             }
         }, onMissed = { missed ->
             // 잠깐 끊긴 것은 실패로 보지 않고 다시 연결되기를 기다린다.
@@ -207,7 +237,6 @@ object ScoreJobs {
         val faint = Demo.faintParts(job.lineup, job.claimed, local.result.faintParts)
             .filter { it !in local.result.generatedParts }
         job.unrecognized = faint
-        job.overlooked = Demo.overlookedParts(job.lineup, job.claimed, local.result.undeclaredParts)
         // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮긴 파트이므로 ✨ 대상에서 뺀다.
         job.original = Demo.ordered(
             originalFromServer(job.lineup, local.result.originalParts, local.result.generatedParts) + faint,
@@ -223,7 +252,8 @@ object ScoreJobs {
         if (job.done || job.failed) {
             remove(job)
             // 보관함에 저장하지 않은 결과는 다시 열 수 없으니 폰과 서버의 파일도 지운다 (NFR-07).
-            if (job.done && !job.saved) ServerCleanup.deleteWork(ctx, job.id, job.serverId)
+            // 실패한 곡도 서버에 남은 기록·음원을 지운다 (다시 시도 직후 지워도 항상 지워진다: 서버 #25).
+            if ((job.done && !job.saved) || (job.failed && job.serverId != null)) ServerCleanup.deleteWork(ctx, job.id, job.serverId)
             return
         }
         if (job.cancelling) return
@@ -309,6 +339,79 @@ object ScoreJobs {
         if (stopped === job) stopped = null
     }
 
+    /**
+     * 서버가 진행 중에 보내는 짧은 안내(note, 한국어 개발용 문장)를 사용자 문장으로.
+     * 모르는 안내는 보여주지 않는다 (단계 이름이 대신 보인다).
+     */
+    fun noteText(note: String?): String? {
+        if (note.isNullOrBlank()) return null
+        val count = Regex("""\((\d+)/(\d+)\)""").find(note)?.value
+        return when {
+            "PDF" in note && "다시" in note ->
+                tr("악보 파일을 다시 만드는 중", "Making the score files again") + (count?.let { " $it" } ?: "")
+            "GPU" in note -> tr("앞의 곡이 끝나길 기다리는 중", "Waiting for the song before yours")
+            "agent" in note -> tr("악보를 만드는 컴퓨터를 기다리는 중", "Waiting for the scoring computer")
+            else -> null
+        }
+    }
+
+    /** 실패를 어떻게 보여줄지: 안내 문장, 이 곡 그대로 다시 시도할 수 있는지, 기다릴 시간(초). */
+    data class Failure(val message: String, val retry: Boolean, val waitSec: Int? = null)
+
+    /**
+     * 실패 이유를 나눈다 (조수빈 'ROCKY 곡 처리 결과별 동작', 서버 #25).
+     * - 다시 시도할 수 있음: 서버가 retryable로 알려 준 실패(PDF 준비 실패·시간 초과·처리 오류), 인터넷 끊김
+     * - 새로 만들어야 함: 입력 거부(짧음·무음·밴드 곡 아님), 작업 컴퓨터 없음, 업로드 중 서버 재시작,
+     *   올린 음원이 서버에 없음(410), 파일 크기·형식·구성 거절(413·415·422), 파일을 못 엶, 옛 서버의 실패
+     */
+    fun classify(e: Exception): Failure = when (e) {
+        is FileGoneException -> Failure(failureMessage(e), retry = false)
+        is JobFailedException -> when {
+            e.reason != null -> Failure(rejectionMessage(e.reason), retry = false)
+            e.retryable == true -> Failure(serverFailureMessage(e.errorCode, e.retryFrom, e.userMessage, e.retryAfterSec), true, e.retryAfterSec)
+            else -> Failure(serverFailureMessage(e.errorCode, e.retryFrom, e.userMessage, null), retry = false)
+        }
+        is ApiException -> when (e.code) {
+            401 -> Failure(failureMessage(e), retry = true)  // 연결 설정을 고친 뒤 다시
+            404, 410, 413, 415, 422 -> Failure(failureMessage(e), retry = false)
+            else -> Failure(failureMessage(e), retry = true)
+        }
+        else -> Failure(failureMessage(e), retry = true)  // 인터넷 끊김 등
+    }
+
+    /** 서버 처리 실패(#25 error_code)를 사용자 문장으로. 무엇이 일어났고, 다시 시도하면 무엇을 하는지. */
+    fun serverFailureMessage(code: String?, retryFrom: String?, serverMessage: String?, waitSec: Int?): String {
+        val redo = if (retryFrom == "pdf") tr(
+            "다시 시도하면 채보 결과는 그대로 두고 악보 파일만 다시 만들어요 (1~2분).",
+            "Retry remakes only the score files and keeps the notes (1–2 min).",
+        ) else tr(
+            "다시 시도하면 끝난 단계는 건너뛰고 멈춘 단계부터 이어서 해요 (10분 안팎).",
+            "Retry skips finished steps and continues where it stopped (about 10 min).",
+        )
+        return when (code) {
+            "pdf_network" -> tr(
+                "악보 파일을 만드는 프로그램을 준비하다가 인터넷이 끊겼어요. ${waitSec ?: 60}초 뒤에 ",
+                "The internet dropped while getting the score tools ready. After ${waitSec ?: 60} s, ",
+            ) + redo.replaceFirstChar { if (AppSettings.lang == Lang.EN) it.lowercaseChar() else it }
+            "timeout" -> tr("너무 오래 걸려서 끝내지 못했어요. ", "It took too long to finish. ") + redo
+            "pipeline_error" -> tr("악보를 만드는 중에 오류가 났어요. ", "Something went wrong while making the scores. ") + redo +
+                tr(" 같은 곡이 두 번 실패하면 팀에게 알려 주세요.", " If it fails twice, please tell the team.")
+            "no_agent" -> tr(
+                "지금 악보를 만드는 컴퓨터가 연결되어 있지 않아서 시작하지 못했어요. 팀에게 알려 주세요.",
+                "The scoring computer isn't connected, so it couldn't start. Please tell the team.",
+            )
+            "upload_interrupted" -> tr(
+                "곡을 올리는 중에 연결이 끊겼어요. 처음부터 다시 올려 주세요.",
+                "The connection dropped while uploading. Please upload the song again.",
+            )
+            // 앱이 모르는 새 종류: 서버 안내(한국어)가 있으면 그대로, 없으면 일반 문장.
+            else -> serverMessage?.takeIf { AppSettings.lang == Lang.KO } ?: tr(
+                "악보를 만들지 못했어요. 곡을 다시 올려 주세요.",
+                "Couldn't make the scores. Please upload the song again.",
+            )
+        }
+    }
+
     /** 로그아웃하면 다른 회원에게 보이지 않게 비운다. */
     fun clear(ctx: Context) {
         jobs.toList().forEach { if (!it.done && !it.failed) cancel(ctx, it) else it.runner?.cancel() }
@@ -347,21 +450,22 @@ object ScoreJobs {
 
     fun failureMessage(e: Exception): String = when (e) {
         is FileGoneException -> tr(
-            "곡 파일을 열 수 없어요. 다시 골라 주세요.",
-            "Can't open the file. Pick it again.",
+            "곡 파일을 열 수 없어요. 새로 만들기에서 곡을 다시 골라 주세요.",
+            "Can't open the file. Pick it again in a new score.",
         )
         // 입력 거부(밴드 곡이 아님 등): 다시 시도해도 같은 결과라 이유만 알려 준다.
         is JobFailedException -> if (e.reason != null) rejectionMessage(e.reason)
-            else tr("만들지 못했어요. 다시 시도하면 처음부터 만들어요.", "Failed. Retry to start over.")
+            else serverFailureMessage(e.errorCode, e.retryFrom, e.userMessage, e.retryAfterSec)
         is ApiException -> when (e.code) {
             401 -> tr("접속할 수 없어요. 연결 설정을 확인해 주세요.", "Can't connect. Check the connection settings.")
             413 -> tr("파일이 너무 커요. 짧은 곡이나 MP3로 올려 주세요.", "File too big. Try a shorter song or MP3.")
             415 -> tr("MP3나 WAV 파일만 올릴 수 있어요.", "Only MP3 or WAV files can be used.")
             422 -> tr(
-                "원곡에 기타가 없으면 기타는 1대까지만 만들 수 있어요.",
-                "If the song has no guitar, we can add only one guitar.",
+                "원곡에 기타가 없으면 우리 밴드 기타는 1대까지만 만들 수 있어요.",
+                "With no guitar in the song, we can make only one guitar part.",
             )
-            404 -> tr("곡을 찾을 수 없어요. 다시 시도하면 처음부터 만들어요.", "Song not found. Retry to start over.")
+            404 -> tr("서버에서 곡을 찾을 수 없어요. 곡을 다시 올려 주세요.", "The song is gone from the server. Please upload it again.")
+            410 -> tr("서버에 올린 곡 파일이 없어서 이어서 할 수 없어요. 곡을 다시 올려 주세요.", "The uploaded file is gone. Please upload the song again.")
             // 오류 번호는 보여주지 않는다 (Nielsen 9: 쉬운 말로, 해결 방법과 함께).
             else -> tr("문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.", "Something went wrong. Retry in a moment.")
         }
