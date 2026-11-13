@@ -133,8 +133,9 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     if workers > 1:
         assert {stage.removeprefix("muscriptor_") for stage, _ in commands
                 if stage.startswith("muscriptor_")} == expected_stems
-    jobs_path = runner.out / "stem_midi" / "transcription_jobs.json"
-    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+    jobs = [job for name in ("probe_jobs.json", "transcription_jobs.json")
+            if (path := runner.out / "stem_midi" / name).is_file()
+            for job in json.loads(path.read_text(encoding="utf-8"))]
     assert {job["stem"] for job in jobs} == expected_stems
     if batch:
         assert "--model" in batch[0] and batch[0][batch[0].index("--model") + 1] == "large"
