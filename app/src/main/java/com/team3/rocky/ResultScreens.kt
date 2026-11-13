@@ -786,7 +786,7 @@ private fun RatingDialog(onSend: (Int, String) -> Unit, onLater: () -> Unit, onD
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    tr("남겨 주신 평가는 ROCKY 악보를 더 좋게 만드는 데 써요.", "Your rating helps us make better scores."),
+                    tr("평가는 악보를 더 좋게 만드는 데 써요.", "Your rating helps us make better scores."),
                     fontSize = 14.sp, color = cs.onSurfaceVariant, lineHeight = 20.sp,
                     modifier = Modifier.fillMaxWidth(),
                 )
