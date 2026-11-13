@@ -31,7 +31,7 @@ data class SharedScore(
     val sharedById: Long,
     val sharedByName: String,
     val sharedAt: Long,
-    /** 서버의 작업 번호. 다른 폰의 밴드원은 이 번호로 악보 파일을 받는다. 데모 곡이나 폰 안의 공유는 null. */
+    /** 서버의 작업 번호. 다른 폰의 밴드원은 이 번호로 악보 파일을 받는다. 폰 안의 공유(예전 버전)는 null. */
     val jobId: String? = null,
 )
 

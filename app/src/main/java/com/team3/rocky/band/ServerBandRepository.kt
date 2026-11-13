@@ -76,7 +76,7 @@ class ServerBandRepository(
     override suspend fun leave(user: User, bandId: Long) = io(Unit) { api().post("/bands/$bandId/leave"); Unit }
 
     override suspend fun share(user: User, bandId: Long, work: Work): Boolean = io(false) {
-        // 밴드원이 다른 폰에서 받을 수 있게 서버 작업 번호를 같이 올린다 (데모 곡은 없음).
+        // 밴드원이 다른 폰에서 받을 수 있게 서버 작업 번호를 같이 올린다
         val jobId = ScoreStore.load(ctx, work.id)?.result?.id
         val body = JSONObject().put("work_id", work.id).put("title", work.title)
             .put("instruments", JSONArray(work.instruments)).put("date", work.date)
