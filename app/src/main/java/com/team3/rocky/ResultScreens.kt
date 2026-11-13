@@ -932,7 +932,7 @@ fun GuitarCountDialog(heard: Int?, others: List<String>, onDismiss: () -> Unit, 
                 Spacer(Modifier.height(14.dp))
                 Text(
                     tr(
-                        "고른 대수로 처음부터 다시 만들어요 (10분쯤). 서버에 곡 파일을 남기지 않아서, 우리 밴드 악기를 확인하고 같은 곡 파일을 한 번 더 올려 주세요. 지금 악보는 그대로 남아요.",
+                        "고른 대수로 처음부터 다시 만들어요 (10분쯤). ROCKY는 올린 곡 파일을 보관하지 않아서, 악기를 확인하고 같은 곡 파일을 한 번 더 올려 주세요. 지금 악보는 그대로 남아요.",
                         "It starts over with your count (about 10 min). We don't keep song files, so check your band and pick the same file again. These scores stay.",
                     ),
                     fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,

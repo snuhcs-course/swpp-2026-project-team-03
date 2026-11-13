@@ -997,7 +997,7 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             text = {
                 Text(
                     when {
-                        job.failed -> tr("목록과 서버에서 지워져요. 다시 만들려면 새로 만들기에서 곡을 올려 주세요.", "It's removed here and on the server. To try again, start a new score.")
+                        job.failed -> tr("목록에서 지워져요. 다시 만들려면 홈에서 새 악보를 만들어 주세요.", "It's removed here and on the server. To try again, start a new score.")
                         !job.done -> tr("지금까지 만든 내용은 사라져요.", "Progress so far will be lost.")
                         job.saved -> tr("보관함의 악보는 남아요.", "Saved scores stay in your library.")
                         else -> tr(
@@ -1198,7 +1198,7 @@ fun UploadScreen(redo: GuitarRedo?, onBack: () -> Unit, onStart: (title: String,
                 InfoNote(guitarRedoNotice(redo), strong = true)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    tr("서버에 곡 파일을 남기지 않아서, 같은 곡 파일을 한 번 더 골라 주세요. 처음부터 다시 만들어서 10분쯤 걸려요.",
+                    tr("ROCKY는 올린 곡 파일을 보관하지 않아서, 같은 곡 파일을 한 번 더 골라 주세요. 처음부터 다시 만들어서 10분쯤 걸려요.",
                         "We don't keep song files on the server, so please pick the same file again. It starts over and takes about 10 min."),
                     fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
                 )

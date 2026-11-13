@@ -353,9 +353,9 @@ object ScoreJobs {
         val count = Regex("""\((\d+)/(\d+)\)""").find(note)?.value
         return when {
             "PDF" in note && "다시" in note ->
-                tr("악보 파일을 다시 만드는 중", "Making the score files again") + (count?.let { " $it" } ?: "")
+                tr("PDF를 다시 만드는 중", "Making the PDF again") + (count?.let { " $it" } ?: "")
             "GPU" in note -> tr("앞의 곡이 끝나길 기다리는 중", "Waiting for the song before yours")
-            "agent" in note -> tr("악보를 만드는 컴퓨터를 기다리는 중", "Waiting for the scoring computer")
+            "agent" in note -> tr("곧 시작해요 · 준비하는 중", "Starting soon · getting ready")
             else -> null
         }
     }
@@ -386,28 +386,34 @@ object ScoreJobs {
 
     /** 서버 처리 실패(#25 error_code)를 사용자 문장으로. 무엇이 일어났고, 다시 시도하면 무엇을 하는지. */
     fun serverFailureMessage(code: String?, retryFrom: String?, serverMessage: String?, waitSec: Int?): String {
+        // 사용자 말로: 무엇이 안 됐는지 + 다시 시도하면 무엇을 하는지. (채보·단계·프로그램 같은 말은 쓰지 않는다)
         val redo = if (retryFrom == "pdf") tr(
-            "다시 시도하면 채보 결과는 그대로 두고 악보 파일만 다시 만들어요 (1~2분).",
-            "Retry remakes only the score files and keeps the notes (1–2 min).",
+            "다시 시도하면 PDF만 다시 만들어요 (1~2분).",
+            "Retry makes just the PDF again (1–2 min).",
         ) else tr(
-            "다시 시도하면 끝난 단계는 건너뛰고 멈춘 단계부터 이어서 해요 (10분 안팎).",
-            "Retry skips finished steps and continues where it stopped (about 10 min).",
+            "다시 시도하면 멈춘 곳부터 이어서 만들어요 (10분 안팎).",
+            "Retry picks up where it stopped (about 10 min).",
         )
         return when (code) {
-            "pdf_network" -> tr(
-                "악보 파일을 만드는 프로그램을 준비하다가 인터넷이 끊겼어요. ${waitSec ?: 60}초 뒤에 ",
-                "The internet dropped while getting the score tools ready. After ${waitSec ?: 60} s, ",
-            ) + redo.replaceFirstChar { if (AppSettings.lang == Lang.EN) it.lowercaseChar() else it }
-            "timeout" -> tr("너무 오래 걸려서 끝내지 못했어요. ", "It took too long to finish. ") + redo
-            "pipeline_error" -> tr("악보를 만드는 중에 오류가 났어요. ", "Something went wrong while making the scores. ") + redo +
-                tr(" 같은 곡이 두 번 실패하면 팀에게 알려 주세요.", " If it fails twice, please tell the team.")
+            "pdf_network" -> {
+                val wait = if ((waitSec ?: 60) >= 60 && (waitSec ?: 60) % 60 == 0) tr("${(waitSec ?: 60) / 60}분", "${(waitSec ?: 60) / 60} min")
+                else tr("${waitSec}초", "$waitSec s")
+                tr(
+                    "악보를 PDF로 만드는 중에 오류가 났어요. $wait 뒤에 다시 시도하면 PDF만 다시 만들어요 (1~2분).",
+                    "Something went wrong while making the PDF. Retry in $wait to make just the PDF again (1–2 min).",
+                )
+            }
+            "timeout" -> tr("악보를 만드는 데 너무 오래 걸렸어요. ", "Making the scores took too long. ") + redo
+            "pipeline_error" -> (if (retryFrom == "pdf") tr("악보를 PDF로 만드는 중에 오류가 났어요. ", "Something went wrong while making the PDF. ")
+                else tr("악보를 만드는 중에 오류가 났어요. ", "Something went wrong while making the scores. ")) + redo +
+                tr(" 두 번 연속 안 되면 팀에게 알려 주세요.", " If it fails twice, please tell the team.")
             "no_agent" -> tr(
-                "지금 악보를 만드는 컴퓨터가 연결되어 있지 않아서 시작하지 못했어요. 팀에게 알려 주세요.",
-                "The scoring computer isn't connected, so it couldn't start. Please tell the team.",
+                "지금은 악보를 만들 수 없는 상태예요. 잠시 뒤 새로 만들어 보고, 계속 안 되면 팀에게 알려 주세요.",
+                "Scores can't be made right now. Try again later, and tell the team if it keeps happening.",
             )
             "upload_interrupted" -> tr(
-                "곡을 올리는 중에 연결이 끊겼어요. 처음부터 다시 올려 주세요.",
-                "The connection dropped while uploading. Please upload the song again.",
+                "곡을 보내는 중에 연결이 끊겼어요. 곡을 다시 올려 주세요.",
+                "The connection dropped while sending the song. Please upload it again.",
             )
             // 앱이 모르는 새 종류: 서버 안내(한국어)가 있으면 그대로, 없으면 일반 문장.
             else -> serverMessage?.takeIf { AppSettings.lang == Lang.KO } ?: tr(
@@ -445,8 +451,8 @@ object ScoreJobs {
     /** 실패 이유를 사용자가 알아들을 말로. 서버·HTTP 같은 말은 쓰지 않고, 무엇을 하면 되는지 적는다. */
     /** 서버가 입력을 거부한 이유(reason 코드)를 사용자 문장으로. 서버 안내는 한국어뿐이라 앱에서 바꾼다. */
     fun rejectionMessage(reason: String): String = when (reason) {
-        "too_short" -> tr("곡이 너무 짧아서 악보를 만들 수 없어요.", "The song is too short to make scores.")
-        "silent" -> tr("소리가 거의 들리지 않는 파일이에요.", "The file is almost silent.")
+        "too_short" -> tr("곡이 너무 짧아서 악보를 만들 수 없어요. 30초 넘는 곡을 올려 주세요.", "The song is too short. Please upload one longer than 30 seconds.")
+        "silent" -> tr("소리가 거의 없는 파일이에요. 다른 파일을 올려 주세요.", "The file is almost silent. Please pick another one.")
         else -> tr(
             "밴드 악기 소리가 거의 들리지 않아요. 밴드 곡을 올려 주세요.",
             "Hardly any band instruments. Please upload a band song.",
@@ -463,14 +469,14 @@ object ScoreJobs {
             else serverFailureMessage(e.errorCode, e.retryFrom, e.userMessage, e.retryAfterSec)
         is ApiException -> when (e.code) {
             401 -> tr("접속할 수 없어요. 연결 설정을 확인해 주세요.", "Can't connect. Check the connection settings.")
-            413 -> tr("파일이 너무 커요. 짧은 곡이나 MP3로 올려 주세요.", "File too big. Try a shorter song or MP3.")
+            413 -> tr("파일이 너무 커요. 더 짧은 곡이나 MP3 파일로 올려 주세요.", "The file is too big. Try a shorter song or an MP3.")
             415 -> tr("MP3나 WAV 파일만 올릴 수 있어요.", "Only MP3 or WAV files can be used.")
             422 -> tr(
                 "원곡에 기타가 없으면 우리 밴드 기타는 1대까지만 만들 수 있어요.",
                 "With no guitar in the song, we can make only one guitar part.",
             )
-            404 -> tr("서버에서 곡을 찾을 수 없어요. 곡을 다시 올려 주세요.", "The song is gone from the server. Please upload it again.")
-            410 -> tr("서버에 올린 곡 파일이 없어서 이어서 할 수 없어요. 곡을 다시 올려 주세요.", "The uploaded file is gone. Please upload the song again.")
+            404 -> tr("만들던 곡을 찾을 수 없어요. 곡을 다시 올려 주세요.", "Couldn't find this song. Please upload it again.")
+            410 -> tr("이어서 만들 곡 파일이 없어요. 곡을 다시 올려 주세요.", "The song file is gone. Please upload it again.")
             // 오류 번호는 보여주지 않는다 (Nielsen 9: 쉬운 말로, 해결 방법과 함께).
             else -> tr("문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.", "Something went wrong. Retry in a moment.")
         }

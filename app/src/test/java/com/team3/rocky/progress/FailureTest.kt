@@ -22,22 +22,22 @@ class FailureTest {
         val f = ScoreJobs.classify(server("pdf_network", true, wait = 60, from = "pdf"))
         assertTrue(f.retry)
         assertEquals(60, f.waitSec)
-        assertTrue(f.message.contains("60초 뒤에 다시 시도하면"))
-        assertTrue(f.message.contains("악보 파일만"))
+        assertTrue(f.message.contains("1분 뒤에 다시 시도하면"))
+        assertTrue(f.message.contains("PDF만 다시"))
     }
 
     @Test fun timeoutCanBeRetriedRightAway() {
         val f = ScoreJobs.classify(server("timeout", true, from = "gpu"))
         assertTrue(f.retry)
         assertNull(f.waitSec)
-        assertTrue(f.message.contains("멈춘 단계부터"))
+        assertTrue(f.message.contains("멈춘 곳부터"))
     }
 
     @Test fun pipelineErrorAsksToTellTheTeamAfterTwoFailures() {
         val f = ScoreJobs.classify(server("pipeline_error", true, from = "pdf"))
         assertTrue(f.retry)
-        assertTrue(f.message.contains("악보 파일만"))
-        assertTrue(f.message.contains("두 번 실패하면"))
+        assertTrue(f.message.contains("PDF만 다시"))
+        assertTrue(f.message.contains("두 번 연속"))
     }
 
     @Test fun noAgentAndInterruptedUploadStartOver() {
@@ -52,7 +52,7 @@ class FailureTest {
     @Test fun refusedInputIsNeverRetried() {
         val f = ScoreJobs.classify(JobFailedException("밴드 곡을 올려 주세요.", reason = "too_short"))
         assertFalse(f.retry)
-        assertEquals("곡이 너무 짧아서 악보를 만들 수 없어요.", f.message)
+        assertEquals("곡이 너무 짧아서 악보를 만들 수 없어요. 30초 넘는 곡을 올려 주세요.", f.message)
     }
 
     @Test fun oldServerFailureStartsOver() {
@@ -84,9 +84,9 @@ class FailureTest {
     }
 
     @Test fun serverNotesBecomeShortUserText() {
-        assertEquals("악보 파일을 다시 만드는 중 (2/3)", ScoreJobs.noteText("악보 PDF 만들기를 다시 시도하는 중 (2/3)"))
+        assertEquals("PDF를 다시 만드는 중 (2/3)", ScoreJobs.noteText("악보 PDF 만들기를 다시 시도하는 중 (2/3)"))
         assertEquals("앞의 곡이 끝나길 기다리는 중", ScoreJobs.noteText("GPU를 다른 작업이 쓰고 있어서 기다리는 중"))
-        assertEquals("악보를 만드는 컴퓨터를 기다리는 중", ScoreJobs.noteText("노트북 연결(agent)을 기다리는 중"))
+        assertEquals("곧 시작해요 · 준비하는 중", ScoreJobs.noteText("노트북 연결(agent)을 기다리는 중"))
         assertNull(ScoreJobs.noteText("unified.py stage 3"))
         assertNull(ScoreJobs.noteText(null))
     }
