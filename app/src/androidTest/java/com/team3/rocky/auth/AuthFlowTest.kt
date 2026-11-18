@@ -49,7 +49,7 @@ class AuthFlowTest {
         rule.onNodeWithTag("signup_password").performTextInput("band2026")
         rule.onNodeWithTag("signup_password_confirm").performTextInput("band2026")
         rule.onNodeWithTag("signup_nickname").performTextInput("테스트밴드")
-        rule.onNodeWithTag("instrument_guitar").performScrollTo().performClick()
+        // 연주하는 악기는 회원가입에서 묻지 않는다 (밴드에 들어갈 때 고른다).
         rule.onNodeWithTag("agree_all").performScrollTo().performClick()
         rule.onNodeWithTag("signup_submit").performClick()
 
