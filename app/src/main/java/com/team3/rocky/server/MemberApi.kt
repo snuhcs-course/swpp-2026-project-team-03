@@ -45,6 +45,30 @@ class MemberApi(baseUrl: String, private val apiKey: String, private val token: 
         }
     }
 
+    /** 사진처럼 JSON이 아닌 내용을 올리거나(PUT) 받는다(GET). 없으면(404) null. */
+    fun bytes(method: String, path: String, body: ByteArray? = null, type: String = "image/jpeg"): ByteArray? {
+        val c = (URL(base + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 10_000
+            readTimeout = 20_000
+            if (apiKey.isNotBlank()) setRequestProperty("X-Rocky-Key", apiKey)
+            if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+        }
+        try {
+            if (body != null) {
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", type)
+                c.outputStream.use { it.write(body) }
+            }
+            val code = c.responseCode
+            if (code == 404) return null
+            if (code !in 200..299) throw MemberApiException(code, "HTTP $code", null)
+            return c.inputStream.use { it.readBytes() }
+        } finally {
+            c.disconnect()
+        }
+    }
+
     fun get(path: String) = call("GET", path)
     fun post(path: String, body: JSONObject = JSONObject()) = call("POST", path, body)
     fun patch(path: String, body: JSONObject) = call("PATCH", path, body)

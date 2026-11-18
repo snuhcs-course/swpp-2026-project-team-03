@@ -39,7 +39,12 @@ class ServerBandRepository(
             band = band(o.getJSONObject("band")),
             members = (0 until members.length()).map { i ->
                 val m = members.getJSONObject(i)
-                BandMember(m.getLong("user_id"), m.getString("nickname"), m.getString("instrument"), m.getBoolean("is_owner"))
+                // 예전 서버는 instrument 하나만 보낸다.
+                val parts = MemberApi.strings(m.optJSONArray("instruments")).ifEmpty { listOf(m.getString("instrument")) }
+                BandMember(
+                    m.getLong("user_id"), m.getString("nickname"), parts.joinToString(","), m.getBoolean("is_owner"),
+                    photoAt = m.optLong("photo_at").takeIf { !m.isNull("photo_at") && m.has("photo_at") },
+                )
             },
             scores = (0 until scores.length()).map { i ->
                 val s = scores.getJSONObject(i)
@@ -63,15 +68,18 @@ class ServerBandRepository(
 
     override suspend fun create(user: User, name: String, instrument: String): BandResult {
         BandRules.validateName(name)?.let { return BandResult.Failure(it) }
-        return result { api().post("/bands", JSONObject().put("name", name.trim()).put("instrument", instrument)) }
+        return result { api().post("/bands", JSONObject().put("name", name.trim()).put("instruments", parts(instrument))) }
     }
 
     override suspend fun join(user: User, code: String, instrument: String): BandResult {
         BandRules.validateCode(code)?.let { return BandResult.Failure(it) }
         return result {
-            api().post("/bands/join", JSONObject().put("code", BandRules.normalizeCode(code)).put("instrument", instrument))
+            api().post("/bands/join", JSONObject().put("code", BandRules.normalizeCode(code)).put("instruments", parts(instrument)))
         }
     }
+
+    /** 화면은 고른 악기를 쉼표로 이어 넘긴다. 서버에는 목록으로 보낸다. */
+    private fun parts(instrument: String) = JSONArray(instrument.split(",").filter { it.isNotBlank() })
 
     override suspend fun leave(user: User, bandId: Long) = io(Unit) { api().post("/bands/$bandId/leave"); Unit }
 

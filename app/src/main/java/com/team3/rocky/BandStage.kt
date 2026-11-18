@@ -28,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,14 +65,18 @@ private val LabelLocked = Color(0xFF5E5E6A)
 private class StageSpot(val key: String, val icon: String, val x: Float, val y: Dp, val size: Dp)
 
 // 실제 밴드 무대처럼: 뒷줄 베이스·드럼·피아노, 앞줄 기타 1·기타 2. 드럼만 조금 크게.
+// 작은 폰(S22)에서도 무대 아래 안내가 버튼에 가리지 않게 무대를 낮게 잡는다.
 private val SPOTS = listOf(
-    StageSpot("bass", "bass", 0.18f, 104.dp, 74.dp),
-    StageSpot("drums", "drums", 0.50f, 92.dp, 88.dp),
-    StageSpot("piano", "piano", 0.82f, 104.dp, 74.dp),
-    StageSpot("guitar", "guitar", 0.31f, 262.dp, 78.dp),
-    StageSpot(Demo.GUITAR2, "guitar", 0.69f, 262.dp, 78.dp),
+    StageSpot("bass", "bass", 0.18f, 84.dp, 64.dp),
+    StageSpot("drums", "drums", 0.50f, 74.dp, 76.dp),
+    StageSpot("piano", "piano", 0.82f, 84.dp, 64.dp),
+    StageSpot("guitar", "guitar", 0.31f, 212.dp, 68.dp),
+    StageSpot(Demo.GUITAR2, "guitar", 0.69f, 212.dp, 68.dp),
 )
-private val STAGE_HEIGHT = 372.dp
+private val STAGE_HEIGHT = 300.dp
+
+/** ✓ 표시가 원 밖으로 조금 나와도 잘리지 않게 원 둘레에 남겨 두는 여백. */
+private val BADGE_ROOM = 6.dp
 
 /** 아래 요약에 쓰는 순서 (기타가 맨 끝에 오지 않게) */
 private val SUMMARY_ORDER = listOf("drums", "guitar", Demo.GUITAR2, "bass", "piano")
@@ -86,10 +91,6 @@ fun BandStageScreen(
     onChange: (Set<String>) -> Unit,
     onBack: () -> Unit,
     onNext: () -> Unit,
-    /** 제목 위에 보여줄 안내 (기타 대수 바꿔서 다시 만들 때). */
-    notice: String? = null,
-    /** 이 구성으로는 만들 수 없는 이유. 있으면 '다음'을 막고 아래에 보여준다. */
-    blocked: String? = null,
 ) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -132,28 +133,23 @@ fun BandStageScreen(
                 Text("${names.size}", fontSize = 22.sp, fontWeight = FontWeight.Black)
                 Text(tr("개", ""), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.onSurfaceVariant)
             }
-            if (blocked != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(blocked, fontSize = 13.sp, color = cs.error, lineHeight = 18.sp)
-            }
             Spacer(Modifier.height(12.dp))
             Button(shape = ButtonShape,
-                onClick = onNext, enabled = lineup.isNotEmpty() && blocked == null,
+                onClick = onNext, enabled = lineup.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
             ) { Text(tr("다음", "Next"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
         }
     }) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            if (notice != null) {
-                InfoNote(notice, strong = true)
-                Spacer(Modifier.height(14.dp))
-            }
+        val scroll = rememberScrollState()
+        // 기타 대수를 바꾸면 무대 아래 안내가 나오므로, 가려지지 않게 끝까지 내려 준다.
+        LaunchedEffect(guitars) { if (guitars > 0) scroll.animateScrollTo(scroll.maxValue) }
+        Column(Modifier.verticalScroll(scroll)) {
             Text(tr("우리 밴드에 어떤 악기가 있나요?", "What instruments are in your band?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
             Text(tr("무대에서 눌러 고르세요 · 기타는 2대까지", "Tap them on stage · up to 2 guitars"),
                 fontSize = 14.sp, color = cs.onSurfaceVariant)
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(14.dp))
             Stage(lineup, guitars, onTap = { tap(it) })
             // 기타 대수에 따른 안내 (개인 연습용과 같은 문구).
             Demo.guitarNote(guitars)?.let {
@@ -184,7 +180,7 @@ private fun Stage(lineup: Set<String>, guitars: Int, onTap: (String) -> Unit) {
             val h = size.height
             drawRect(Brush.radialGradient(listOf(Color(0xFF26262F), Color(0xFF16161B)), center = Offset(w / 2, 0f), radius = w * 0.8f))
             // 바닥 (넓은 타원의 윗부분)
-            val floorTop = h - 170.dp.toPx()
+            val floorTop = h - 140.dp.toPx()
             drawOval(
                 Brush.verticalGradient(listOf(Color(0xFF22222A), Color(0xFF1A1A20)), startY = floorTop, endY = h),
                 topLeft = Offset(-w * 0.1f, floorTop), size = Size(w * 1.2f, 260.dp.toPx()),
@@ -226,7 +222,7 @@ private fun Stage(lineup: Set<String>, guitars: Int, onTap: (String) -> Unit) {
             }
             val labelWidth = 104.dp
             Box(
-                Modifier.offset(x = stageWidth * s.x - labelWidth / 2, y = s.y - s.size / 2).width(labelWidth),
+                Modifier.offset(x = stageWidth * s.x - labelWidth / 2, y = s.y - s.size / 2 - BADGE_ROOM).width(labelWidth),
                 contentAlignment = Alignment.TopCenter,
             ) { InstrumentSpot(s, state) { onTap(s.key) } }
         }
@@ -254,9 +250,10 @@ private fun InstrumentSpot(spot: StageSpot, state: SpotState, onClick: () -> Uni
             },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(spot.size)) {
+        // 원 둘레에 BADGE_ROOM만큼 여백을 둬서 오른쪽 위 ✓가 잘리지 않게 한다.
+        Box(Modifier.size(spot.size + BADGE_ROOM * 2)) {
             Box(
-                Modifier.fillMaxSize().clip(CircleShape).background(fill)
+                Modifier.padding(BADGE_ROOM).fillMaxSize().clip(CircleShape).background(fill)
                     .then(
                         when (state) {
                             SpotState.On -> Modifier.border(4.dp, Orange.copy(alpha = 0.25f), CircleShape)
@@ -268,7 +265,7 @@ private fun InstrumentSpot(spot: StageSpot, state: SpotState, onClick: () -> Uni
             ) { InstrumentIcon(spot.icon, iconColor, size = spot.size * 0.52f) }
             if (state == SpotState.Locked) {
                 // 아직 고를 수 없는 자리: 점선 원
-                Canvas(Modifier.fillMaxSize()) {
+                Canvas(Modifier.padding(BADGE_ROOM).fillMaxSize()) {
                     val stroke = 2.dp.toPx()
                     drawCircle(
                         Color(0xFF3A3A45), radius = size.minDimension / 2 - stroke / 2,
@@ -278,20 +275,20 @@ private fun InstrumentSpot(spot: StageSpot, state: SpotState, onClick: () -> Uni
             }
             if (on) {
                 Box(
-                    Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(22.dp)
+                    Modifier.align(Alignment.TopEnd).size(22.dp)
                         .clip(CircleShape).background(LabelOn),
                     contentAlignment = Alignment.Center,
                 ) { Text("✓", fontSize = 13.sp, fontWeight = FontWeight.Black, color = OnOrange) }
             }
         }
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(2.dp))
         Text(
             label, fontSize = 14.sp, maxLines = 1,
             fontWeight = if (on) FontWeight.ExtraBold else FontWeight.SemiBold,
             color = when (state) { SpotState.On -> LabelOn; SpotState.Off -> LabelOff; SpotState.Locked -> LabelLocked },
         )
         if (state == SpotState.Locked) {
-            Text(tr("기타 1 먼저", "Guitar 1 first"), fontSize = 11.sp, color = LabelLocked, maxLines = 1)
+            Text(tr("기타 1 먼저", "Guitar 1 first"), fontSize = 12.sp, color = LabelOff, maxLines = 1)
         }
     }
 }

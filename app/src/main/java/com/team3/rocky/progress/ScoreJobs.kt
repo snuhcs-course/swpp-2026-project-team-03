@@ -1,5 +1,6 @@
 package com.team3.rocky.progress
 
+import com.team3.rocky.WorkStore
 import android.content.Context
 import android.net.Uri
 import android.widget.Toast
@@ -60,6 +61,8 @@ class ScoreJob(
         internal set
     /** 업로드 중 같은 진행률이 없는 단계 안내 */
     var phase by mutableStateOf<String?>(null)
+    /** 서버에서 차례를 기다리는 중. 이때는 진행률을 올리지 않고 0% '대기 중'으로 보여준다. */
+    var queued by mutableStateOf(false)
         internal set
     var cancelling by mutableStateOf(false)
         internal set
@@ -169,8 +172,10 @@ object ScoreJobs {
                 runOnServer(app, job, job.audio)
                 // 그사이 사용자가 지운 곡이면 알리지 않는다. 앱을 안 보고 있으면 휴대폰 알림으로.
                 if (job in jobs) {
+                    // 완성되면 바로 보관함에 저장한다 (팀 결정: 따로 '저장'을 누르지 않아도 남게).
+                    if (!job.saved) { WorkStore.add(app, job.toWork()); job.saved = true }
                     if (appVisible) Toast.makeText(
-                        app, tr("'${job.title}' 악보가 완성됐어요", "'${job.title}' is ready"), Toast.LENGTH_LONG,
+                        app, tr("'${job.title}' 악보가 완성돼서 보관함에 저장했어요", "'${job.title}' is ready and saved to your library"), Toast.LENGTH_LONG,
                     ).show() else JobNotifier.ready(app, job)
                 }
             } catch (e: CancellationException) {
@@ -219,15 +224,16 @@ object ScoreJobs {
         // Keep its runner here until cancel() has sent the new server ID upstream.
         while (job.cancelRequested) delay(100)
         job.phase = null
-        // 서버에 올라간 순간부터 1%. (올리는 중에는 '곡을 보내는 중'으로 0%)
-        job.bar.started()
         val id = job.serverId!!
         val tracker = ServerProgress(server, maxMissed = 90, onStatus = { st ->
+            // 차례를 기다리는 동안은 0% '대기 중'. 실제로 시작하면 1%부터 올린다.
+            job.queued = st.state == "queued"
+            if (!job.queued) job.bar.started()
             // 서버의 note는 개발 용어일 수 있어서 그대로 보여주지 않고, 사용자가 알 것만 바꿔 적는다.
             job.phase = when {
                 st.state == "queued" && (st.queuePosition ?: 0) > 1 ->
                     tr("대기 중 · 앞에 ${st.queuePosition!! - 1}곡", "Waiting · ${st.queuePosition!! - 1} ahead")
-                st.state == "queued" -> tr("곧 시작해요", "Starting soon")
+                st.state == "queued" -> tr("대기 중 · 곧 시작해요", "Waiting · starting soon")
                 else -> noteText(st.note)
             }
         }, onMissed = { missed ->
@@ -235,9 +241,11 @@ object ScoreJobs {
             if (missed > 0) job.phase = tr("연결 끊김 · 다시 연결 중", "Disconnected · reconnecting")
         })
         tracker.track(id).collect { p ->
+            if (job.queued) return@collect
             // 마지막 '완료'는 결과 파일을 다 받은 뒤에 보낸다.
             job.progress = if (p.done) p.copy(done = false, etaSec = 0) else p
         }
+        job.queued = false
         job.phase = tr("완성된 악보를 받는 중", "Downloading your scores")
         val local = withContext(Dispatchers.IO) { ScoreStore.download(app, server, id, job.id) }
         val faint = Demo.faintParts(job.lineup, job.claimed, local.result.faintParts)
@@ -372,9 +380,10 @@ object ScoreJobs {
      */
     fun classify(e: Exception): Failure = when (e) {
         is FileGoneException -> Failure(failureMessage(e), retry = false)
+        // 서버에서 처리하다 실패한 곡은 같은 파일로 다시 돌려도 안 될 수 있어서(깨진 파일 등) 다시 시도를 주지 않는다.
+        // 목록에서 빼고 이유를 팝업으로 알린다. '다시 시도'는 인터넷·서버 연결 문제(아래)일 때만.
         is JobFailedException -> when {
             e.reason != null -> Failure(rejectionMessage(e.reason), retry = false)
-            e.retryable == true -> Failure(serverFailureMessage(e.errorCode, e.retryFrom, e.userMessage, e.retryAfterSec), true, e.retryAfterSec)
             else -> Failure(serverFailureMessage(e.errorCode, e.retryFrom, e.userMessage, null), retry = false)
         }
         is ApiException -> when (e.code) {
@@ -387,27 +396,20 @@ object ScoreJobs {
 
     /** 서버 처리 실패(#25 error_code)를 사용자 문장으로. 무엇이 일어났고, 다시 시도하면 무엇을 하는지. */
     fun serverFailureMessage(code: String?, retryFrom: String?, serverMessage: String?, waitSec: Int?): String {
-        // 사용자 말로: 무엇이 안 됐는지 + 다시 시도하면 무엇을 하는지. (채보·단계·프로그램 같은 말은 쓰지 않는다)
-        val redo = if (retryFrom == "pdf") tr(
-            "다시 시도하면 PDF만 다시 만들어요 (1~2분).",
-            "Retry makes just the PDF again (1–2 min).",
-        ) else tr(
-            "다시 시도하면 멈춘 곳부터 이어서 만들어요 (10분 안팎).",
-            "Retry picks up where it stopped (about 10 min).",
-        )
+        // 사용자 말로: 무엇이 안 됐는지 + 어떻게 하면 되는지. (채보·단계·프로그램 같은 말은 쓰지 않는다)
         return when (code) {
-            "pdf_network" -> {
-                val wait = if ((waitSec ?: 60) >= 60 && (waitSec ?: 60) % 60 == 0) tr("${(waitSec ?: 60) / 60}분", "${(waitSec ?: 60) / 60} min")
-                else tr("${waitSec}초", "$waitSec s")
-                tr(
-                    "악보를 PDF로 만드는 중에 오류가 났어요. $wait 뒤에 다시 시도하면 PDF만 다시 만들어요 (1~2분).",
-                    "Something went wrong while making the PDF. Retry in $wait to make just the PDF again (1–2 min).",
-                )
-            }
-            "timeout" -> tr("악보를 만드는 데 너무 오래 걸렸어요. ", "Making the scores took too long. ") + redo
-            "pipeline_error" -> (if (retryFrom == "pdf") tr("악보를 PDF로 만드는 중에 오류가 났어요. ", "Something went wrong while making the PDF. ")
-                else tr("악보를 만드는 중에 오류가 났어요. ", "Something went wrong while making the scores. ")) + redo +
-                tr(" 두 번 연속 안 되면 팀에게 알려 주세요.", " If it fails twice, please tell the team.")
+            "pdf_network" -> tr(
+                "악보를 PDF로 만드는 중에 오류가 났어요. 잠시 뒤 새로 만들어 주세요.",
+                "Something went wrong while making the PDF. Please make it again in a moment.",
+            )
+            "timeout" -> tr(
+                "악보를 만드는 데 너무 오래 걸렸어요. 잠시 뒤 새로 만들어 주세요.",
+                "Making the scores took too long. Please try making it again later.",
+            )
+            "pipeline_error" -> tr(
+                "이 파일로 악보를 만드는 중에 오류가 났어요. 깨진 파일이거나 처리할 수 없는 곡일 수 있어요. 파일을 확인하고 새로 만들어 주세요. 계속 안 되면 팀에게 알려 주세요.",
+                "Something went wrong while making scores from this file. It may be damaged or unsupported. Please check the file and try again; tell the team if it keeps happening.",
+            )
             "no_agent" -> tr(
                 "지금은 악보를 만들 수 없는 상태예요. 잠시 뒤 새로 만들어 보고, 계속 안 되면 팀에게 알려 주세요.",
                 "Scores can't be made right now. Try again later, and tell the team if it keeps happening.",

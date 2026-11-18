@@ -296,18 +296,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
                 else tr("${SignUpValidator.NICKNAME_MIN}~${SignUpValidator.NICKNAME_MAX}자, 한글·영문·숫자·_", "${SignUpValidator.NICKNAME_MIN}–${SignUpValidator.NICKNAME_MAX} characters: letters, numbers, _"),
                 imeAction = ImeAction.Done, onDone = { focus.clearFocus() },
             )
-            Spacer(Modifier.height(16.dp))
-            Text(tr("연주하는 파트 (선택)", "Your instrument (optional)"), fontWeight = FontWeight.Bold)
-            Text(
-                tr("새 악보를 만들 때 미리 선택돼요.", "Preselected when you make a new score."),
-                fontSize = 13.sp, color = cs.onSurface,
-            )
-            Spacer(Modifier.height(10.dp))
-            // 한 사람은 파트 하나만 맡는다. 같은 칸을 다시 누르면 선택을 뺀다.
-            PartChips(form.instruments) { inst ->
-                edit { it.copy(instruments = if (inst in it.instruments) emptySet() else setOf(inst)) }
-            }
-
+            // 연주하는 악기는 회원가입에서 묻지 않고 밴드에 들어갈 때 고른다 (UAT 의견).
             Spacer(Modifier.height(24.dp))
             SectionLabel(tr("약관 동의", "Agreements"))
             val all = form.over14 && form.agreeTerms && form.agreePrivacy
@@ -418,10 +407,10 @@ fun AccountScreen(
                 imeAction = ImeAction.Done, onDone = { focus.clearFocus() },
             )
             Spacer(Modifier.height(12.dp))
-            Text(tr("연주하는 파트", "Your instrument"), fontWeight = FontWeight.Bold)
+            Text(tr("연주하는 악기 (여러 개 가능)", "Instruments you play (pick any)"), fontWeight = FontWeight.Bold)
             Text(tr("새 악보를 만들 때 미리 선택돼요.", "Preselected when you make a new score."), fontSize = 13.sp, color = cs.onSurface)
             Spacer(Modifier.height(10.dp))
-            PartChips(parts) { p -> parts = if (p in parts) emptySet() else setOf(p); error = null }
+            PartChips(parts) { p -> parts = if (p in parts) parts - p else parts + p; error = null }
 
             Spacer(Modifier.height(24.dp))
             SectionLabel(tr("화면", "Display"))
@@ -468,8 +457,19 @@ fun AccountScreen(
             dismissButton = { TextButton(onClick = { confirm = false }) { Text(tr("취소", "Cancel")) } },
             title = { Text(tr("로그아웃할까요?", "Log out?")) },
             text = {
-                Text(tr("저장한 악보는 남고, 만들던 악보는 멈춰요.",
-                    "Saved scores stay. Scores in progress stop."))
+                // 만드는 중인 악보가 있으면 사라진다는 것을 눈에 띄게 알린다 (UAT 의견).
+                val running = com.team3.rocky.progress.ScoreJobs.runningCount
+                Column {
+                    if (running > 0) {
+                        Text(
+                            tr("지금 만들고 있는 악보 ${running}개가 멈추고 사라져요. 다 만든 뒤에 로그아웃하는 걸 추천해요.",
+                                "$running score(s) in progress will stop and be lost. We suggest logging out after they finish."),
+                            color = cs.error, fontWeight = FontWeight.Bold, lineHeight = 21.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text(tr("완성된 악보는 보관함에 남아요.", "Finished scores stay in your library."))
+                }
             },
         )
     }
@@ -635,7 +635,7 @@ private fun privacy() = if (AppSettings.lang == Lang.EN) "Privacy policy" to """
     • Your account is stored on the ROCKY server so you can log in on any phone and share scores with your band.
     • You may refuse, but then you can't sign up.
 """.trimIndent() else "개인정보 수집·이용" to """
-    • 수집 항목: 이메일, 비밀번호(복원할 수 없는 형태로 암호화해 저장), 닉네임, 연주하는 파트(선택), 프로필 사진(선택), 약관 동의 시각
+    • 수집 항목: 이메일, 비밀번호(복원할 수 없는 형태로 암호화해 저장), 닉네임, 연주하는 악기(선택), 프로필 사진(선택), 약관 동의 시각
     • 이용 목적: 회원 식별과 로그인, 악보 보관함 제공, 악보 만들기 기본 설정
     • 보관 기간: 회원 탈퇴 시까지
     • 회원 정보는 ROCKY 서버에 저장되어, 다른 휴대폰에서 로그인하고 밴드와 악보를 공유하는 데 쓰입니다.

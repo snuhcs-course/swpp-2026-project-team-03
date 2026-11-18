@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.io.File
+import kotlinx.coroutines.launch
 
 // ---------- 테마 ----------
 // 시안 A '스튜디오': 무채색 바탕 + 절제된 주황, 얇은 1px 테두리, 넉넉한 여백.
@@ -90,12 +91,13 @@ private val LightColors = lightColorScheme(
 
 /** 앱 전체 글꼴. 한글이 또렷한 Pretendard(SIL OFL 1.1). */
 val Pretendard = FontFamily(
+    // 글자가 너무 두꺼워 무거워 보인다는 의견(UAT)에 따라 Bold부터 한 단계씩 가볍게 그린다.
     Font(R.font.pretendard_regular, FontWeight.Normal),
     Font(R.font.pretendard_medium, FontWeight.Medium),
     Font(R.font.pretendard_semibold, FontWeight.SemiBold),
-    Font(R.font.pretendard_bold, FontWeight.Bold),
-    Font(R.font.pretendard_extrabold, FontWeight.ExtraBold),
-    Font(R.font.pretendard_extrabold, FontWeight.Black),
+    Font(R.font.pretendard_semibold, FontWeight.Bold),
+    Font(R.font.pretendard_bold, FontWeight.ExtraBold),
+    Font(R.font.pretendard_bold, FontWeight.Black),
 )
 
 /**
@@ -103,23 +105,27 @@ val Pretendard = FontFamily(
  * 안드로이드 13(API 33) 이상에서 글자 언어가 한국어일 때 적용된다. 그 아래 버전은 기본 줄바꿈.
  */
 private val WordLineBreak = LineBreak(
-    strategy = LineBreak.Strategy.HighQuality,
-    strictness = LineBreak.Strictness.Strict,
+    strategy = LineBreak.Strategy.Balanced,
+    strictness = LineBreak.Strictness.Normal,
     wordBreak = LineBreak.WordBreak.Phrase,
 )
 
-/** 모든 글자 스타일에 Pretendard를 쓰고, 큰 제목은 자간을 살짝 좁힌다. 줄바꿈은 단어 단위. */
+/**
+ * 글자 스타일. 화면 글자(bodyLarge, 제목들)는 한국어가 단어 중간에서 끊기지 않게 단어 단위로 줄을 바꾸고,
+ * 팝업(AlertDialog)과 작은 글자(bodyMedium·bodySmall·label)는 다른 앱처럼 기본 줄바꿈을 쓴다
+ * (단어 단위로 하면 줄 끝이 들쭉날쭉해서 어색하다는 의견).
+ */
 private fun rockyTypography(lang: Lang) = Typography().let { t ->
     val locale = if (lang == Lang.KO) LocaleList("ko-KR") else LocaleList("en-US")
-    fun TextStyle.p(tight: Boolean = false) =
+    fun TextStyle.p(tight: Boolean = false, words: Boolean = true) =
         copy(fontFamily = Pretendard, letterSpacing = if (tight) (-0.4).sp else letterSpacing,
-            lineBreak = WordLineBreak, localeList = locale)
+            lineBreak = if (words) WordLineBreak else LineBreak.Simple, localeList = locale)
     t.copy(
         displayLarge = t.displayLarge.p(true), displayMedium = t.displayMedium.p(true), displaySmall = t.displaySmall.p(true),
-        headlineLarge = t.headlineLarge.p(true), headlineMedium = t.headlineMedium.p(true), headlineSmall = t.headlineSmall.p(true),
+        headlineLarge = t.headlineLarge.p(true), headlineMedium = t.headlineMedium.p(true), headlineSmall = t.headlineSmall.p(true, words = false),
         titleLarge = t.titleLarge.p(true), titleMedium = t.titleMedium.p(), titleSmall = t.titleSmall.p(),
-        bodyLarge = t.bodyLarge.p(), bodyMedium = t.bodyMedium.p(), bodySmall = t.bodySmall.p(),
-        labelLarge = t.labelLarge.p(), labelMedium = t.labelMedium.p(), labelSmall = t.labelSmall.p(),
+        bodyLarge = t.bodyLarge.p(), bodyMedium = t.bodyMedium.p(words = false), bodySmall = t.bodySmall.p(words = false),
+        labelLarge = t.labelLarge.p(words = false), labelMedium = t.labelMedium.p(words = false), labelSmall = t.labelSmall.p(words = false),
     )
 }
 
@@ -128,8 +134,17 @@ fun RockyTheme(dark: Boolean = AppSettings.dark, content: @Composable () -> Unit
     // 언어를 바꾸면 줄바꿈 규칙(한국어 단어 단위)도 같이 바뀐다.
     val lang = AppSettings.lang
     val typography = remember(lang) { rockyTypography(lang) }
-    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = typography, content = content)
+    // 글씨가 커서 투박해 보인다는 의견(UAT): 앱 전체 글자를 6% 작게 (휴대폰 글자 크기 설정은 그대로 곱해진다).
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, density.fontScale * TEXT_SCALE),
+    ) {
+        MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = typography, content = content)
+    }
 }
+
+/** 앱 전체 글자 크기 배율. */
+const val TEXT_SCALE = 0.94f
 
 /** 카드 바탕: 둥근 모서리 + 면 색 + 얇은 1px 테두리 (시안 A). */
 fun Modifier.card(shape: Shape, cs: ColorScheme, bg: Color = cs.surface, line: Color = cs.outlineVariant): Modifier =
@@ -198,12 +213,46 @@ object ProfileStore {
     fun save(ctx: Context, userId: Long, uri: Uri): Boolean = try {
         val bmp = decodeSampled(ctx, uri, 512) ?: error("decode")
         file(ctx, userId).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        upload(ctx)
         true
     } catch (_: Exception) {
         false
     }
 
-    fun remove(ctx: Context, userId: Long) { file(ctx, userId).delete() }
+    fun remove(ctx: Context, userId: Long) { file(ctx, userId).delete(); upload(ctx, remove = true) }
+
+    // 밴드 멤버가 서로의 사진을 볼 수 있게 서버에도 올린다 (PUT/DELETE /me/photo). 실패해도 폰의 사진은 남는다.
+    private val io = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    private fun upload(ctx: Context, remove: Boolean = false) {
+        val app = ctx.applicationContext
+        val token = com.team3.rocky.auth.AuthRepository.token(app) ?: return
+        val userId = com.team3.rocky.auth.AuthRepository.currentUserId(app) ?: return
+        io.launch {
+            runCatching {
+                val api = com.team3.rocky.server.MemberApi.from(app, token)
+                if (remove) api.bytes("DELETE", "/me/photo")
+                else api.bytes("PUT", "/me/photo", file(app, userId).readBytes())
+            }
+        }
+    }
+
+    /**
+     * 밴드 멤버 사진. [photoAt]은 서버가 알려 준 사진 바꾼 시각이라, 같은 값이면 폰에 받아 둔 것을 쓴다.
+     * 사진이 없거나 받을 수 없으면 null (기본 프로필로 보인다). IO 스레드에서 부른다.
+     */
+    fun member(ctx: Context, userId: Long, photoAt: Long?): ImageBitmap? {
+        if (photoAt == null) return null
+        val cached = File(ctx.cacheDir, "member_${userId}_$photoAt.jpg")
+        if (!cached.exists()) {
+            val token = com.team3.rocky.auth.AuthRepository.token(ctx) ?: return null
+            val data = runCatching { com.team3.rocky.server.MemberApi.from(ctx, token).bytes("GET", "/users/$userId/photo") }
+                .getOrNull() ?: return null
+            ctx.cacheDir.listFiles { f -> f.name.startsWith("member_${userId}_") }?.forEach { it.delete() }
+            cached.writeBytes(data)
+        }
+        return BitmapFactory.decodeFile(cached.absolutePath)?.asImageBitmap()
+    }
 
     fun load(ctx: Context, userId: Long): ImageBitmap? =
         file(ctx, userId).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() }
@@ -221,21 +270,23 @@ object ProfileStore {
     }
 }
 
-/** 둥근 프로필 사진. 사진이 없으면 닉네임 첫 글자를 보여준다. */
+/** 둥근 프로필 사진. 사진이 없으면 기본 프로필(사람 모양)을 보여준다. */
 @Composable
 fun Avatar(image: ImageBitmap?, nickname: String, size: Dp, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     Box(
-        modifier.size(size).clip(CircleShape).background(cs.primary.copy(alpha = 0.18f)),
+        modifier.size(size).clip(CircleShape).background(cs.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         if (image != null) {
-            Image(image, contentDescription = tr("프로필 사진", "Profile photo"), contentScale = ContentScale.Crop, modifier = Modifier.size(size))
+            Image(image, contentDescription = tr("$nickname 프로필 사진", "$nickname's photo"), contentScale = ContentScale.Crop, modifier = Modifier.size(size))
         } else {
-            Text(
-                nickname.trim().take(1).ifEmpty { "?" },
-                fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Bold, color = cs.primary,
-            )
+            val fg = cs.onSurfaceVariant
+            Canvas(Modifier.size(size)) {
+                val w = this.size.width
+                drawCircle(fg, radius = w * 0.18f, center = Offset(w / 2, w * 0.40f))
+                drawOval(fg, topLeft = Offset(w * 0.20f, w * 0.64f), size = Size(w * 0.60f, w * 0.50f))
+            }
         }
     }
 }

@@ -64,7 +64,7 @@ data class JobResult(
      * 악보는 만들어지지만 음이 아주 적을 수 있어서 결과 화면에 ⚠️를 붙인다.
      */
     val faintParts: List<String> = emptyList(),
-    /** 파이프라인이 원곡에서 들은 기타 대수 (0~2). 모르면 null. '기타 대수 바꿔서 다시 만들기'에 보여준다. */
+    /** 파이프라인이 원곡에서 들은 기타 대수 (0~2). 모르면 null. (지금 앱 화면에는 쓰지 않는다.) */
     val originalGuitars: Int? = null,
 )
 

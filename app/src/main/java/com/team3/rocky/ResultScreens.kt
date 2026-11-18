@@ -1,5 +1,7 @@
 package com.team3.rocky
 
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedTextField
 import kotlin.math.roundToInt
 import androidx.compose.ui.layout.layout
 import android.Manifest
@@ -14,6 +16,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.DropdownMenu
@@ -30,7 +34,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -83,6 +86,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -119,29 +123,17 @@ fun ResultScreen(
     onBack: () -> Unit,
     onSaved: () -> Unit,
     onShareToBand: () -> Unit,
-    /** '기타 대수 바꿔서 다시 만들기'에서 대수를 고르면 불린다 → 우리 밴드 구성·곡 올리기부터 다시. */
-    onRedoGuitars: (GuitarRedo) -> Unit = {},
     myPart: String? = null,
 ) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    var saved by remember { mutableStateOf(WorkStore.load(ctx).any { it.id == work.id }) }
+    val saved = remember { WorkStore.load(ctx).any { it.id == work.id } }
     val ai = work.aiGenerated
     // 서버에서 만들어 폰에 받아 둔 PDF·MIDI·MP3. 키를 바꾸면 새 결과로 바뀐다. 받아 둔 파일이 없으면 악보가 없다고 알려 준다.
     var local by remember(work.id) { mutableStateOf(ScoreStore.load(ctx, work.id)) }
     var changingKey by remember { mutableStateOf(false) }
     var keyDialog by remember { mutableStateOf(false) }
-    var guitarDialog by remember { mutableStateOf(false) }
-    if (guitarDialog) {
-        GuitarCountDialog(
-            heard = local?.result?.originalGuitars,
-            // 모델이 찾은 원곡 악기 중 기타 아닌 것. 다시 만들 때 그대로 원곡 구성으로 보낸다.
-            others = (local?.result?.originalParts ?: work.original).filter { it in Demo.NON_GUITAR }.distinct(),
-            onDismiss = { guitarDialog = false },
-            onNext = { plan -> guitarDialog = false; onRedoGuitars(plan.copy(title = work.title)) },
-        )
-    }
     // 대화상자에서 고른 키. '바꾸기'를 눌러야 서버가 한 번만 다시 만든다 (+반 키를 두 번 눌러도 한 번).
     var targetKey by remember(work.id) { mutableIntStateOf(local?.semitones ?: 0) }
     // 원곡에 있다고 골랐지만 원곡에서 소리가 거의 들리지 않은 파트. 칩을 누르면 무슨 뜻인지 3초 동안 보여준다.
@@ -157,8 +149,10 @@ fun ResultScreen(
     // 서버 결과는 기타 2를 따로 가질 수 있어서 파트 이름 그대로 쓴다.
     fun baseOf(part: String?) = part ?: Demo.BAND
     fun serverPart(base: String) = base.takeIf { it != Demo.BAND }
-    // 밴드에서 열면 내 파트를 먼저 골라 둔다. 보컬처럼 악보가 없는 파트는 밴드 전체 악보를 보여준다.
+    // 밴드에서 열면 내 파트, 개인 연습용이면 연습할 악기를 먼저 골라 둔다 ('내 파트' 글자 대신 칩이 켜져 있다).
+    // 보컬처럼 악보가 없는 파트는 밴드 전체 악보를 보여준다.
     val bandPart = myPart?.takeIf { it in work.instruments }
+        ?: work.instruments.firstOrNull()?.takeIf { work.personal }
     var selectedPart by remember { mutableStateOf(bandPart) }   // null = 전체
 
     // ----- 재생 -----
@@ -171,32 +165,8 @@ fun ResultScreen(
     var follow by remember { mutableStateOf(true) }
     DisposableEffect(Unit) { onDispose { player.release() } }
 
-    // 개인 연습용의 '전체'는 올린 원곡 파일을 그대로 들려준다 (이 폰에 파일이 있고, 키를 바꾸지 않았을 때).
-    // 원곡을 열 수 없으면 악보로 합성한 소리로 대신한다.
-    var originalPlaying by remember { mutableStateOf(false) }
-    fun originalSong(base: String): android.net.Uri? =
-        work.audio?.takeIf { work.personal && base == Demo.BAND && (local?.semitones ?: 0) == 0 }?.let { android.net.Uri.parse(it) }
-
     /** 선택한 파트의 음원을 준비한다. 위치는 그대로 이어서 재생할 수 있게 [startAt]으로 옮긴다. */
     fun load(base: String, startAt: Int): Boolean {
-        val song = originalSong(base)
-        if (song != null) {
-            val ok = runCatching {
-                player.reset()
-                player.setDataSource(ctx, song)
-                player.prepare()
-            }.isSuccess
-            if (ok) {
-                originalPlaying = true
-                player.setOnCompletionListener { playing = false; position = 0; player.seekTo(0) }
-                duration = player.duration
-                player.seekTo(startAt.coerceIn(0, duration))
-                position = startAt.coerceIn(0, duration)
-                loadedBase = base
-                return true
-            }
-        }
-        originalPlaying = false
         // 서버 결과는 악보로 합성한 MP3(없으면 MIDI)를 들려준다.
         val path = local?.audio(serverPart(base))?.absolutePath
         if (path == null) {
@@ -283,17 +253,12 @@ fun ResultScreen(
             }.getOrNull()?.takeIf { it.count > 0 }
         }
     }
-    val scoreScroll = rememberScrollState()
     val currentMeasure = clock?.measureAt((dragging?.toLong() ?: position.toLong()))
     // 재생을 시작한 뒤에만 지금 마디를 칠한다.
     val currentBox = currentMeasure?.let { measures?.box(it) }?.takeIf { duration > 0 }
-    // 마디를 못 찾은 악보(MIDI가 없거나 줄을 못 읽음)는 재생 시간 비율로 내린다. 마디를 찾았으면 ScoreSheet가 그 줄로 넘긴다.
-    LaunchedEffect(position, follow, playing, scoreScroll.maxValue, measures) {
-        if (measures == null && follow && playing && duration > 0 && scoreScroll.maxValue > 0) {
-            val target = (scoreScroll.maxValue * position.toFloat() / duration).toInt()
-            scoreScroll.animateScrollTo(target, tween(200, easing = LinearEasing))
-        }
-    }
+    // 마디를 못 찾은 악보(MIDI가 없거나 줄을 못 읽음)는 재생 시간 비율로 쪽을 넘긴다. 마디를 찾았으면 ScoreSheet가 그 쪽·줄로 넘긴다.
+    val followPage = pages?.size?.takeIf { measures == null && follow && playing && duration > 0 && it > 0 }
+        ?.let { n -> (n * position.toFloat() / duration).toInt().coerceIn(0, n - 1) }
 
     /** 키 바꾸기: 서버가 전체·악기별 악보와 음원을 새 키로 다시 만든다 (보관함에 저장한 악보만). */
     fun changeKey(next: Int) {
@@ -328,23 +293,15 @@ fun ResultScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var fullScreen by remember { mutableStateOf(false) }
     var zoom by remember { mutableFloatStateOf(1f) }
-    // "악기를 누르면 그 악기만 들려요" 안내는 처음 한 번만. 닫으면 다시 보이지 않는다.
-    val prefs = remember { ctx.getSharedPreferences(TIP_PREF, android.content.Context.MODE_PRIVATE) }
-    var showTip by remember { mutableStateOf(!prefs.getBoolean(TIP_PARTS, false)) }
-    fun closeTip() { showTip = false; prefs.edit().putBoolean(TIP_PARTS, true).apply() }
+    // 처음 열면 이 화면에서 할 수 있는 것을 안내한다 (홈의 처음 안내와 같은 모양). 메뉴에서 다시 볼 수 있다.
+    var guide by remember { mutableStateOf(!ResultGuide.seen(ctx)) }
+    if (guide) ResultGuideDialog(personal = work.personal, onDone = { guide = false })
     BackHandler(enabled = fullScreen) { fullScreen = false }
 
-    fun saveToLibrary() {
-        WorkStore.add(ctx, work); saved = true; onSaved()
-        Toast.makeText(ctx, tr("보관함에 저장했어요", "Saved"), Toast.LENGTH_SHORT).show()
-    }
-
-    // 기타가 맨 끝에 있으면 '그 밖의 것'으로 읽혀서, 다른 악기 사이에 둔다.
-    val chipParts = work.instruments.sortedBy { RESULT_ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } }
 
     val playerBar: @Composable (Boolean) -> Unit = { flat ->
         val who = selectedPart?.let { tr("${Demo.label(it, work.instruments)}만", "${Demo.label(it, work.instruments)} only") }
-            ?: if (originalPlaying || (loadedBase == null && originalSong(Demo.BAND) != null)) tr("원곡", "Original song") else tr("밴드 전체", "Full band")
+            ?: tr("밴드 전체", "Full band")
         // 몇 번째 마디인지 (MIDI로 셀 수 있을 때)
         val bar = clock?.let { c -> tr(" · ${(currentMeasure ?: 0) + 1}/${c.count}마디", " · bar ${(currentMeasure ?: 0) + 1}/${c.count}") }.orEmpty()
         val listening = who + bar
@@ -386,31 +343,46 @@ fun ResultScreen(
         }
     }
 
-    // 악보 맨 아래 별점 (1~5). 품질 개선용으로 모은다.
-    var stars by remember(work.id) { mutableStateOf(RatingStore.stars(ctx, work.id)) }
+    // 악보 마지막 장 다음의 별점 (1~5). 품질 개선용으로 모은다.
+    // '제출' 전에는 별을 계속 바꿀 수 있고 별점 장도 계속 남는다. 제출하면 같은 장에 의견 칸(선택)이 나오고,
+    // 의견도 '제출'하면 별점 장이 더 이상 나오지 않는다.
+    var submitted by remember(work.id) { mutableStateOf(RatingStore.stars(ctx, work.id) > 0) }
+    var finished by remember(work.id) { mutableStateOf(RatingStore.finished(ctx, work.id)) }
+    var stars by remember(work.id) { mutableIntStateOf(0) }
+    var comment by remember(work.id) { mutableStateOf("") }
+    val ratingPage: (@Composable () -> Unit)? = if (finished) null else {
+        {
+            if (!submitted) RatingCard(stars, onRate = { stars = it }, onSubmit = {
+                if (stars > 0) { RatingStore.rate(ctx, work, stars); submitted = true }
+            }, modifier = Modifier.fillMaxWidth())
+            else CommentCard(comment, onChange = { comment = it.take(1000) }, onSubmit = {
+                RatingStore.comment(ctx, work, comment); finished = true
+                Toast.makeText(ctx, tr("고마워요! ROCKY가 더 좋아지는 데 쓸게요", "Thanks! It helps ROCKY get better"), Toast.LENGTH_SHORT).show()
+            }, modifier = Modifier.fillMaxWidth())
+        }
+    }
 
     val sheet: @Composable (Modifier, Boolean) -> Unit = { modifier, bleed ->
         ScoreSheet(
-            pages = pages, scroll = scoreScroll, zoom = zoom,
+            pages = pages, followPage = followPage, zoom = zoom,
             onZoom = { z -> zoom = (zoom * z).coerceIn(1f, 4f) },
             fullScreen = fullScreen, onToggleFullScreen = { fullScreen = !fullScreen },
             hint = hint, onHintClick = { hint = null },
             bleed = bleed,
             box = currentBox,
             followBox = follow && playing,
-            stars = stars,
-            onRate = { n -> stars = n; RatingStore.rate(ctx, work, n) },
+            ratingPage = ratingPage,
             modifier = modifier,
         )
     }
 
     if (fullScreen) {
-        // 전체 화면: 악보와 재생 바만. 뒤로 가기나 오른쪽 아래 버튼으로 돌아온다.
+        // 전체 화면: 악보와 재생 바만. 재생 바는 보통 화면과 같은 자리(아래)에 같은 모양으로 둔다.
         Column(Modifier.fillMaxSize().background(cs.background).statusBarsPadding()) {
             sheet(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp, vertical = 8.dp), false)
             Box(
                 Modifier.windowInsetsPadding(BottomSystemBars)
-                    .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp),
+                    .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 20.dp),
             ) { playerBar(false) }
         }
         return
@@ -467,18 +439,15 @@ fun ResultScreen(
         )
     }
 
-    Page(work.title, onBack, actions = {
+    // 위: 악기 고르기 · 가운데: 악보(좌우로 넘김, 마지막 장 다음은 별점) · 아래: 재생 바 (전체 화면과 같은 자리)
+    Page(work.title, onBack, bottom = { playerBar(false) }, actions = {
         Box {
             TextButton(onClick = { menuOpen = true }) {
                 Text("⋮", fontSize = 22.sp, color = cs.onSurface,
                     modifier = Modifier.semantics { contentDescription = tr("메뉴", "Menu") })
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text(if (saved) tr("보관함에 저장됨", "Saved") else tr("보관함에 저장", "Save to library")) },
-                    enabled = !saved,
-                    onClick = { menuOpen = false; saveToLibrary() },
-                )
+                // 완성된 악보는 보관함에 자동으로 저장되므로 '보관함에 저장'은 없다.
                 // 개인 연습용 악보는 밴드에 공유하지 않는다.
                 if (!work.personal) DropdownMenuItem(
                     text = { Text(tr("밴드에 공유", "Share with a band")) },
@@ -489,7 +458,7 @@ fun ResultScreen(
                     text = {
                         Text(
                             if (saved) tr("키 바꾸기 · ${keyLabel(local?.semitones ?: 0)}", "Change key · ${keyLabel(local?.semitones ?: 0)}")
-                            else tr("키 바꾸기 (저장 후)", "Change key (save first)"),
+                            else tr("키 바꾸기 (보관함 악보만)", "Change key (library scores only)"),
                         )
                     },
                     enabled = saved && local != null,
@@ -505,89 +474,53 @@ fun ResultScreen(
                     text = { Text(tr("전체 화면", "Full screen")) },
                     onClick = { menuOpen = false; fullScreen = true },
                 )
+                DropdownMenuItem(
+                    text = { Text(tr("사용법 보기", "How to use")) },
+                    onClick = { menuOpen = false; guide = true },
+                )
             }
         }
     }) {
-        if (showTip) {
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(cs.surfaceVariant)
-                    .padding(start = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(tr("악기를 누르면 그 악기만 들려요", "Tap an instrument to hear it alone"),
-                    fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                TextButton(onClick = { closeTip() }) {
-                    Text("✕", color = cs.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = tr("닫기", "Close") })
-                }
+        // 위: 악기 고르기. 네 악기 자리는 늘 같고, 이 곡에 없는 악기는 회색으로 막아 둔다.
+        // 개인 연습용은 고를 것이 없어서 칸을 두지 않는다 (기타 2대일 때만 기타 1·기타 2).
+        val onSelect: (String?) -> Unit = { inst ->
+            selectPart(inst)
+            // 표시의 뜻은 칩을 누를 때만 잠깐 보여준다.
+            hint = when (inst) {
+                null -> null
+                in warn -> warnText(inst)
+                in ai -> tr("✨ 원곡에 없어서 AI로 만든 파트예요", "✨ Not in the song, made with AI")
+                else -> null
             }
-            Spacer(Modifier.height(8.dp))
         }
-        // 위: 악기 칩과 재생 바를 카드 하나로 묶는다.
-        Column(Modifier.fillMaxWidth().card(RoundedCornerShape(16.dp), cs)) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    .padding(start = 12.dp, end = 12.dp, top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                PartChip(null, if (work.personal) tr("전체 · 원곡", "All · original") else tr("전체", "All"), selectedPart == null, ai = false) { selectPart(null) }
-                chipParts.forEach { inst ->
-                    val mark = when {
-                        inst in warn -> "⚠️ "
-                        inst in ai -> "✨ "
-                        else -> ""
-                    }
-                    PartChip(inst, mark + Demo.label(inst, work.instruments), selectedPart == inst, ai = inst in ai, warn = inst in warn) {
-                        selectPart(inst)
-                        // 표시의 뜻은 칩을 누를 때만 잠깐 보여준다.
-                        hint = when (inst) {
-                            in warn -> warnText(inst)
-                            in ai -> tr("✨ 원곡에 없어서 AI로 만든 파트예요", "✨ Not in the song, made with AI")
-                            else -> null
-                        }
-                    }
+        if (!work.personal) {
+            PartGrid(
+                instruments = work.instruments, selected = selectedPart,
+                mark = { inst -> when { inst in warn -> "⚠️ "; inst in ai -> "✨ "; else -> "" } },
+                ai = ai.toSet(), warn = warn, onSelect = onSelect,
+            )
+        } else if (Demo.GUITAR2 in work.instruments) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("guitar", Demo.GUITAR2).forEach { inst ->
+                    PartChip(
+                        inst, (if (inst in ai) "✨ " else "") + Demo.label(inst, work.instruments), selectedPart == inst,
+                        ai = inst in ai, modifier = Modifier.weight(1f),
+                    ) { onSelect(inst) }
                 }
-            }
-            HorizontalDivider(color = cs.outlineVariant, modifier = Modifier.padding(top = 12.dp))
-            Box(Modifier.padding(start = 2.dp, top = 4.dp, bottom = 4.dp)) { playerBar(true) }
-        }
-        // 원곡 기타 대수는 모델이 판단한다. 기타 파트가 이상해 보이면 대수를 직접 골라 처음부터 다시 만들 수 있다.
-        if (Demo.guitarCount(work.instruments.toSet()) > 0) {
-            // 한 줄짜리 눌리는 띠: 왼쪽 질문, 오른쪽 주황 동작. 줄 전체를 눌러도 된다.
-            Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp))
-                    .background(cs.surfaceVariant.copy(alpha = 0.6f))
-                    .clickable { player.pause(); playing = false; guitarDialog = true }
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                InstrumentIcon("guitar", cs.onSurfaceVariant, size = 16.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    tr("기타 파트가 이상한가요?", "Guitar parts look off?"),
-                    fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(tr("기타 대수 바꿔서 다시 만들기 ›", "Remake with a guitar count ›"), fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold, color = cs.primary, maxLines = 1)
             }
         }
         Text(
             tr("밴드 곡이 아니면 악보가 부정확할 수 있어요", "Less accurate for non-band songs"),
-            fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
-        Spacer(Modifier.height(10.dp))
-        // 아래: 악보. 화면 양옆 끝까지, 아래에서 올라온 종이처럼.
-        sheet(Modifier.fillMaxWidth().weight(1f).bleed(20.dp), true)
+        Spacer(Modifier.height(8.dp))
+        // 가운데: 악보. 아래 재생 바와 겹치지 않게 남은 높이를 다 쓴다.
+        sheet(Modifier.fillMaxWidth().weight(1f), false)
     }
 }
 
-private const val TIP_PREF = "rocky_settings"
-private const val TIP_PARTS = "tip_parts_seen"
 
-/** 결과 화면 칩 순서. 기타를 가운데 두어 '기타(그 밖의 것)'로 읽히지 않게 한다. */
-private val RESULT_ORDER = listOf("drums", "guitar", Demo.GUITAR2, "bass", "piano", Demo.VOCAL)
 
 /** 지금 키: 원키 / +1반음 / −2반음 */
 private fun keyLabel(semitones: Int): String = when {
@@ -605,14 +538,15 @@ private fun stepLabel(step: Int): String = when (step) {
 }
 
 /**
- * 악보 영역. 두 손가락으로 벌리면 확대(최대 4배), 확대하면 위아래·옆으로 넘겨 본다.
- * [bleed]면 화면 양옆 끝까지 닿고 위 모서리만 둥근, 아래에서 올라온 종이 모양(결과 화면).
+ * 악보 영역. 한 쪽씩 좌우로 넘기고, 마지막 쪽 다음 장이 별점이다.
+ * 두 손가락으로 벌리면 확대(최대 4배), 확대하면 그 쪽 안에서 위아래·옆으로 움직인다(확대 중에는 쪽을 넘기지 않음).
  * 오른쪽 위 버튼으로 전체 화면을 켜고 끄고, 아래 가운데에 몇 쪽인지 보여준다.
  */
 @Composable
 private fun ScoreSheet(
     pages: List<ImageBitmap>?,
-    scroll: ScrollState,
+    /** 마디를 못 찾은 악보에서 재생 위치로 어림한 쪽. 있으면 그 쪽으로 넘긴다. */
+    followPage: Int?,
     zoom: Float,
     onZoom: (Float) -> Unit,
     fullScreen: Boolean,
@@ -620,22 +554,31 @@ private fun ScoreSheet(
     hint: String?,
     onHintClick: () -> Unit,
     bleed: Boolean,
-    /** 지금 연주 중인 마디 (악보 그림의 픽셀 좌표). 칠하고, [followBox]면 그 줄로 넘긴다. */
+    /** 지금 연주 중인 마디 (악보 그림의 픽셀 좌표). 칠하고, [followBox]면 그 쪽·줄로 넘긴다. */
     box: MeasureBox?,
     followBox: Boolean,
-    stars: Int,
-    onRate: (Int) -> Unit,
+    /** 마지막 악보 쪽 다음 장(별점·의견). null이면 다 끝내서 보여주지 않는다. */
+    ratingPage: (@Composable () -> Unit)?,
     modifier: Modifier,
 ) {
     val currentOnZoom by rememberUpdatedState(onZoom)
     val density = LocalDensity.current
-    val hScroll = rememberScrollState()
     val chrome = Color(0xD918181B)
+    val scoreCount = pages?.size ?: 0
+    // 악보 쪽 수 + 별점 한 장 (제출 전까지)
+    val rating = ratingPage != null
+    val pager = rememberPagerState { scoreCount + if (rating) 1 else 0 }
+    // 제출해서 별점 장이 없어지면 마지막 악보 쪽으로 돌아간다.
+    LaunchedEffect(rating) { if (!rating && scoreCount > 0 && pager.currentPage >= scoreCount) pager.scrollToPage(scoreCount - 1) }
+    // 쪽마다 위아래 위치 (확대했거나 쪽이 화면보다 길 때)
+    val scrolls = remember(pages) { List(scoreCount) { ScrollState(0) } }
+    // 파트를 바꾸면 첫 쪽부터
+    LaunchedEffect(pages) { if (scoreCount > 0) pager.scrollToPage(0) }
     BoxWithConstraints(
         modifier
             .clip(if (bleed) RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp) else RoundedCornerShape(16.dp))
             .background(Color.White)
-            // 두 손가락일 때만 가로챈다. 한 손가락은 그대로 스크롤.
+            // 두 손가락일 때만 가로챈다. 한 손가락은 그대로 넘기기·스크롤.
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -651,21 +594,22 @@ private fun ScoreSheet(
             },
         contentAlignment = Alignment.TopCenter,
     ) {
-        val side = 14.dp
+        val side = 12.dp
         val top = if (bleed) 24.dp else 12.dp
-        val gap = 20.dp
         val pageWidth = (maxWidth - side * 2) * zoom
-        val cardWidth = maxWidth - side * 2
-        // 지금 마디가 있는 줄이 바뀔 때마다 그 줄이 위에 오게 넘긴다 (그림은 pageWidth에 맞춰 늘어난다).
-        LaunchedEffect(box?.page, box?.top, followBox, pageWidth) {
+        // 지금 마디가 있는 쪽으로 넘기고, 그 쪽 안에서 그 줄이 위에 오게 한다 (그림은 pageWidth에 맞춰 늘어난다).
+        LaunchedEffect(box?.page, box?.top, followBox, pageWidth, pages) {
             val b = box ?: return@LaunchedEffect
             val list = pages ?: return@LaunchedEffect
             if (!followBox || b.page !in list.indices) return@LaunchedEffect
-            val (w, topPx, gapPx) = with(density) { Triple(pageWidth.toPx(), top.toPx(), gap.toPx()) }
-            var y = topPx
-            for (i in 0 until b.page) y += list[i].height * w / list[i].width + gapPx
-            y += b.top * w / list[b.page].width
-            scroll.animateScrollTo((y - with(density) { 28.dp.toPx() }).toInt().coerceAtLeast(0), tween(350))
+            if (pager.currentPage != b.page) pager.animateScrollToPage(b.page)
+            val (w, topPx) = with(density) { pageWidth.toPx() to top.toPx() }
+            val y = topPx + b.top * w / list[b.page].width
+            scrolls[b.page].animateScrollTo((y - with(density) { 28.dp.toPx() }).toInt().coerceAtLeast(0), tween(350))
+        }
+        LaunchedEffect(followPage) {
+            val target = followPage ?: return@LaunchedEffect
+            if (target != pager.currentPage) pager.animateScrollToPage(target)
         }
         when {
             pages == null -> CircularProgressIndicator(Modifier.padding(40.dp))
@@ -673,15 +617,27 @@ private fun ScoreSheet(
                 tr("이 파트는 악보가 없어요", "No score for this part"),
                 color = Color.Gray, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.padding(40.dp),
             )
-            else -> Column(
-                Modifier.fillMaxSize().verticalScroll(scroll).horizontalScroll(hScroll)
-                    .padding(start = side, end = side, top = top, bottom = 56.dp),
-                verticalArrangement = Arrangement.spacedBy(gap),
-            ) {
+            else -> HorizontalPager(
+                state = pager, modifier = Modifier.fillMaxSize(),
+                // 확대 중에는 손가락으로 그 쪽 안을 움직이고, 쪽은 넘기지 않는다.
+                userScrollEnabled = zoom <= 1.01f,
+            ) { i ->
+                if (i >= pages.size) {
+                    // 마지막 장: 악보를 다 본 다음 평가한다.
+                    Box(Modifier.fillMaxSize().padding(horizontal = side), contentAlignment = Alignment.Center) {
+                        ratingPage?.invoke()
+                    }
+                    return@HorizontalPager
+                }
+                val bmp = pages[i]
+                val mine = box?.takeIf { it.page == i }
                 val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
                 val edge = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                pages.forEachIndexed { i, bmp ->
-                    val mine = box?.takeIf { it.page == i }
+                Box(
+                    Modifier.fillMaxSize().verticalScroll(scrolls[i])
+                        .then(if (zoom > 1.01f) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+                        .padding(start = side, end = side, top = top, bottom = 56.dp),
+                ) {
                     Image(
                         bitmap = bmp, contentDescription = tr("악보", "Score"),
                         contentScale = ContentScale.FillWidth,
@@ -699,8 +655,6 @@ private fun ScoreSheet(
                         },
                     )
                 }
-                // 악보를 끝까지 본 다음에 평가한다.
-                RatingCard(stars, onRate, Modifier.width(cardWidth))
             }
         }
         // 위 가운데 손잡이 (종이 느낌)
@@ -710,13 +664,17 @@ private fun ScoreSheet(
                     .clip(RoundedCornerShape(2.dp)).background(Color(0xFFD4D4D8)),
             )
         }
-        // 몇 쪽인지: 스크롤 위치로 어림한다.
-        if (!pages.isNullOrEmpty() && pages.size > 1) {
+        // 몇 쪽인지. 마지막 악보 쪽에서는 다음 장이 별점이라고 알려 준다.
+        if (!pages.isNullOrEmpty()) {
             val n = pages.size
-            val page = if (scroll.maxValue <= 0) 1
-            else (scroll.value.toFloat() / scroll.maxValue * (n - 1)).roundToInt() + 1
+            val cur = pager.currentPage
+            val label = when {
+                cur >= n -> tr("★ 별점", "★ Rate")
+                cur == n - 1 && rating -> tr("$n / $n · 넘기면 별점 ›", "$n / $n · swipe to rate ›")
+                else -> "${cur + 1} / $n"
+            }
             Text(
-                "$page / $n", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
                     .clip(CircleShape).background(chrome).padding(horizontal = 12.dp, vertical = 6.dp),
             )
@@ -748,9 +706,9 @@ private fun ScoreSheet(
     }
 }
 
-/** 악보 맨 아래 별점 칸. 흰 종이 위에 놓이므로 밝은 색으로 그린다. */
+/** 악보 마지막 장 다음의 별점 칸. 흰 종이 위에 놓이므로 밝은 색으로 그린다. */
 @Composable
-private fun RatingCard(stars: Int, onRate: (Int) -> Unit, modifier: Modifier) {
+private fun RatingCard(stars: Int, onRate: (Int) -> Unit, onSubmit: () -> Unit, modifier: Modifier) {
     val orange = MaterialTheme.colorScheme.primary
     Column(
         modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xFFF4F4F5))
@@ -777,10 +735,46 @@ private fun RatingCard(stars: Int, onRate: (Int) -> Unit, modifier: Modifier) {
         }
         Text(
             if (stars == 0) tr("별을 눌러 5점 만점으로 평가해 주세요", "Tap a star to rate out of 5")
-            else tr("${stars}점 · 고마워요! 다시 누르면 바꿀 수 있어요", "$stars / 5 · Thanks! Tap again to change"),
+            else tr("${stars}점 · 제출하기 전에는 다시 눌러 바꿀 수 있어요", "$stars / 5 · Tap again to change before sending"),
             fontSize = 12.sp, color = if (stars == 0) Color(0xFF71717A) else orange,
-            fontWeight = if (stars == 0) FontWeight.Normal else FontWeight.SemiBold, maxLines = 1,
+            fontWeight = if (stars == 0) FontWeight.Normal else FontWeight.SemiBold,
         )
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onSubmit, enabled = stars > 0, shape = ButtonShape,
+            modifier = Modifier.fillMaxWidth().height(48.dp).testTag("rating_submit"),
+        ) { Text(tr("제출", "Send"), fontWeight = FontWeight.Bold) }
+    }
+}
+
+/** 별점을 제출한 뒤 같은 장에 나오는 의견 칸 (선택). 비워 두고 제출해도 된다. */
+@Composable
+private fun CommentCard(text: String, onChange: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier) {
+    val dark = Color(0xFF18181B)
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xFFF4F4F5))
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(tr("의견을 남겨 주시면 ROCKY의 발전에 도움이 돼요", "Your feedback helps ROCKY improve"),
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = dark, textAlign = TextAlign.Center)
+        Text(tr("선택 사항이에요", "Optional"), fontSize = 12.sp, color = Color(0xFF71717A))
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = text, onValueChange = onChange,
+            placeholder = { Text(tr("예: 드럼 필인이 원곡이랑 거의 같아요", "e.g. The drum fills match the song")) },
+            minLines = 3, maxLines = 5,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = dark, unfocusedTextColor = dark,
+                focusedContainerColor = Color.White, unfocusedContainerColor = Color.White,
+            ),
+            modifier = Modifier.fillMaxWidth().testTag("rating_comment"),
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onSubmit, shape = ButtonShape,
+            modifier = Modifier.fillMaxWidth().height(48.dp).testTag("comment_submit"),
+        ) { Text(tr("제출", "Send"), fontWeight = FontWeight.Bold) }
     }
 }
 
@@ -852,18 +846,64 @@ private fun FullScreenGlyph(exit: Boolean, color: Color) {
     }
 }
 
-/** 파트 고르기 칸. 악기 그림 + 이름 한 줄. [inst]가 null이면 '전체'. */
+/**
+ * 파트 고르기. '전체'는 한 줄을 다 쓰고, 악기는 두 칸씩 줄을 나눈다 (옆으로 넘기지 않아도 다 보인다).
+ * 기타가 2대면 기타 칸 하나를 '기타 1 | 기타 2'로 반씩 나눈다. 이름은 한 줄로만 쓴다(좁아도 세로로 쓰지 않음).
+ */
+/**
+ * 결과 화면 악기 고르기. 자리는 늘 같다: 전체 / 피아노 · 드럼 / 베이스 · 기타.
+ * 기타가 2대면 아래 줄을 베이스 · 기타 1 · 기타 2 세 칸으로 (한 줄의 칸은 너비가 같다).
+ * 이 곡에 없는 악기는 회색으로 막아 둔다.
+ */
+@Composable
+private fun PartGrid(
+    instruments: List<String>,
+    selected: String?,
+    mark: (String) -> String,
+    ai: Set<String>,
+    warn: Set<String>,
+    onSelect: (String?) -> Unit,
+) {
+    val rows = listOf(
+        listOf("piano", "drums"),
+        if (Demo.GUITAR2 in instruments) listOf("bass", "guitar", Demo.GUITAR2) else listOf("bass", "guitar"),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        PartChip(null, tr("전체", "All"), selected == null, ai = false, modifier = Modifier.fillMaxWidth()) { onSelect(null) }
+        rows.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { inst ->
+                    val has = inst in instruments
+                    PartChip(
+                        inst, (if (has) mark(inst) else "") + Demo.label(inst, instruments), selected == inst,
+                        ai = has && inst in ai, warn = has && inst in warn, enabled = has, modifier = Modifier.weight(1f),
+                    ) { onSelect(inst) }
+                }
+            }
+        }
+    }
+}
+
+/** 파트 고르기 칸 하나. 악기 그림 + 이름 한 줄. [inst]가 null이면 '전체'. [enabled]가 false면 회색으로 막는다. */
 @Composable
 private fun PartChip(
-    inst: String?, text: String, selected: Boolean, ai: Boolean, warn: Boolean = false, onClick: () -> Unit,
+    inst: String?, text: String, selected: Boolean, ai: Boolean, warn: Boolean = false,
+    enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    val fg = if (selected) cs.onPrimary else if (ai) cs.secondary else cs.onSurface
+    val fg = when {
+        !enabled -> cs.onSurfaceVariant.copy(alpha = 0.45f)
+        selected -> cs.onPrimary
+        ai -> cs.secondary
+        else -> cs.onSurface
+    }
+    val shape = RoundedCornerShape(10.dp)
     Row(
-        Modifier
+        modifier
             .card(
-                CircleShape, cs,
+                shape, cs,
                 bg = when {
+                    !enabled -> cs.surfaceVariant.copy(alpha = 0.35f)
                     selected -> cs.primary
                     warn -> cs.error.copy(alpha = 0.16f)
                     ai -> cs.secondary.copy(alpha = 0.18f)
@@ -871,80 +911,16 @@ private fun PartChip(
                 },
                 line = if (selected) cs.primary else cs.outlineVariant,
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { if (!enabled) contentDescription = tr("$text · 이 곡에 없음", "$text · not in this song") }
+            .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         if (inst != null) {
-            InstrumentIcon(inst, fg, size = 18.dp)
-            Spacer(Modifier.width(6.dp))
+            InstrumentIcon(inst, fg, size = 16.dp)
+            Spacer(Modifier.width(5.dp))
         }
-        Text(text, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
+        Text(text, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
     }
-}
-
-// ---------- 5-1. 기타 대수 바꿔서 다시 만들기 ----------
-/**
- * 원곡에 기타가 몇 대인지(0~2) 고르는 창. 모델이 들은 대수([heard])를 함께 보여준다.
- * 고르면 [GuitarRedo]를 넘기고, 앱은 우리 밴드 구성·곡 올리기부터 다시 만든다.
- * [others]가 비어 있으면(모델이 기타 말고 아무것도 못 찾음) '없음'은 고를 수 없다: 원곡 구성이 비면 서버가 다시 '모름'으로 판단해서.
- */
-@Composable
-fun GuitarCountDialog(heard: Int?, others: List<String>, onDismiss: () -> Unit, onNext: (GuitarRedo) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    var pick by remember { mutableStateOf<Int?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(tr("원곡에 기타가 몇 대 있나요?", "How many guitars are in the song?")) },
-        text = {
-            Column {
-                Text(
-                    when (heard) {
-                        null -> tr("기타 대수를 바꾸면 그 대수로 기타 파트를 다시 나눠요.", "We'll split the guitar parts again with your count.")
-                        0 -> tr("지금 악보는 원곡에 기타가 없다고 보고 만들었어요.", "These scores assumed the song has no guitar.")
-                        else -> tr("지금 악보는 원곡 기타를 ${heard}대로 보고 만들었어요.", "These scores assumed $heard guitar${if (heard > 1) "s" else ""} in the song.")
-                    },
-                    fontSize = 14.sp, lineHeight = 20.sp,
-                )
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0, 1, 2).forEach { n ->
-                        val on = pick == n
-                        val enabled = n != heard && !(n == 0 && others.isEmpty())
-                        val shape = RoundedCornerShape(14.dp)
-                        Column(
-                            Modifier.weight(1f).height(72.dp).clip(shape)
-                                .background(if (on) cs.primary else cs.surfaceVariant.copy(alpha = if (enabled) 1f else 0.4f))
-                                .clickable(enabled = enabled) { pick = n }
-                                .semantics { contentDescription = tr("원곡 기타 ${n}대", "$n guitars in the song") },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Text(
-                                when (n) { 0 -> tr("없음", "None"); 1 -> tr("1대", "1"); else -> tr("2대", "2") },
-                                fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                                color = when { on -> cs.onPrimary; enabled -> cs.onSurface; else -> cs.onSurfaceVariant.copy(alpha = 0.5f) },
-                            )
-                            if (n == heard) Text(tr("지금", "Now"), fontSize = 11.sp, color = cs.onSurfaceVariant)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    tr(
-                        "고른 대수로 처음부터 다시 만들어요 (10분쯤). ROCKY는 올린 곡 파일을 보관하지 않아서, 악기를 확인하고 같은 곡 파일을 한 번 더 올려 주세요. 지금 악보는 그대로 남아요.",
-                        "It starts over with your count (about 10 min). We don't keep song files, so check your band and pick the same file again. These scores stay.",
-                    ),
-                    fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = pick != null, onClick = {
-                val n = pick ?: return@TextButton
-                onNext(GuitarRedo(title = "", guitars = n, original = Demo.redoOriginal(others, n)))
-            }) { Text(tr("다음", "Next")) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("취소", "Cancel")) } },
-    )
 }

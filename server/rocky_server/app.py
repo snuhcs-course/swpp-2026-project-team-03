@@ -39,7 +39,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .accounts import AccountError, Accounts, User
@@ -209,7 +209,8 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         find(job_id)
         token = (authorization or "").removeprefix("Bearer ").strip()
         rater = accounts.user_for_token(token) if token else None
-        return accounts.rate(job_id, body.get("stars"), rater, str(body.get("title", "")), body.get("instruments") or [])
+        return accounts.rate(job_id, body.get("stars"), rater, str(body.get("title", "")), body.get("instruments") or [],
+                             body.get("comment"))
 
     @app.get("/ratings", dependencies=[Depends(check_key)])
     def all_ratings() -> dict:
@@ -376,6 +377,39 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def update_me(body: dict = Body(...), user: User = Depends(current_user)) -> dict:
         return accounts.update_profile(user, str(body.get("nickname", "")), body.get("instruments") or []).json()
 
+    # ---- profile photos: band members see each other's photo ----
+    photo_dir = store.root / "photos"
+    PHOTO_MAX = 2 * 1024 * 1024
+
+    def photo_file(user_id: int) -> Path:
+        return photo_dir / f"{user_id}.jpg"
+
+    @app.put("/me/photo", dependencies=keyed)
+    async def put_photo(request: Request, user: User = Depends(current_user)) -> dict:
+        data = await request.body()
+        if len(data) > PHOTO_MAX:
+            raise HTTPException(413, "photo is larger than 2 MB")
+        if not (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG")):
+            raise HTTPException(415, "send a JPEG or PNG image")
+        photo_dir.mkdir(parents=True, exist_ok=True)
+        tmp = photo_file(user.id).with_suffix(".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(photo_file(user.id))
+        return {"photo_at": accounts.set_photo(user, True)}
+
+    @app.delete("/me/photo", dependencies=keyed)
+    def delete_photo(user: User = Depends(current_user)) -> dict:
+        photo_file(user.id).unlink(missing_ok=True)
+        accounts.set_photo(user, False)
+        return {"photo_at": None}
+
+    @app.get("/users/{user_id}/photo", dependencies=keyed)
+    def get_photo(user_id: int, user: User = Depends(current_user)) -> FileResponse:
+        f = photo_file(user_id)
+        if accounts.photo_at(user_id) is None or not f.is_file():
+            raise HTTPException(404, "no photo")
+        return FileResponse(f, media_type="image/jpeg")
+
     @app.patch("/me/works/{work_id}", dependencies=keyed)
     def rename_my_work(work_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
         accounts.rename_my_work(user, work_id, str(body.get("title", "")))
@@ -392,11 +426,11 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
 
     @app.post("/bands", status_code=201, dependencies=keyed)
     def create_band(body: dict = Body(...), user: User = Depends(current_user)) -> dict:
-        return accounts.create_band(user, str(body.get("name", "")), str(body.get("instrument", "")))
+        return accounts.create_band(user, str(body.get("name", "")), body.get("instruments") or str(body.get("instrument", "")))
 
     @app.post("/bands/join", dependencies=keyed)
     def join_band(body: dict = Body(...), user: User = Depends(current_user)) -> dict:
-        return accounts.join(user, str(body.get("code", "")), str(body.get("instrument", "")))
+        return accounts.join(user, str(body.get("code", "")), body.get("instruments") or str(body.get("instrument", "")))
 
     @app.get("/bands/{band_id}", dependencies=keyed)
     def band_detail(band_id: int, user: User = Depends(current_user)) -> dict:

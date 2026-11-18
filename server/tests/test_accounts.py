@@ -230,3 +230,36 @@ def test_data_survives_a_restart(tmp_path):
     assert again.login("a@snu.ac.kr", "band2026")[0].id == user.id
     assert [b["band"]["name"] for b in again.bands_of(user)] == ["밴드"]
     assert again.db.execute("SELECT COUNT(*) FROM bands").fetchone()[0] == 1
+
+
+def test_a_member_can_play_several_instruments(client):
+    a = sign_up(client)
+    band = client.post("/bands", json={"name": "밴드", "instruments": ["guitar", "vocal", "kazoo"]}, headers=auth(a)).json()
+    b = sign_up(client, email="b@snu.ac.kr", nickname="베이스")
+    assert client.post("/bands/join", json={"code": band["invite_code"], "instruments": []}, headers=auth(b)).status_code == 422
+    assert client.post("/bands/join", json={"code": band["invite_code"], "instruments": ["bass", "piano"]},
+                       headers=auth(b)).status_code == 200
+    d = client.get(f"/bands/{band['id']}", headers=auth(b)).json()
+    assert [(m["instrument"], m["instruments"]) for m in d["members"]] == [
+        ("guitar", ["guitar", "vocal"]), ("bass", ["bass", "piano"])]
+    mine = client.get("/bands", headers=auth(b)).json()[0]
+    assert (mine["my_instrument"], mine["my_instruments"]) == ("bass", ["bass", "piano"])
+
+
+def test_profile_photo_is_seen_by_band_members(client):
+    a = sign_up(client)
+    b = sign_up(client, email="b@snu.ac.kr", nickname="베이스")
+    band = client.post("/bands", json={"name": "밴드", "instrument": "guitar"}, headers=auth(a)).json()
+    client.post("/bands/join", json={"code": band["invite_code"], "instrument": "bass"}, headers=auth(b))
+    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 100
+    assert client.put("/me/photo", content=b"not an image", headers=auth(a)).status_code == 415
+    assert client.put("/me/photo", content=b"\xff\xd8\xff" + b"0" * (2 * 1024 * 1024), headers=auth(a)).status_code == 413
+    assert client.put("/me/photo", content=jpeg, headers=auth(a)).json()["photo_at"] is not None
+    members = client.get(f"/bands/{band['id']}", headers=auth(b)).json()["members"]
+    assert members[0]["photo_at"] is not None and members[1]["photo_at"] is None
+    got = client.get(f"/users/{a['user']['id']}/photo", headers=auth(b))
+    assert got.status_code == 200 and got.content == jpeg
+    assert client.get(f"/users/{b['user']['id']}/photo", headers=auth(a)).status_code == 404
+    assert client.get(f"/users/{a['user']['id']}/photo").status_code == 401
+    client.delete("/me/photo", headers=auth(a))
+    assert client.get(f"/users/{a['user']['id']}/photo", headers=auth(b)).status_code == 404

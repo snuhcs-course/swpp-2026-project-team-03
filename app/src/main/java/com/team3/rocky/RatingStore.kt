@@ -46,6 +46,29 @@ object RatingStore {
         scope.launch { send(app, r) }
     }
 
+    private fun commentKey(workId: Long) = "c_$workId"
+
+    /** 별점 뒤 의견 칸까지 끝냈는지 (의견을 쓰지 않고 제출해도 끝). 끝나면 별점 장이 더 이상 나오지 않는다. */
+    fun finished(ctx: Context, workId: Long): Boolean =
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(commentKey(workId), false)
+
+    /** 별점 다음에 쓰는 한 줄 의견(선택). 비어 있으면 서버에 보내지 않고 끝난 것으로만 적는다. */
+    fun comment(ctx: Context, work: Work, text: String) {
+        val prefs = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(commentKey(work.id), true).apply()
+        val words = text.trim().take(1000)
+        val stars = stars(ctx, work.id)
+        if (words.isEmpty() || stars == 0) return
+        val app = ctx.applicationContext
+        scope.launch {
+            if (!ServerSettings.isConfigured(app)) return@launch
+            val jobId = ScoreStore.load(app, work.id)?.result?.id ?: return@launch
+            runCatching {
+                RockyApi.from(app).rate(jobId, stars, work.title, work.instruments, AuthRepository.token(app), comment = words)
+            }
+        }
+    }
+
     /** 아직 서버로 못 보낸 별점을 다시 보낸다. */
     fun sendPending(ctx: Context) {
         val app = ctx.applicationContext
@@ -77,6 +100,7 @@ object RatingStore {
     /** 아직 서버로 보내지 않은 별점. */
     fun unsent(ctx: Context): List<Rating> =
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).all.mapNotNull { (k, v) ->
+            if (!k.startsWith("w_")) return@mapNotNull null
             val id = k.removePrefix("w_").toLongOrNull() ?: return@mapNotNull null
             (v as? String)?.let { decode(id, it) }
         }.filter { !it.sent }
