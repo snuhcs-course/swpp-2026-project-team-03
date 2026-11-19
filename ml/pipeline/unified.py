@@ -67,6 +67,18 @@ def guitar_case(original_guitars: int, requested_guitars: int) -> tuple[str | No
     return split, requested_guitars > original_guitars
 
 
+def guitars_to_make(source_guitars: int, requested_guitars: int, original_unknown: bool) -> int:
+    """Guitar parts the run will deliver.
+
+    When the model decides the song has no guitar but the band asked for two, only one guitar is
+    generated (two guitars from nothing is not supported). The app tells the user why. A declared
+    original with no guitar and two requested is still rejected up front (guitar_case).
+    """
+    if original_unknown and source_guitars == 0 and requested_guitars == 2:
+        return 1
+    return requested_guitars
+
+
 def digest(path: Path) -> str:
     sha = hashlib.sha256()
     with path.open("rb") as f:
@@ -622,7 +634,11 @@ class Runner:
                                      "--no-merged", "--split", "never"])
                     self.stage("guitar_compressed", [guitar_dir / "guitar.mid"], compress_guitar,
                                validate=lambda: tab_ready(guitar_dir, ("guitar.mid",)))
-        _, generate_guitar = guitar_case(source_guitars, self.requested_guitars)
+        guitars_out = guitars_to_make(source_guitars, self.requested_guitars, self.original_unknown)
+        if guitars_out != self.requested_guitars:
+            # no guitar heard in the song, two asked: make one; the app shows a notice
+            self.manifest["guitars_delivered"] = guitars_out
+        _, generate_guitar = guitar_case(source_guitars, guitars_out)
         self.manifest["original_parts"] = sorted(presence if self.original_unknown else self.original_parts)
         self.manifest["original_guitars_inferred"] = (
             None if self.original_unknown and not self.requested_guitars else source_guitars)
@@ -713,8 +729,8 @@ class Runner:
             score = assemble(aligned, guitar_dir, bass_dir, generated, final, guitar_code,
                              self.requested_parts, generated_guitar_dir if source_guitars else None)
             guitar_tracks_count = sum(family(inst) == "guitar" for inst in score.instruments)
-            if guitar_tracks_count != self.requested_guitars:
-                raise ValueError(f"Expected {self.requested_guitars} guitar parts, got {guitar_tracks_count}")
+            if guitar_tracks_count != guitars_out:
+                raise ValueError(f"Expected {guitars_out} guitar parts, got {guitar_tracks_count}")
             duration = json.loads(normalization_record.read_text(encoding="utf-8"))["duration_sec"]
             if score.get_end_time() > duration + 0.05:
                 raise ValueError("Final score extends beyond the input song duration")

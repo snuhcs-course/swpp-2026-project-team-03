@@ -13,7 +13,7 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, merge_stem_midis, merge_tracks, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
+from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, guitars_to_make, merge_stem_midis, merge_tracks, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
 from publish_scores import publication_ready, publish  # noqa: E402
 
 
@@ -110,6 +110,15 @@ def test_user_lineups_and_four_guitar_cases():
         guitar_case(0, 2)
     with pytest.raises(ValueError, match="exactly one guitar count"):
         parse_lineup("guitar1,guitar2", original=False)
+
+
+def test_no_guitar_heard_but_two_requested_makes_one():
+    assert guitars_to_make(0, 2, original_unknown=True) == 1
+    assert guitar_case(0, guitars_to_make(0, 2, original_unknown=True)) == (None, True)
+    assert guitars_to_make(1, 2, original_unknown=True) == 2
+    assert guitars_to_make(2, 2, original_unknown=True) == 2
+    assert guitars_to_make(0, 1, original_unknown=True) == 1
+    assert guitars_to_make(0, 2, original_unknown=False) == 2  # declared: still rejected by guitar_case
 
 
 def test_known_absent_stems_are_not_merged_or_used_as_gpt_context(tmp_path):
