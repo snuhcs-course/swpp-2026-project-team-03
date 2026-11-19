@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "sklearn": "1.9.1",
+  "arms": {
+    "fusion_extra_trees": {
+      "sha256": "6105fbd435ede5fd1bfd46fa1cde467f8dc00592e162ef221103394090a16f03",
+      "bytes": 645589
+    },
+    "fusion_rbf_svm": {
+      "sha256": "c961d38f31e6d818878be4a283f11172b27e1d4d6e76192b0d61f778d8395e02",
+      "bytes": 503152
+    },
+    "fusion_stem_extra_trees": {
+      "sha256": "0c1f2092c989f01be95f0751e163294f6b7016312022702e3cfe04f6f9da9358",
+      "bytes": 644478
+    }
+  }
+}

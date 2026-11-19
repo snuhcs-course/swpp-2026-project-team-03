@@ -28,6 +28,19 @@ import sys
 import time
 from pathlib import Path
 
+
+def valid_logits_feature(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        import numpy as np
+        with np.load(path, allow_pickle=False) as archive:
+            feature = archive["feature"]
+        return feature.shape == (2790,) and bool(np.isfinite(feature).all())
+    except (OSError, ValueError, KeyError, EOFError):
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("audio", type=Path, nargs="?")
@@ -38,9 +51,11 @@ def main():
     parser.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
     parser.add_argument("--instruments", help="comma-separated MuScriptor instrument hints for a stem")
     parser.add_argument("--progress", type=Path, help="append progress as JSON lines to this file")
+    parser.add_argument("--decoder-logits-output", type=Path,
+                        help="capture pooled final decoder logits during this transcription")
     args = parser.parse_args()
     if args.jobs_file:
-        if args.audio or args.output or args.instruments or args.progress:
+        if args.audio or args.output or args.instruments or args.progress or args.decoder_logits_output:
             parser.error("--jobs-file cannot be combined with single-stem arguments")
         jobs = json.loads(args.jobs_file.read_text(encoding="utf-8"))
         if not isinstance(jobs, list) or not jobs:
@@ -48,7 +63,9 @@ def main():
     elif args.audio and args.output:
         jobs = [{"audio": str(args.audio), "output": str(args.output),
                  "instruments": args.instruments,
-                 "progress": str(args.progress) if args.progress else None}]
+                 "progress": str(args.progress) if args.progress else None,
+                 "decoder_logits_output": (str(args.decoder_logits_output)
+                                           if args.decoder_logits_output else None)}]
     else:
         parser.error("provide AUDIO OUT.mid or --jobs-file")
 
@@ -62,7 +79,9 @@ def main():
     for job in jobs:
         audio, output = Path(job["audio"]), Path(job["output"])
         progress = Path(job["progress"]) if job.get("progress") else None
-        if args.resume_existing and output.is_file() and output.stat().st_size:
+        logits_output = Path(job["decoder_logits_output"]) if job.get("decoder_logits_output") else None
+        feature_ready = logits_output is None or valid_logits_feature(logits_output)
+        if args.resume_existing and feature_ready and output.is_file() and output.stat().st_size:
             try:
                 import pretty_midi
                 pretty_midi.PrettyMIDI(str(output))
@@ -82,6 +101,12 @@ def main():
         if progress:
             progress.parent.mkdir(parents=True, exist_ok=True)
         progress_file = progress.open("a", buffering=1) if progress else None
+        if logits_output:
+            from decoder_logits_feature import DecoderLogitsMoments
+            moments = DecoderLogitsMoments(model._model.card)
+        else:
+            moments = None
+        hook = model._model.linear.register_forward_hook(moments.hook) if moments else None
         try:
             events = []
             started = time.perf_counter()
@@ -107,8 +132,12 @@ def main():
             midi = model.events_to_midi_bytes(iter(events), beat_grid=None, export=ExportOptions())
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(midi)
+            if moments is not None:
+                moments.save(logits_output)
             print(f"Saved MIDI to {output}", file=sys.stderr, flush=True)
         finally:
+            if hook is not None:
+                hook.remove()
             if progress_file:
                 progress_file.close()
 

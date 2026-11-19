@@ -15,12 +15,17 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Callable
 
 import pretty_midi
+import numpy as np
+from guitar_count_model import load_model as load_guitar_count_model
+from guitar_count_model import predict as predict_guitar_count, split_scores
 from rule_gates import GateConfig, InputRejected, check_input, gate_stem, guitar_stereo
 from separate_bs_roformer import (CHECKPOINT_SHA256, CONFIG_SHA256, NONVOCAL_STEMS,
                                   PACKAGE_VERSION, STEMS, valid_stems)
@@ -73,6 +78,15 @@ def digest(path: Path) -> str:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             sha.update(block)
     return sha.hexdigest()
+
+
+def valid_feature(path: Path, width: int) -> bool:
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            value = archive["feature"]
+        return value.shape == (width,) and bool(np.isfinite(value).all())
+    except (OSError, ValueError, KeyError, EOFError):
+        return False
 
 
 def atomic_json(path: Path, value: dict | list) -> None:
@@ -302,6 +316,33 @@ class Runner:
         self.out = args.output_dir.resolve()
         self.pipeline = Path(__file__).resolve().parent
         self.modules = args.modules_root.resolve()
+        self.guitar_count_classifier = getattr(args, "guitar_count_classifier", "rule")
+        self.guitar_count_model = getattr(
+            args, "guitar_count_model", self.pipeline / "guitar_count_extra_trees_v1.json")
+        self.alpha_enabled = (self.guitar_count_classifier == "alpha_three_arm"
+                              and self.original_unknown and bool(self.requested_guitars))
+        self.alpha_models_dir = getattr(args, "alpha_models_dir",
+                                        self.pipeline / "guitar_count_alpha_models")
+        self.manifest_path = self.out / "manifest.json"
+        self.alpha_arm = None
+        self.alpha_models_sha256 = None
+        if self.alpha_enabled:
+            from guitar_count_alpha import ARMS
+            self.alpha_models_dir = self.alpha_models_dir.resolve(strict=True)
+            self.alpha_models_sha256 = digest(self.alpha_models_dir / "manifest.json")
+            if args.resume and self.manifest_path.exists():
+                saved = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                self.alpha_arm = saved.get("config", {}).get("guitar_count_arm")
+                if self.alpha_arm not in ARMS:
+                    raise ValueError("Cannot resume without the original alpha assignment")
+            else:
+                self.alpha_arm = ARMS[secrets.randbelow(len(ARMS))]
+        if (self.guitar_count_classifier == "extra_trees" and self.original_unknown
+                and self.requested_guitars):
+            self.guitar_count_model = self.guitar_count_model.resolve(strict=True)
+            self.guitar_count_model_sha256 = digest(self.guitar_count_model)
+        else:
+            self.guitar_count_model_sha256 = None
         # Do not resolve venv/bin/python symlinks: their location is how Python
         # discovers the virtual environment and its installed packages.
         self.model_python = args.model_python.absolute()
@@ -311,7 +352,7 @@ class Runner:
             note_floor_db=getattr(args, "note_floor_db", GateConfig.note_floor_db),
             min_notes_per_minute=getattr(args, "min_notes_per_minute", GateConfig.min_notes_per_minute))
         self.config = {
-            "pipeline_contract": 14,
+            "pipeline_contract": 16,
             "audio": str(self.audio), "audio_sha256": digest(self.audio),
             "original": "unknown" if self.original_unknown else sorted(self.original_parts),
             "original_guitars": self.original_guitars,
@@ -327,8 +368,12 @@ class Runner:
             "separator_models_dir": str(args.bsroformer_models_dir.absolute()),
             "beat_mix_stems": list(NONVOCAL_STEMS),
             "rule_gates": self.gates.as_dict(),
+            "guitar_count_classifier": self.guitar_count_classifier,
+            "guitar_count_model_sha256": self.guitar_count_model_sha256,
+            "guitar_count_arm": self.alpha_arm,
+            "guitar_count_arm_probability": 1 / 3 if self.alpha_arm else None,
+            "guitar_count_alpha_manifest_sha256": self.alpha_models_sha256,
         }
-        self.manifest_path = self.out / "manifest.json"
         if self.manifest_path.exists():
             if not args.resume:
                 raise FileExistsError(f"{self.manifest_path} exists; pass --resume for the same input/config")
@@ -345,6 +390,12 @@ class Runner:
 
     def command(self, stage: str, cmd: list[str], env: dict | None = None) -> None:
         log_path = self.out / "logs" / f"{stage}.log"
+        if cmd and cmd[0] == str(self.tab_python):
+            # TAB runs under a separate Python version. Model-only PYTHONPATH
+            # additions (for example the alpha sklearn/scipy target) must not
+            # shadow its own native packages.
+            env = dict(os.environ if env is None else env)
+            env.pop("PYTHONPATH", None)
         with log_path.open("a", encoding="utf-8") as log:
             log.write("$ " + " ".join(cmd) + "\n")
             log.flush()
@@ -409,6 +460,78 @@ class Runner:
             self.stage("guitar_stereo", [stereo_file], lambda: atomic_json(
                 stereo_file, guitar_stereo(stems_dir / "guitar.wav", self.gates)))
         return json.loads(stereo_file.read_text(encoding="utf-8"))
+
+    def guitar_scores(self, gated_guitar: Path, beats_file: Path,
+                      stereo: dict, guitar_code: Path) -> tuple[dict, dict] | None:
+        """Extract the four scores using the development guitar-only path.
+
+        The CV features came from guitar-only gated MIDI aligned to the same
+        Beat This! beats. Aligning the full band here would change the features
+        because drum sync can move pitched notes.
+        """
+        if "corr" not in stereo or "balance" not in stereo:
+            return None
+        sys.path.insert(0, str(self.modules / "beat_align"))
+        from align import align_midi, load_beats
+
+        with tempfile.TemporaryDirectory(prefix="guitar-count-", dir=self.out) as scratch:
+            raw_path = Path(scratch) / "guitar.mid"
+            aligned_path = Path(scratch) / "aligned_guitar.mid"
+            midi = pretty_midi.PrettyMIDI(str(gated_guitar))
+            midi.instruments = [inst for inst in midi.instruments
+                                if family(inst) == "guitar" and inst.notes]
+            if not midi.instruments:
+                raise ValueError("No gated guitar notes for guitar-count inference")
+            midi.write(str(raw_path))
+            beats, downbeats = load_beats(beats_file)
+            align_midi(raw_path, aligned_path, beats=beats, downbeats=downbeats, drum_sync=True)
+            split = split_scores(aligned_path, guitar_code)
+        scores = {"corr": stereo["corr"], "balance": stereo["balance"],
+                  "unplayable": split["unplayable"], "wide": split["wide"]}
+        return scores, split
+
+    def classify_guitars(self, gated_guitar: Path, beats_file: Path,
+                         stereo: dict, guitar_code: Path) -> dict:
+        """Classify unknown-original guitar count with four-score ExtraTrees."""
+        extracted = self.guitar_scores(gated_guitar, beats_file, stereo, guitar_code)
+        if extracted is None:
+            return {"method": "rule_fallback", "reason": "stereo_scores_unavailable",
+                    "two_guitars": bool(stereo.get("two_guitars")), "stereo": stereo}
+        scores, split = extracted
+        model = load_guitar_count_model(self.guitar_count_model)
+        count, vote_fraction = predict_guitar_count(model, scores)
+        return {"method": model["model_id"], "model_sha256": self.guitar_count_model_sha256,
+                "two_guitars": count == 2, "count": count, "scores": scores,
+                "split": split, "vote_fraction_two": round(vote_fraction, 6),
+                "vote_fraction_calibrated": False}
+
+    def classify_alpha(self, gated_guitar: Path, beats_file: Path, stereo: dict,
+                       guitar_code: Path, logits_file: Path, roformer_file: Path,
+                       guitar_stem: Path) -> dict:
+        """Predict all frozen arms and apply the persisted random assignment."""
+        from guitar_count_alpha import load_models, predictions
+        from stem_audio_features import NAMES, extract
+
+        extracted = self.guitar_scores(gated_guitar, beats_file, stereo, guitar_code)
+        if extracted is None:
+            return {"method": "rule_fallback", "reason": "stereo_scores_unavailable",
+                    "two_guitars": bool(stereo.get("two_guitars")), "assigned_arm": self.alpha_arm,
+                    "experiment_eligible": False}
+        scores, split = extracted
+        blocks = {"rules": np.array([scores[name] for name in ("corr", "balance", "unplayable", "wide")]),
+                  "muscriptor": np.load(logits_file)["feature"],
+                  "roformer": np.load(roformer_file)["feature"],
+                  "stem": extract(guitar_stem)}
+        all_predictions = predictions(load_models(self.alpha_models_dir), blocks)
+        selected = all_predictions[self.alpha_arm]
+        return {"method": "alpha_three_arm", "assigned_arm": self.alpha_arm,
+                "assignment_probability": 1 / 3,
+                "model_sha256": json.loads((self.alpha_models_dir / "manifest.json").read_text(
+                    encoding="utf-8"))["arms"][self.alpha_arm]["sha256"],
+                "experiment_eligible": True, "count": selected["count"],
+                "two_guitars": selected["count"] == 2,
+                "candidate_predictions": all_predictions, "scores": scores, "split": split,
+                "stem_scores": dict(zip(NAMES, blocks["stem"].tolist()))}
 
     def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
                         transcribe_set: Callable[[tuple[str, ...], Path], None]
@@ -482,19 +605,26 @@ class Runner:
 
         midi_dir = self.out / "stem_midi"
         midi_dir.mkdir(exist_ok=True)
+        logits_file = midi_dir / "guitar_decoder_logits.npz"
         base = [str(self.model_python), str(self.pipeline / "transcribe_with_progress.py")]
 
         def stem_command(stem: str) -> list[str]:
-            return base + [str(stems_dir / f"{stem}.wav"), str(midi_dir / f"{stem}.mid"),
+            command = base + [str(stems_dir / f"{stem}.wav"), str(midi_dir / f"{stem}.mid"),
                            "--model", self.args.model, "--device", self.args.device,
                            "--instruments", HINTS[stem], "--progress",
                            str(midi_dir / f"{stem}.progress.jsonl"), "--resume-existing"]
+            if self.alpha_enabled and stem == "guitar":
+                command += ["--decoder-logits-output", str(logits_file)]
+            return command
 
         def transcribe_set(todo: tuple[str, ...], jobs_file: Path) -> None:
             atomic_json(jobs_file, [{"stem": stem, "audio": str(stems_dir / f"{stem}.wav"),
                                      "output": str(midi_dir / f"{stem}.mid"),
                                      "instruments": HINTS.get(stem),
-                                     "progress": str(midi_dir / f"{stem}.progress.jsonl")}
+                                     "progress": str(midi_dir / f"{stem}.progress.jsonl"),
+                                     "decoder_logits_output": (str(logits_file)
+                                                               if self.alpha_enabled and stem == "guitar"
+                                                               else None)}
                                     for stem in todo])
             if not todo:
                 return
@@ -521,8 +651,13 @@ class Runner:
         def transcribe():
             transcribe_set(todo, jobs_file)
         if transcribe_stems:
-            self.stage("muscriptor_batch", list(stem_midis.values()), transcribe,
-                       validate=lambda: all(valid_midi(path) for path in stem_midis.values()))
+            transcribe_outputs = list(stem_midis.values())
+            if self.alpha_enabled and "guitar" in transcribe_stems:
+                transcribe_outputs.append(logits_file)
+            self.stage("muscriptor_batch", transcribe_outputs, transcribe,
+                       validate=lambda: (all(valid_midi(path) for path in stem_midis.values())
+                                         and (not self.alpha_enabled or "guitar" not in transcribe_stems
+                                              or valid_feature(logits_file, 2790))))
 
         # Rule 2: drop notes MuScriptor wrote from the residue of a resting stem,
         # and (original unknown only) treat a stem with very few notes as absent.
@@ -595,11 +730,45 @@ class Runner:
             split = "auto" if self.original_unknown else guitar_case(
                 self.original_guitars, self.requested_guitars)[0]
             if self.original_unknown:
-                # Two guitars panned apart can play the same register and chords
-                # (21 Guns), which the chord rule in skyline_tab cannot see.
                 stereo = self.stereo_check(stems_dir)
                 self.manifest["guitar_stereo"] = stereo
-                if stereo.get("two_guitars"):
+                if self.guitar_count_classifier == "alpha_three_arm" and "corr" in stereo:
+                    roformer_file = self.out / "roformer_shared.npz"
+                    self.stage("roformer_shared", [roformer_file], lambda: self.command(
+                        "roformer_shared", [str(self.model_python),
+                            str(self.pipeline / "roformer_shared_feature.py"),
+                            str(self.audio), str(roformer_file),
+                            "--models-dir", str(self.args.bsroformer_models_dir),
+                            "--lib-dir", str(self.args.bsroformer_lib_dir)]),
+                               validate=lambda: valid_feature(roformer_file, 512))
+                    result_file = self.out / "guitar_count.json"
+                    self.stage("guitar_count", [result_file], lambda: atomic_json(
+                        result_file, self.classify_alpha(gated_midis["guitar"], beats_file,
+                            stereo, guitar_code, logits_file, roformer_file,
+                            stems_dir / "guitar.wav")))
+                    result = json.loads(result_file.read_text(encoding="utf-8"))
+                    self.manifest["guitar_count"] = result
+                    split = "always" if result["two_guitars"] else "never"
+                elif self.guitar_count_classifier == "alpha_three_arm":
+                    result = {"method": "rule_fallback", "reason": "stereo_scores_unavailable",
+                              "assigned_arm": self.alpha_arm, "experiment_eligible": False,
+                              "two_guitars": bool(stereo.get("two_guitars"))}
+                    atomic_json(self.out / "guitar_count.json", result)
+                    self.manifest["guitar_count"] = result
+                    if result["two_guitars"]:
+                        split = "always"
+                elif self.guitar_count_classifier == "extra_trees":
+                    result_file = self.out / "guitar_count.json"
+                    self.stage("guitar_count", [result_file], lambda: atomic_json(
+                        result_file, self.classify_guitars(
+                            gated_midis["guitar"], beats_file, stereo, guitar_code)))
+                    result = json.loads(result_file.read_text(encoding="utf-8"))
+                    self.manifest["guitar_count"] = result
+                    if result["method"] == "rule_fallback":
+                        split = "always" if result["two_guitars"] else "auto"
+                    else:
+                        split = "always" if result["two_guitars"] else "never"
+                elif stereo.get("two_guitars"):
                     split = "always"
             def guitar():
                 guitar_dir.mkdir(exist_ok=True)
@@ -765,6 +934,12 @@ def cli(argv: list[str] | None = None) -> int:
                    help="drop notes quieter than this, relative to the stem's playing level (default -40)")
     p.add_argument("--min-notes-per-minute", type=float, default=GateConfig.min_notes_per_minute,
                    help="original unknown: treat a stem with fewer notes as absent (default 20)")
+    p.add_argument("--guitar-count-classifier", choices=("alpha_three_arm", "extra_trees", "rule"),
+                   default="rule", help="unknown original: opt-in frozen alpha arms or rollback")
+    p.add_argument("--guitar-count-model", type=Path,
+                   default=Path(__file__).resolve().parent / "guitar_count_extra_trees_v1.json")
+    p.add_argument("--alpha-models-dir", type=Path,
+                   default=Path(__file__).resolve().parent / "guitar_count_alpha_models")
     args = p.parse_args(argv)
     try:
         original_parts, original_guitars, original_unknown = parse_lineup(args.original, original=True)

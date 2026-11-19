@@ -25,17 +25,23 @@ def one_track(part, start=0.0):
     return score
 
 
-@pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers,stereo_two", [
-    ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1, False),
-    ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1, False),
-    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1, False),
-    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2, False),
-    ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1, False),
+@pytest.mark.parametrize("original,requested,auto_split,expected_stems,expected_guitars,generated,workers,stereo_two,model_count", [
+    ("keyboard,guitar1", "keyboard,guitar2", False, {"guitar", "piano"}, 2, True, 1, False, None),
+    ("keyboard,guitar2", "guitar1", False, {"guitar", "piano"}, 1, False, 1, False, None),
+    ("unknown", "guitar1", True, {"drums", "bass", "guitar", "piano"}, 1, False, 1, False, None),
+    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, True, 2, False, None),
+    ("keyboard,drums", "guitar1", False, {"drums", "piano"}, 1, True, 1, False, None),
     # two guitars panned apart: the stereo check forces a split, no MIDI-GPT guitar
-    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, False, 1, True),
+    ("unknown", "guitar2", False, {"drums", "bass", "guitar", "piano"}, 2, False, 1, True, None),
+    # Model decisions override the old stereo/split branch and drive downstream routing.
+    ("unknown", "guitar1", False, {"drums", "bass", "guitar", "piano"}, 1, False, 1, False, 2),
+    ("unknown", "guitar2", True, {"drums", "bass", "guitar", "piano"}, 2, True, 1, True, 1),
+    # Mono/unmeasurable stereo falls back to skyline auto split.
+    ("unknown", "guitar2", True, {"drums", "bass", "guitar", "piano"}, 2, False, 1, False, 0),
 ])
 def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, auto_split,
-                                    expected_stems, expected_guitars, generated, workers, stereo_two):
+                                    expected_stems, expected_guitars, generated, workers,
+                                    stereo_two, model_count):
     audio = tmp_path / "song.wav"
     sf.write(str(audio), np.zeros((16000, 2), dtype="float32"), 8000, subtype="FLOAT")
     args = SimpleNamespace(audio=audio, output_dir=tmp_path / "run", original=original,
@@ -48,6 +54,8 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
                            transcription_workers=workers,
                            # one fixture note per stem would count as a sparse stem
                            min_notes_per_minute=0.0)
+    if model_count is not None:
+        args.guitar_count_classifier = "extra_trees"
 
     def save_beats(path, beats, downbeats):
         Path(path).write_text(json.dumps({"beats": beats, "downbeats": downbeats}), encoding="utf-8")
@@ -85,6 +93,10 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     monkeypatch.setitem(sys.modules, "full_score", SimpleNamespace(guitar_tracks=guitar_tracks, build=build))
     monkeypatch.setattr(unified, "guitar_stereo", lambda path, cfg: {"two_guitars": stereo_two})
     runner = Runner(args)
+    if model_count is not None:
+        monkeypatch.setattr(runner, "classify_guitars", lambda *unused: {
+            "method": "rule_fallback" if model_count == 0 else "test-model",
+            "two_guitars": model_count == 2, "count": model_count or None})
     commands = []
 
     def fake_command(stage, command, env=None):
@@ -147,11 +159,23 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
     assert runner.manifest["generated_targets"] == (["guitar"] if generated else [])
     assert runner.manifest["faint_parts"] == []  # every fixture stem is audible
     if original == "unknown" and requested == "guitar1":
-        assert "--split" not in next(command for stage, command in commands if stage == "guitar_tab")
-        assert "--split" in next(command for stage, command in commands if stage == "guitar_compressed")
+        command = next(command for stage, command in commands if stage == "guitar_tab")
+        if model_count is not None:
+            assert command[command.index("--split") + 1] == "always"
+            assert runner.manifest["guitar_count"]["count"] == 2
+        else:
+            assert "--split" not in command
+        if auto_split or model_count == 2:
+            assert "--split" in next(command for stage, command in commands if stage == "guitar_compressed")
     if original == "unknown" and requested == "guitar2":
         command = next(command for stage, command in commands if stage == "guitar_tab")
-        if stereo_two:
+        if model_count == 0:
+            assert "--split" not in command
+            assert runner.manifest["guitar_count"]["method"] == "rule_fallback"
+        elif model_count is not None:
+            assert command[command.index("--split") + 1] == "never"
+            assert runner.manifest["guitar_count"]["count"] == 1
+        elif stereo_two:
             assert command[command.index("--split") + 1] == "always"
             assert runner.manifest["guitar_stereo"] == {"two_guitars": True}
         else:
