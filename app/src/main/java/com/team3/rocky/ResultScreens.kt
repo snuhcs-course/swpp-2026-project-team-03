@@ -509,6 +509,13 @@ fun ResultScreen(
                 }
             }
         }
+        // 원곡에 기타가 없다고 들었는데 기타 2대를 골랐으면 기타는 1대만 새로 만든다 (재생성 기능을 뺀 대신).
+        if (local?.oneGuitarOnly == true) {
+            InfoNote(
+                tr("원곡에 기타가 없어서 기타 파트는 1개만 새로 만들었어요", "The song has no guitar, so only one guitar part was made"),
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         Text(
             tr("밴드 곡이 아니면 악보가 부정확할 수 있어요", "Less accurate for non-band songs"),
             fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,

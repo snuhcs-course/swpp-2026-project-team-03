@@ -61,6 +61,9 @@ class ScoreJob(
         internal set
     /** 업로드 중 같은 진행률이 없는 단계 안내 */
     var phase by mutableStateOf<String?>(null)
+    /** 원곡에 기타가 없어서 기타 2대를 골랐어도 1대만 만들었다 (보관함에는 기타 1대 곡으로 저장). */
+    var oneGuitarOnly by mutableStateOf(false)
+        internal set
     /** 서버에서 차례를 기다리는 중. 이때는 진행률을 올리지 않고 0% '대기 중'으로 보여준다. */
     var queued by mutableStateOf(false)
         internal set
@@ -101,7 +104,7 @@ class ScoreJob(
 
     /** 완성되면 결과 화면에서 쓰는 작업 정보 (id가 같아서 저장 여부·서버 결과 파일을 맞출 수 있다). */
     fun toWork() = Work(
-        id = id, title = title, instruments = lineup,
+        id = id, title = title, instruments = if (oneGuitarOnly) lineup - Demo.GUITAR2 else lineup,
         date = SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.KOREA).format(Date(id)),
         original = original,
         unrecognized = unrecognized,
@@ -251,6 +254,7 @@ object ScoreJobs {
         val faint = Demo.faintParts(job.lineup, job.claimed, local.result.faintParts)
             .filter { it !in local.result.generatedParts }
         job.unrecognized = faint
+        job.oneGuitarOnly = local.oneGuitarOnly && Demo.GUITAR2 in job.lineup
         // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮긴 파트이므로 ✨ 대상에서 뺀다.
         job.original = Demo.ordered(
             originalFromServer(job.lineup, local.result.originalParts, local.result.generatedParts) + faint,

@@ -66,6 +66,11 @@ data class JobResult(
     val faintParts: List<String> = emptyList(),
     /** 파이프라인이 원곡에서 들은 기타 대수 (0~2). 모르면 null. (지금 앱 화면에는 쓰지 않는다.) */
     val originalGuitars: Int? = null,
+    /**
+     * 파이프라인이 실제로 만든 기타 수가 요청과 다를 때만 값이 있다. 지금은 원곡에 기타가 없다고 들었는데
+     * 우리 밴드가 기타 2대일 때 1 (기타는 1대만 새로 만든다).
+     */
+    val guitarsDelivered: Int? = null,
 )
 
 object ApiJson {
@@ -102,6 +107,7 @@ object ApiJson {
             generatedParts = o.strings("generated_parts"),
             faintParts = o.strings("faint_parts"),
             originalGuitars = o.intOrNull("original_guitars"),
+            guitarsDelivered = o.intOrNull("guitars_delivered"),
         )
     }
 
