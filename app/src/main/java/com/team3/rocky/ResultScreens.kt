@@ -875,10 +875,11 @@ private fun PartGrid(
         listOf("piano", "drums"),
         if (Demo.GUITAR2 in instruments) listOf("bass", "guitar", Demo.GUITAR2) else listOf("bass", "guitar"),
     )
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    // 악보가 더 크게 보이도록 칸을 얇게 (세로 여백 4dp, 칸 사이 4dp).
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         PartChip(null, tr("전체", "All"), selected == null, ai = false, modifier = Modifier.fillMaxWidth()) { onSelect(null) }
         rows.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { inst ->
                     val has = inst in instruments
                     PartChip(
@@ -904,7 +905,7 @@ private fun PartChip(
         ai -> cs.secondary
         else -> cs.onSurface
     }
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(8.dp)
     Row(
         modifier
             .card(
@@ -920,14 +921,14 @@ private fun PartChip(
             )
             .clickable(enabled = enabled, onClick = onClick)
             .semantics { if (!enabled) contentDescription = tr("$text · 이 곡에 없음", "$text · not in this song") }
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         if (inst != null) {
-            InstrumentIcon(inst, fg, size = 16.dp)
+            InstrumentIcon(inst, fg, size = 14.dp)
             Spacer(Modifier.width(5.dp))
         }
-        Text(text, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+        Text(text, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.5.sp)
     }
 }
