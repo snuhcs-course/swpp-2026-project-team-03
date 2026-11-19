@@ -321,7 +321,7 @@ fun RockyApp() {
                 onBack = { back() },
                 onStart = { title, audio ->
                     // 원곡 악기는 묻지 않는다: 비워서 보내면 모델이 듣고 판단한다.
-                    // 개인 연습용은 곡 이름 앞에 악기를 붙인다 (예: '드럼_곡 이름').
+                    // 개인 연습용은 곡 이름 뒤에 악기를 붙인다 (예: '곡 이름_드럼').
                     val name = if (personal) Demo.personalTitle(lineup, title) else title
                     ScoreJobs.start(ctx, name, Demo.ordered(lineup), emptyList(), audio = audio, personal = personal)
                     if (JobNotifier.needsPermission(ctx)) askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)

@@ -71,13 +71,13 @@ object Demo {
     }
 
     /**
-     * 개인 연습용 곡 이름: 앞에 연습할 악기를 붙인다 (예: '드럼_사건의 지평선'). 이미 붙어 있으면 그대로.
-     * 기타 2대도 '기타_'. 곡 이름 칸 길이 제한(60자)은 붙인 뒤에도 지킨다.
+     * 개인 연습용 곡 이름: 원래 곡 이름 뒤에 연습할 악기를 붙인다 (예: '사건의 지평선_드럼'). 이미 붙어 있으면 그대로.
+     * 기타 2대도 '_기타'. 곡 이름 칸 길이 제한(60자)은 붙인 뒤에도 지킨다(긴 곡 이름 쪽을 줄임).
      */
     fun personalTitle(lineup: Collection<String>, title: String): String {
         val inst = SCORE_ORDER.firstOrNull { it in lineup }?.let { if (it == GUITAR2) "guitar" else it } ?: return title
-        val prefix = kor(inst) + "_"
-        return if (title.startsWith(prefix)) title else (prefix + title).take(60)
+        val suffix = "_" + kor(inst)
+        return if (title.endsWith(suffix)) title else title.take(60 - suffix.length) + suffix
     }
 
     /** 기타가 두 대인 곡에서는 첫 번째 기타를 '기타 1'로 부른다. */
