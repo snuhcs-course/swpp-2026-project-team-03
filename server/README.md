@@ -41,6 +41,22 @@ namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
 | `GET` | `/jobs/{id}/transpositions/{semitones}/result` | Read an already rendered offset. |
 | `GET` | `/jobs/{id}/transpositions/{semitones}/files/{path}` | Download a PDF, MIDI or MP3 from that offset. |
 | `DELETE` | `/jobs/{id}` | Deletes the job record, upload, run folder, result files and key changes → `{"id", "deleted", "pending"}`. A queued song is removed at once. A running song is cancelled the same way as `POST /jobs/{id}/cancel` and removed when its Pod has stopped (`pending: true`). A job shared to a band is not deleted (`409`), because band members open it from the server. |
+| `PUT` | `/jobs/{id}/rating` | Save or change a 1–5 star rating and an optional comment. For a completed score, the server copies its assigned guitar-count model from the pipeline manifest into the rating row; the client cannot specify a model. |
+| `GET` | `/ratings` | List ratings with `job_id`, `stars`, `comment`, `assigned_model`, `applied_model`, `model_sha256`, `assignment_probability`, and `predicted_guitars`. These fields stay in SQLite after the score files are deleted. A null model means no verified model attribution. A `rule_fallback` applied model means the assigned arm was not used for that score. |
+
+`rocky.db` also keeps one `experiment_jobs` row per job, including jobs without a rating.
+The row records the assigned and applied model, version hashes, probability, state,
+failure code, start/finish times, and `processing_seconds` (worker start to terminal state;
+queue time is excluded). Deleting score files marks `deleted_at` but retains this
+minimal analysis row. Join `experiment_jobs` to `ratings` by `job_id`; count distinct
+rated jobs for the submission rate because several members may rate one score.
+For the three-arm comparison, filter to the three alpha arm names and distinguish
+`applied_model = assigned_model` from `rule_fallback`. The assignment probabilities
+remain fixed at 1/3 during alpha; ratings do not change them automatically.
+After deploying the three-arm pipeline, set `ROCKY_GUITAR_COUNT_CLASSIFIER=alpha_three_arm`
+on the API Pod to opt in. Without it, the server sends no new classifier flag and
+keeps the existing pipeline behavior. The assigned arm is written by the GPU
+pipeline into each job's manifest, then copied into `experiment_jobs`.
 
 Key changes run in a CPU Pod. `transpose_scores.py` shifts pitched MIDI notes and
 the guitar/bass GP5 notes; drum hits and timing stay fixed. If an open low string

@@ -8,12 +8,14 @@ queued again and unified.py --resume continues from the last finished stage.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .runners import NoAgent, PodTimeout, RunnerError, TransientPodFailure, to_wav
 
@@ -60,6 +62,8 @@ class JobStore:
         for d in (root, runs, inputs):
             d.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
+        self.on_save: Callable[[Job], None] | None = None
+        self.on_purge: Callable[[Job], None] | None = None
 
     def path(self, job_id: str) -> Path:
         return self.root / f"{job_id}.json"
@@ -74,6 +78,11 @@ class JobStore:
         tmp = self.path(job.id).with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(job), ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path(job.id))
+        if self.on_save is not None:
+            try:
+                self.on_save(job)
+            except Exception:
+                logging.exception("Could not record experiment state for job %s", job.id)
 
     def get(self, job_id: str) -> Job | None:
         try:
@@ -107,6 +116,12 @@ class JobStore:
 
     def purge(self, job_id: str) -> None:
         """Remove the record, log, upload, run folder (results and key changes) and the mark."""
+        job = self.get(job_id)
+        if job is not None and self.on_purge is not None:
+            try:
+                self.on_purge(job)
+            except Exception:
+                logging.exception("Could not record experiment deletion for job %s", job_id)
         shutil.rmtree(self.run_dir(job_id), ignore_errors=True)
         for f in self.inputs.glob(f"{job_id}.*"):
             f.unlink(missing_ok=True)

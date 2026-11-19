@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from kubernetes import client
 
-from rocky_server.runners import KubernetesRunner, RunnerError
+from rocky_server.runners import KubernetesRunner, RunnerError, SubprocessRunner
 
 
 def runner():
@@ -40,6 +40,19 @@ def test_solo_practice_passes_personal_to_unified():
     env = lambda pod: {e.name: e.value for e in pod.spec.containers[0].env}
     assert "${ROCKY_PERSONAL:+--personal}" in solo.spec.containers[0].args[0]
     assert env(solo)["ROCKY_PERSONAL"] == "1" and env(band)["ROCKY_PERSONAL"] == ""
+
+
+def test_three_arm_flag_is_opt_in_for_pods_and_subprocess(monkeypatch):
+    default = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
+    assert "--guitar-count-classifier" not in default.spec.containers[0].args[0]
+    monkeypatch.setenv("ROCKY_GUITAR_COUNT_CLASSIFIER", "alpha_three_arm")
+    alpha = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
+    assert "--guitar-count-classifier alpha_three_arm" in alpha.spec.containers[0].args[0]
+    local = SubprocessRunner()
+    commands = []
+    monkeypatch.setattr(local, "_run", lambda _job, template, *_args: commands.append(template))
+    local.run_midi("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", Path("/log"))
+    assert commands and commands[0].endswith("--guitar-count-classifier alpha_three_arm")
 
 
 def test_pdf_pod_has_no_gpu():

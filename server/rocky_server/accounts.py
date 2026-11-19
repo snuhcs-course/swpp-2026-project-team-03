@@ -153,8 +153,33 @@ CREATE TABLE IF NOT EXISTS ratings (
     title       TEXT    NOT NULL DEFAULT '',
     instruments TEXT    NOT NULL DEFAULT '',
     rated_at    INTEGER NOT NULL,
+    assigned_model TEXT,
+    applied_model TEXT,
+    model_sha256 TEXT,
+    assignment_probability REAL,
+    predicted_guitars INTEGER,
     PRIMARY KEY (job_id, rater)
 );
+-- One row for every job, including unrated and failed jobs. No song title or user identity.
+CREATE TABLE IF NOT EXISTS experiment_jobs (
+    job_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    started_at REAL,
+    finished_at REAL,
+    processing_seconds REAL,
+    failure_code TEXT,
+    rejection_reason TEXT,
+    assigned_model TEXT,
+    applied_model TEXT,
+    model_sha256 TEXT,
+    model_manifest_sha256 TEXT,
+    assignment_probability REAL,
+    predicted_guitars INTEGER,
+    experiment_eligible INTEGER,
+    deleted_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_jobs_model ON experiment_jobs(assigned_model, state);
 """
 
 
@@ -185,6 +210,10 @@ class Accounts:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         add("users", "photo_at", "INTEGER")          # when the profile photo last changed (null = no photo)
         add("ratings", "comment", "TEXT NOT NULL DEFAULT ''")  # optional words after the stars
+        for column, kind in (("assigned_model", "TEXT"), ("applied_model", "TEXT"),
+                             ("model_sha256", "TEXT"), ("assignment_probability", "REAL"),
+                             ("predicted_guitars", "INTEGER")):
+            add("ratings", column, kind)
 
     def _tx(self):
         return _Tx(self)
@@ -453,7 +482,43 @@ class Accounts:
 
     # ---------- ratings ----------
 
-    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=(), comment=None) -> dict:
+    def record_experiment_job(self, job, model: dict | None = None, *, deleted_at: float | None = None) -> None:
+        """Persist every job outcome so unrated and failed jobs remain in the alpha denominator."""
+        model = model or {}
+        duration = (round(max(0.0, job.finished_at - job.started_at), 3)
+                    if job.started_at is not None and job.finished_at is not None else None)
+        with self.lock, self._tx():
+            self.db.execute(
+                """INSERT INTO experiment_jobs (
+                       job_id, state, created_at, started_at, finished_at, processing_seconds,
+                       failure_code, rejection_reason, assigned_model, applied_model, model_sha256,
+                       model_manifest_sha256, assignment_probability, predicted_guitars,
+                       experiment_eligible, deleted_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(job_id) DO UPDATE SET
+                       state = excluded.state, started_at = excluded.started_at,
+                       finished_at = excluded.finished_at, processing_seconds = excluded.processing_seconds,
+                       failure_code = excluded.failure_code, rejection_reason = excluded.rejection_reason,
+                       assigned_model = COALESCE(experiment_jobs.assigned_model, excluded.assigned_model),
+                       applied_model = COALESCE(excluded.applied_model, experiment_jobs.applied_model),
+                       model_sha256 = COALESCE(excluded.model_sha256, experiment_jobs.model_sha256),
+                       model_manifest_sha256 = COALESCE(excluded.model_manifest_sha256,
+                                                        experiment_jobs.model_manifest_sha256),
+                       assignment_probability = COALESCE(excluded.assignment_probability,
+                                                         experiment_jobs.assignment_probability),
+                       predicted_guitars = COALESCE(excluded.predicted_guitars,
+                                                    experiment_jobs.predicted_guitars),
+                       experiment_eligible = COALESCE(excluded.experiment_eligible,
+                                                      experiment_jobs.experiment_eligible),
+                       deleted_at = COALESCE(experiment_jobs.deleted_at, excluded.deleted_at)""",
+                (job.id, job.state, job.created_at, job.started_at, job.finished_at, duration,
+                 job.error_code, job.reason, model.get("assigned_model"), model.get("applied_model"),
+                 model.get("model_sha256"), model.get("model_manifest_sha256"),
+                 model.get("assignment_probability"), model.get("predicted_guitars"),
+                 model.get("experiment_eligible"), deleted_at))
+
+    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=(),
+             comment=None, *, model: dict | None = None) -> dict:
         """Save (or change) one rater's stars for a score.
 
         Ratings sent without a login all count as rater 0, so a later anonymous rating of the same
@@ -473,6 +538,15 @@ class Accounts:
                    instruments = excluded.instruments, rated_at = excluded.rated_at,
                    comment = COALESCE(?, ratings.comment)""",
                 (job_id, rater.id if rater else 0, stars, str(title)[:200], ",".join(parts), self.clock(), words, words))
+            # A job's first verified assignment is immutable even if the user changes their stars.
+            if model and model.get("assigned_model"):
+                self.db.execute(
+                    """UPDATE ratings SET assigned_model = ?, applied_model = ?, model_sha256 = ?,
+                       assignment_probability = ?, predicted_guitars = ?
+                       WHERE job_id = ? AND rater = ? AND assigned_model IS NULL""",
+                    (model["assigned_model"], model.get("applied_model"), model.get("model_sha256"),
+                     model.get("assignment_probability"), model.get("predicted_guitars"),
+                     job_id, rater.id if rater else 0))
             saved = self._one("SELECT comment FROM ratings WHERE job_id = ? AND rater = ?", job_id, rater.id if rater else 0)
         return {"job_id": job_id, "stars": stars, "comment": saved["comment"] if saved else ""}
 
@@ -483,7 +557,10 @@ class Accounts:
         items = [{"job_id": r["job_id"], "stars": r["stars"], "title": r["title"],
                   "instruments": [i for i in r["instruments"].split(",") if i], "rated_at": r["rated_at"],
                   "comment": r["comment"],
-                  "logged_in": r["rater"] != 0} for r in rows]
+                  "logged_in": r["rater"] != 0, "assigned_model": r["assigned_model"],
+                  "applied_model": r["applied_model"], "model_sha256": r["model_sha256"],
+                  "assignment_probability": r["assignment_probability"],
+                  "predicted_guitars": r["predicted_guitars"]} for r in rows]
         average = round(sum(i["stars"] for i in items) / len(items), 2) if items else None
         histogram = {str(n): sum(1 for i in items if i["stars"] == n) for n in range(1, 6)}
         return {"count": len(items), "average": average, "histogram": histogram, "ratings": items}

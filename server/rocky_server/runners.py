@@ -43,6 +43,16 @@ class NoAgent(PodTimeout):
 TRANSIENT_MARKER = "ROCKY_TRANSIENT_FAILURE"
 
 
+def guitar_count_option() -> str:
+    """Only pass a new CLI flag when the alpha pipeline is explicitly enabled."""
+    choice = os.environ.get("ROCKY_GUITAR_COUNT_CLASSIFIER", "").strip()
+    if choice in ("", "rule"):
+        return ""
+    if choice not in ("alpha_three_arm", "extra_trees"):
+        raise ValueError("ROCKY_GUITAR_COUNT_CLASSIFIER must be rule, alpha_three_arm, or extra_trees")
+    return choice
+
+
 def pod_failure(what: str, phase: str | None, pod_log: str, log_name: str) -> RunnerError:
     """The error for a finished Pod that did not succeed."""
     cls = TransientPodFailure if TRANSIENT_MARKER in (pod_log or "") else RunnerError
@@ -123,7 +133,9 @@ class SubprocessRunner:
 
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
                  note=lambda _msg: None, original: str = "unknown", personal: bool = False) -> None:
-        self._run(job_id, self.midi_cmd, audio, run, requested, log, original, personal)
+        classifier = guitar_count_option()
+        template = self.midi_cmd + (f" --guitar-count-classifier {classifier}" if classifier else "")
+        self._run(job_id, template, audio, run, requested, log, original, personal)
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
         self._run(job_id, self.pdf_cmd, run, run, "", log)
@@ -230,6 +242,7 @@ class KubernetesRunner:
 
     def midi_pod(self, job_id: str, audio: Path, run: Path, requested: str, original: str = "unknown",
                  personal: bool = False):
+        classifier = guitar_count_option()
         script = (
             "set -euo pipefail; "
             "export HF_HOME=/data/cache/hf TORCH_HOME=/data/cache/torch "
@@ -239,7 +252,8 @@ class KubernetesRunner:
             '"$ROCKY_INPUT_AUDIO" "$ROCKY_OUTPUT_DIR" '
             '--original "$ROCKY_ORIGINAL" --requested "$ROCKY_REQUESTED" ${ROCKY_PERSONAL:+--personal} '
             '--bsroformer-models-dir /data/bsrofo/models --bsroformer-lib-dir /data/bsrofo/pylib '
-            '--resume --no-publish')
+            '--resume --no-publish'
+            + (f' --guitar-count-classifier {classifier}' if classifier else ''))
         env = {"ROCKY_INPUT_AUDIO": str(audio), "ROCKY_OUTPUT_DIR": str(run),
                "ROCKY_ORIGINAL": original, "ROCKY_REQUESTED": requested,
                "ROCKY_PERSONAL": "1" if personal else "",

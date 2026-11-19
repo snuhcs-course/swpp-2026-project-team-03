@@ -46,6 +46,7 @@ from .accounts import AccountError, Accounts, User
 from .jobs import JobStore, RetryRefused, Worker
 from .lineup import APP_PARTS, LineupError, pipeline_args
 from .progress import allowed_paths, result_files, run_progress
+from .rating_model import model_assignment, rating_model
 from .runners import make_runner
 
 INSTRUMENTS = ("piano", "guitar", "bass", "drums")
@@ -61,8 +62,15 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
                               Path(os.environ.get("ROCKY_RUNS", "/data/rocky-unified/runs")),
                               Path(os.environ.get("ROCKY_INPUTS", "/data/input/app")))
     runner = runner or make_runner(os.environ.get("ROCKY_RUNNER", "kubernetes"))
-    worker = Worker(store, runner, int(os.environ.get("ROCKY_PARALLEL", "1")))
     accounts = accounts or Accounts(store.root / "rocky.db")
+    store.on_save = lambda job: accounts.record_experiment_job(job, model_assignment(store.run_dir(job.id)))
+    store.on_purge = lambda job: accounts.record_experiment_job(
+        job, model_assignment(store.run_dir(job.id)), deleted_at=time.time())
+    for existing in store.all():
+        accounts.record_experiment_job(
+            existing, model_assignment(store.run_dir(existing.id)),
+            deleted_at=time.time() if store.is_deleted(existing.id) else None)
+    worker = Worker(store, runner, int(os.environ.get("ROCKY_PARALLEL", "1")))
     api_key = os.environ.get("ROCKY_API_KEY", "")
     max_bytes = int(os.environ.get("ROCKY_MAX_UPLOAD_MB", "60")) * CHUNK
     transpose_guard = threading.Lock()
@@ -206,11 +214,12 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     # ---- star ratings (app: the stars under the last score page) ----
     @app.put("/jobs/{job_id}/rating", dependencies=[Depends(check_key)])
     def rate_job(job_id: str, body: dict = Body(...), authorization: str | None = Header(default=None)) -> dict:
-        find(job_id)
+        job = find(job_id)
         token = (authorization or "").removeprefix("Bearer ").strip()
         rater = accounts.user_for_token(token) if token else None
+        model = rating_model(store.run_dir(job_id)) if job.state == "complete" else None
         return accounts.rate(job_id, body.get("stars"), rater, str(body.get("title", "")), body.get("instruments") or [],
-                             body.get("comment"))
+                             body.get("comment"), model=model)
 
     @app.get("/ratings", dependencies=[Depends(check_key)])
     def all_ratings() -> dict:

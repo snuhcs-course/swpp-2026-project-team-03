@@ -4,6 +4,7 @@ The fake kubectl runs ci_fake_pipeline.py as the "Pod", so the API sees the
 same files a real run writes. No cluster or GPU is needed.
 """
 
+import os
 import socket
 import subprocess
 import sys
@@ -49,10 +50,15 @@ def server(tmp_path, monkeypatch):
 
 
 def start_agent(url, tmp_path, quota_refusals=0, name="laptop-1"):
-    env = {"FAKE_KUBE_DIR": str(tmp_path / "kube"), "FAKE_KUBE_QUOTA_REFUSALS": str(quota_refusals),
-           "PATH": "/usr/bin:/bin"}
+    env = os.environ.copy() if os.name == "nt" else {"PATH": "/usr/bin:/bin"}
+    env.update(FAKE_KUBE_DIR=str(tmp_path / "kube"), FAKE_KUBE_QUOTA_REFUSALS=str(quota_refusals))
+    kubectl = HERE / "fake_kubectl.py"
+    if os.name == "nt":
+        # CreateProcess cannot run a .py script by shebang; wrap the fake executable for Windows.
+        kubectl = tmp_path / "fake_kubectl.cmd"
+        kubectl.write_text(f'@echo off\n"{sys.executable}" "{HERE / "fake_kubectl.py"}" %*\n')
     return subprocess.Popen(
-        [sys.executable, str(AGENT), "--api", url, "--kubectl", str(HERE / "fake_kubectl.py"),
+        [sys.executable, str(AGENT), "--api", url, "--kubectl", str(kubectl),
          "--name", name, "--poll", "0.2", "--beat", "0.2", "--quota-retry", "0.3"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
@@ -80,7 +86,7 @@ def test_song_completes_through_laptop_agent(server):
     try:
         job_id = upload(url)
         job = wait_state(store, job_id, {"complete", "failed"})
-        assert job.state == "complete", (job.error, store.log(job_id).read_text())
+        assert job.state == "complete", job.error
         import httpx
         result = httpx.get(f"{url}/jobs/{job_id}/result").json()
         assert result["full_band"]["mp3"] == "scores/band.mp3"
