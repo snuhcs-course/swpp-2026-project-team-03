@@ -122,7 +122,7 @@ AI 파이프라인 코드는 앱과 git 기록이 이어져 있지 않아 이 �
 ## 3. Demo video
 
 - [Iteration 4 working demo](https://drive.google.com/file/d/1NBejZUPGWrlBinjzxhctGnso7HdQOWc5/view?resourcekey)
-  - 2026-11-18(TA 미팅 전)에 찍은 영상입니다.
+  - 2026-11-18(TA 미팅 전)에 찍은 영상입니다. 키 바꾸기와 Iteration 4의 UI 수정 등 그때까지 반영된 기능을 보여 줍니다.
   - 그 뒤 11/20에 병합한 변경은 영상에 없습니다: UAT 피드백 반영(PR #27), 악보 따라가기 재구현과 빠른 악기 전환(PR #33~#35), 노트북 agent 제거(PR #28).
 - [Iteration 3 working demo](https://drive.google.com/file/d/1mpPb0rXEK5a93LJj82WM1YPhiAR9aUGR/view?usp=sharing)
 - [Iteration 2 working demo](https://drive.google.com/file/d/1wVii7g0WqUVoUHAEtb1jWcls4gWSXsjV/view?usp=sharing)
