@@ -1,0 +1,11 @@
+id,split,artist,name,year,section,youtube_url,youtube_id,start_sec,end_sec,duration_sec,audio_path,reference_midi
+WeglOyOLmrY,test,Lily Allen,22,2009,Chorus,https://www.youtube.com/watch?v=tWjNFC-FinU,tWjNFC-FinU,33.400,63.670,30.270,data/audio/multtipop/WeglOyOLmrY.wav,data/datasets/multtipop/test/WeglOyOLmrY/aligned.mid
+nJmBlBEdxAV,test,Owl City,Fireflies,2009,Chorus,https://www.youtube.com/watch?v=psuRGfAaju4,psuRGfAaju4,154.946,199.812,44.866,data/audio/multtipop/nJmBlBEdxAV.wav,data/datasets/multtipop/test/nJmBlBEdxAV/aligned.mid
+DpgvQJPemad,dev,Taylor Swift,Fifteen,2009,Verse,https://www.youtube.com/watch?v=rLCol1C3ouc,rLCol1C3ouc,10.040,53.756,43.717,data/audio/multtipop/DpgvQJPemad.wav,data/datasets/multtipop/dev/DpgvQJPemad/aligned.mid
+nZgWOyE_gry,test,Carrie Underwood,Cowboy Casanova,2009,Chorus,https://www.youtube.com/watch?v=oM7NQQ0Lfu4,oM7NQQ0Lfu4,55.760,86.720,30.960,data/audio/multtipop/nZgWOyE_gry.wav,data/datasets/multtipop/test/nZgWOyE_gry/aligned.mid
+nRPxeXRLgb_,test,Lady Gaga,Speechless,2009,Verse,https://www.youtube.com/watch?v=BMcs4pbsmeg,BMcs4pbsmeg,13.840,41.280,27.440,data/audio/multtipop/nRPxeXRLgb_.wav,data/datasets/multtipop/test/nRPxeXRLgb_/aligned.mid
+kygzPZbPoKB,dev,U2,Magnificent,2009,Verse,https://www.youtube.com/watch?v=Yi52HjJbwVQ,Yi52HjJbwVQ,40.640,66.630,25.990,data/audio/multtipop/kygzPZbPoKB.wav,data/datasets/multtipop/dev/kygzPZbPoKB/aligned.mid
+nLgakVNzoYp,test,Ne-Yo,Closer,2008,Verse and Pre-Chorus,https://www.youtube.com/watch?v=z_aC5xPQ2f4,z_aC5xPQ2f4,14.820,61.421,46.601,data/audio/multtipop/nLgakVNzoYp.wav,data/datasets/multtipop/test/nLgakVNzoYp/aligned.mid
+kygzJKOLgKB,test,Gwen Stefani,Early Winter,2008,Verse and Pre-Chorus,https://www.youtube.com/watch?v=0S7Qu5HMiCA,0S7Qu5HMiCA,8.609,45.901,37.292,data/audio/multtipop/kygzJKOLgKB.wav,data/datasets/multtipop/test/kygzJKOLgKB/aligned.mid
+jDgXzvEqoKl,test,Alicia Keys,No One,2007,Chorus,https://www.youtube.com/watch?v=rywUS-ohqeE,rywUS-ohqeE,55.563,88.338,32.775,data/audio/multtipop/jDgXzvEqoKl.wav,data/datasets/multtipop/test/jDgXzvEqoKl/aligned.mid
+ZbgOknqwgnY,test,The Killers,Read My Mind,2006,Pre-Chorus and Chorus,https://www.youtube.com/watch?v=zc8hbSM1zVo,zc8hbSM1zVo,73.950,104.030,30.080,data/audio/multtipop/ZbgOknqwgnY.wav,data/datasets/multtipop/test/ZbgOknqwgnY/aligned.mid
