@@ -210,9 +210,11 @@ def test_wide_but_playable_is_not_split():
 def test_split_thresholds_are_shares_of_onsets():
     chords = [[40, 47, 52, 84]] * 2 + [[60]] * 18          # 10% unplayable and wide
     assert decide_split(_onsets(chords), "standard")[0]
-    chords = [[40, 47, 52, 84]] * 1 + [[60]] * 19          # 5% unplayable and wide -> split
+    chords = [[40, 47, 52, 84]] * 1 + [[60]] * 99          # 1% unplayable and wide -> split
     assert decide_split(_onsets(chords), "standard")[0]
-    chords = [[40, 47, 52, 84]] * 1 + [[60]] * 49          # 2% unplayable, 2% wide -> wide below 3%
+    chords = [[40, 47, 52, 84]] * 1 + [[60]] * 100         # just below 1% wide
+    assert not decide_split(_onsets(chords), "standard")[0]
+    chords = [[40, 47, 52, 84]] * 1 + [[60]] * 200         # just below 0.5% unplayable
     assert not decide_split(_onsets(chords), "standard")[0]
 
 
