@@ -102,6 +102,16 @@ class MeasureTest {
         assertEquals(MeasureBox(0, 100, 150, 100, 1000), layout.box(5))  // the whole second system
     }
 
+    @Test fun fewMissedBarsAreStretchedToMidiCount() {
+        // 마디선 98개를 찾았지만 MIDI는 100마디 (3% 이내): 찾은 마디를 비례로 늘려 쓴다
+        val page = (0 until 49).map { k -> sys(k * 100, 500, 1000) }
+        val layout = MeasureLayout.build(listOf(page), measures = 100)
+        assertFalse(layout.exact)
+        assertEquals(100, layout.count)
+        assertEquals(MeasureBox(0, 0, 50, 100, 500), layout.box(0))
+        assertEquals(MeasureBox(0, 4800, 4850, 500, 1000), layout.box(99))
+    }
+
     @Test fun noSystemsMeansNoLayout() {
         assertEquals(0, MeasureLayout.build(listOf(emptyList()), measures = 10).count)
         assertNull(MeasureLayout.build(emptyList(), measures = null).box(0))

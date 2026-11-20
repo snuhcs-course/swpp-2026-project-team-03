@@ -21,6 +21,11 @@ data class StaffSystem(val top: Int, val bottom: Int, val left: Int, val right: 
  * [MeasureLayout]이 MIDI 마디 수와 맞춰 보고, 다르면 쓰지 않는다.
  */
 object ScoreLayout {
+    /**
+     * 어둡다고 볼 밝기 기준. 폰 화면 폭(1080px)으로 그리면 가는 오선·TAB 줄·보표 이음줄이 두 픽셀에 걸쳐
+     * 회색(밝기 200대)으로 흐려진다. 200으로 두면 줄이 끊겨 TAB과 큰 악보를 통째로 못 읽었다.
+     */
+    private const val DARK_LUM = 230
     private class Line(val y: Double, val x0: Int, val x1: Int)
     private class Staff(val top: Double, val bottom: Double, val space: Double, val x0: Int, val x1: Int, val lines: Int)
 
@@ -30,7 +35,7 @@ object ScoreLayout {
             val p = pixels[i]
             val a = p ushr 24
             val lum = (((p shr 16) and 0xFF) * 3 + ((p shr 8) and 0xFF) * 6 + (p and 0xFF)) / 10
-            a > 128 && lum < 200
+            a > 128 && lum < DARK_LUM
         }
         val page = Page(dark, width, height)
         val staves = staves(page.staffLines())
@@ -138,8 +143,10 @@ object ScoreLayout {
             if (p != null) {
                 val y0 = p.bottom.toInt() + 2
                 val y1 = s.top.toInt() - 2
-                val x0 = min(p.x0, s.x0)
-                val joined = y1 > y0 && (max(0, x0 - (4 * s.space).toInt()) until min(page.w, x0 + s.space.toInt()))
+                // 큰보표 중괄호가 있으면 줄 시작이 이음줄보다 1칸쯤 왼쪽에 잡힌다. 두 보표의 시작 위치를 모두 덮고 오른쪽으로 2칸까지 찾는다.
+                val xa = min(p.x0, s.x0)
+                val xb = max(p.x0, s.x0)
+                val joined = y1 > y0 && (max(0, xa - (4 * s.space).toInt()) until min(page.w, xb + (2 * s.space).toInt()))
                     .any { page.colFrac(it, y0, y1) > 0.9 }
                 if (joined) { out.last() += s; continue }
             }
