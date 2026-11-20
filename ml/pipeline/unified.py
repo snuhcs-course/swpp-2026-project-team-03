@@ -587,7 +587,14 @@ class Runner:
             result = align_midi(raw, aligned, beats=beats, downbeats=downbeats, drum_sync=True)
             self.manifest["alignment"] = {"bpm": result.bpm, "meter": result.meter,
                                            "notes": result.note_count,
-                                           "drum_sync_moved": result.drum_sync.moved_notes if result.drum_sync else 0}
+                                           "drum_sync_moved": result.drum_sync.moved_notes if result.drum_sync else 0,
+                                           # publish_scores.py turns these into scores/measure_times.json so the
+                                           # app can follow the original recording measure by measure
+                                           # (an older align.py has no beat_times: then nothing is saved)
+                                           "beats_per_bar": getattr(result, "beats_per_bar", 0),
+                                           "beat_offset": getattr(result, "beat_offset", 0),
+                                           "beat_period": getattr(result, "beat_period", 0.0),
+                                           "beat_times": getattr(result, "beat_times", [])}
         self.stage("align", [aligned], align)
 
         presence = present_parts(pretty_midi.PrettyMIDI(str(aligned)))

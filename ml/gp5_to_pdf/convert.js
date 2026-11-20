@@ -101,6 +101,7 @@ async function routeLocalFiles(context, gp5) {
 
 /** Runs in the page: renders every track one after another and returns the track names. */
 async function renderAllTracks({ scale, width }) {
+  const MEASURE_LINK = 'https://measure.rocky.invalid/';
   const at = window.alphaTab;
   const bytes = new Uint8Array(await (await fetch('/input.gp5')).arrayBuffer());
   const settings = () => {
@@ -112,6 +113,8 @@ async function renderAllTracks({ scale, width }) {
     s.player.enablePlayer = false;
     s.display.layoutMode = at.LayoutMode.Page;
     s.display.scale = scale;
+    // alphaTab draws bar numbers red by default; print them black like the rest of the score.
+    s.display.resources.barNumberColor = new at.model.Color(0, 0, 0, 255);
     return s;
   };
   const score = at.importer.ScoreLoader.loadScoreFromBytes(bytes, settings());
@@ -158,6 +161,15 @@ async function renderAllTracks({ scale, width }) {
       api.renderScore(score, [index]);
     });
 
+    // Measure boxes in surface coordinates, read before the rows are moved.
+    const bars = [];
+    for (const system of api.renderer.boundsLookup?.staffSystems ?? []) {
+      for (const mb of system.bars) {
+        const b = mb.lineAlignedBounds || mb.realBounds;
+        if (b) bars.push({ index: mb.index, x: b.x, y: b.y, w: b.w, h: b.h });
+      }
+    }
+
     // alphaTab places each rendered chunk absolutely. Group chunks that share
     // a top edge into rows, then stack the rows in normal flow.
     const surface = holder.querySelector('.at-surface');
@@ -170,8 +182,10 @@ async function renderAllTracks({ scale, width }) {
     }
     // Rows stay inside the surface: alphaTab's music-font CSS only applies there.
     const flow = surface;
+    const placed = [];
     for (const top of [...rows.keys()].sort((a, b) => a - b)) {
       const row = document.createElement('div');
+      placed.push({ top, row });
       row.className = 'row';
       let height = 0;
       for (const chunk of rows.get(top)) {
@@ -181,6 +195,17 @@ async function renderAllTracks({ scale, width }) {
       }
       row.style.height = `${Math.ceil(height)}px`;
       flow.appendChild(row);
+    }
+    // An invisible link over every measure. Chrome writes each link into the PDF with its page and
+    // rectangle, so publish_scores.py can tell the app where each measure is printed.
+    for (const bar of bars) {
+      const host = placed.filter((p) => p.top <= bar.y + 1).pop() || placed[0];
+      if (!host) continue;
+      const link = document.createElement('a');
+      link.href = `${MEASURE_LINK}${index}/${bar.index}`;
+      link.style.cssText = `position:absolute;display:block;left:${bar.x}px;top:${bar.y - host.top}px;` +
+        `width:${bar.w}px;height:${bar.h}px`;
+      host.row.appendChild(link);
     }
     surface.style.height = 'auto';
     surface.style.position = 'static';
