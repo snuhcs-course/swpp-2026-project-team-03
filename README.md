@@ -1,176 +1,157 @@
-# ROCKY — Working Demo (Iteration 3)
+# ROCKY — Working Demo (Iteration 4 · Hardening and UAT)
 
 > 어떤 곡이든, 우리 밴드 악보로.
-> 밴드 악보 제작을 위한 안드로이드 앱의 로그인, 악보 만들기, 만드는 중, 보관함, 내 밴드 흐름을 시연합니다.
-> 올린 음원은 서버를 거쳐 SGS GPU에서 AI 파이프라인으로 처리되고, 만들어진 악보(PDF·MIDI)와 음원(MP3)이 앱에 표시됩니다.
+> 밴드 곡을 올리면 우리 밴드 악기(또는 내 악기 하나)의 악보와 음원을 만들어 주는 안드로이드 앱입니다.
+> 올린 음원은 ROCKY 서버를 거쳐 SGS GPU에서 AI 파이프라인으로 처리되고, 만들어진 악보(PDF)와 음원(MP3)을 앱에서 보고 들으며 밴드와 공유합니다.
 
 Team 3 (영양실조) · 김채연, 박재욱, 조수빈, 홍순형
+
+Iteration 4에서는 새 기능보다 **이미 만든 기능을 하나로 합치고, 실제 폰에서 처음부터 끝까지 안정적으로 돌아가게 하는 것**에 집중했습니다. 휴리스틱 평가(Iteration 3)와 UAT(11/16 테스터 2명, 11/18 TA)에서 나온 문제를 고쳤고, USB 연결 없이 폰에서 바로 쓸 수 있게 서버를 공개 주소로 열었습니다.
 
 ---
 
 ## 1. How to run
 
 ### 개발·실행 환경
-앱은 Android Studio 2026.1.3으로 작업하고 에뮬레이터에서 확인했습니다. 프로젝트에 고정된 도구·플랫폼 버전과 확인한 개발 환경은 다음과 같습니다.
 
 | 항목 | 버전·요구사항 |
 |---|---|
 | IDE | Android Studio 2026.1.3 (build AI-261.26222.65.2613.15948027), 내장 JDK(JBR) 25.0.2 |
 | 빌드 | Gradle Wrapper 9.5.0, Android Gradle Plugin 9.3.3 |
-| 언어 / UI | Kotlin 2.2.10, Jetpack Compose (Material 3), Java 11 소스 호환성 |
+| 언어 / UI | Kotlin 2.2.10, Jetpack Compose (Material 3, BOM 2026.02.01), Java 11 소스 호환성 |
 | Android SDK | compile/target SDK 37, min SDK 26 (Android 8) |
-| 실행 기기 | API 26 이상 Android Emulator 또는 Android 기기 (팀 시연 기기: 갤럭시, Android 13). 확인한 에뮬레이터: Medium Phone, Android 16 (API 36, Google Play, arm64-v8a), Android Emulator 37.1.11 |
-| 서버 | Python 3.12, FastAPI (`server/`), SGS 팀 워크스페이스의 CPU Pod `rocky-api` |
-| AI 파이프라인 | SGS GPU Pod (NVIDIA A100), `ml/pipeline/unified.py` (서버가 요청하면 노트북 agent가 Pod를 띄움) |
-| 서버 연결용 노트북 | macOS, kubectl, kubelogin, adb, Python 3.8 이상. 확인한 환경: macOS 27.2 (Apple Silicon), kubectl 1.32.2, kubelogin 1.34.0, adb (platform-tools 37.0.1), Python 3.14.3 |
+| 실행 기기 | API 26 이상 Android 기기 또는 에뮬레이터. 팀 시연 기기: Galaxy S22, Galaxy S23 Ultra. 확인한 에뮬레이터: Medium Phone, Android 16 (API 36, arm64-v8a) |
+| 서버 | Python 3.12, FastAPI + SQLite (`server/`), SGS 팀 워크스페이스(gpu22)의 CPU Pod `rocky-api` |
+| AI 파이프라인 | 곡마다 SGS GPU Pod(`rocky-midi-*`, NVIDIA A100)와 CPU Pod(`rocky-pdf-*`)를 `rocky-api`가 직접 만들어 처리 |
+| 공개 주소 | `http://team3.swpp-2026-b.snu.ac.kr` (팀 서버 nginx → SSH 역방향 터널 → `rocky-api`) |
+| 공개 주소를 잇는 노트북 | macOS, kubectl + kubelogin, OpenSSH. 학교 네트워크(또는 VPN)에서 `kubectl port-forward`와 SSH 터널을 켜 둠 |
 
 ### 실행 방법
 
-**A. 앱 빌드·설치**
-1. 이 저장소를 받아요.
+**A. 폰에서 바로 써 보기 (USB 필요 없음)**
+
+1. 팀에게 공개 주소가 들어간 APK를 받아 설치합니다. 처음이면 "출처를 알 수 없는 앱" 설치를 허용합니다.
+2. 앱을 열고 이메일로 회원가입합니다(인증번호 없음). 와이파이·LTE 어디서든 됩니다.
+3. 홈에서 **밴드 합주용**(우리 밴드 악기) 또는 **개인 연습용**(내 악기 하나)을 고릅니다 → 악기를 고르고 → 곡(MP3·WAV·FLAC·OGG)을 올립니다 → **악보 만들기 시작**.
+4. **만드는 중** 탭에서 단계·퍼센트·남은 시간을 보다가, 완료되면 결과를 엽니다. 완료된 곡은 **보관함**에 자동으로 저장됩니다. GPU가 비어 있으면 3분 곡이 약 5분 걸립니다.
+
+**B. 소스에서 빌드하기**
+
+1. 저장소를 받고 이 브랜치로 바꿉니다.
    ```bash
    git clone https://github.com/snuhcs-course/swpp-2026-project-team-03.git
    cd swpp-2026-project-team-03
-   git switch app/my-band
+   git switch iteration-4-demo
    ```
-2. Android Studio에서 저장소 루트 폴더를 열고 Android SDK 37을 설치하거나 설치 안내에 따라 설정합니다. Gradle Sync를 완료합니다. 로컬 SDK 경로는 각자 `local.properties`에 설정하며 이 파일은 Git에 포함하지 않습니다.
-3. API 26 이상 에뮬레이터 또는 USB 디버깅된 기기를 선택해 `app`을 실행합니다.
-4. 회원·밴드·악보는 모두 ROCKY 서버에 저장되므로, 회원가입 전에 아래 **B**로 서버에 연결합니다. 데모 곡·예시 결과·예시 밴드는 2026-11-11에 모두 뺐습니다.
-
-**B. 실제 음원을 AI 파이프라인으로 처리하기 (서버 연결)**
-
-서버(`rocky-api`)는 SGS 팀 워크스페이스에 이미 올라가 있습니다. 시연할 때는 노트북에서 연결만 하면 됩니다. 처음 설정(kubectl·kubelogin·adb 설치, kubeconfig, 서버 올리기)은 [`server/DEPLOY_ko.md`](server/DEPLOY_ko.md), 시연 당일 순서는 [`server/DEMO_jaewook_ko.md`](server/DEMO_jaewook_ko.md)에 있습니다.
-
-1. 폰에 앱을 설치하고 USB 디버깅을 켠 뒤 노트북에 연결합니다.
-2. 노트북에서 터미널 3개를 엽니다 (1·2는 켜 둡니다).
+2. 서버 주소와 API 키를 넣습니다. 키는 Git에 올리지 않으니 팀에게 개인 메시지로 받습니다. `local.properties`(커밋하지 않음)에 적거나 Gradle 속성으로 넘깁니다.
+   ```properties
+   # local.properties
+   rocky.serverUrl=http://team3.swpp-2026-b.snu.ac.kr
+   rocky.apiKey=<팀에게 받은 키>
+   ```
    ```bash
-   # 터미널 1: 서버 연결 (노트북 8080 → 서버 8000)
-   kubectl port-forward pod/rocky-api 8080:8000
-   # 터미널 2: GPU·PDF Pod를 띄우는 agent ("할 일을 기다려요"가 보이면 정상)
-   python3 server/agent/rocky_agent.py --api http://localhost:8080
-   # 터미널 3: 폰 연결
-   curl localhost:8080/health          # {"ok":true}
-   adb reverse tcp:8000 tcp:8080       # 폰의 8000(앱 기본 주소) → 노트북 8080
+   ./gradlew assembleDebug -Procky.serverUrl=http://team3.swpp-2026-b.snu.ac.kr -Procky.apiKey=<팀에게 받은 키>
    ```
-3. 앱 로그인 화면 아래 **연결 설정 → 연결 확인 → `연결됨 ✓`**을 확인합니다 (로그인 뒤에는 곡 올리기 화면 아래에도 있습니다). 처음이면 이메일로 회원가입합니다(인증번호 없음).
-4. **새 악보 만들기 → 우리 밴드 악기 → 곡(MP3·WAV) 올리기 → 악보 만들기 시작** → **만드는 중** 탭에서 단계·퍼센트·남은 시간을 보고, 완료되면 결과를 엽니다. GPU에서 곡 길이의 1~3배가 걸립니다.
+3. Android Studio에서 저장소 루트를 열고 Gradle Sync 후 `app`을 실행합니다. 로그인 화면 아래 **연결 설정**에서 연결 상태를 확인할 수 있고, 여기에 저장한 주소·키가 빌드 값보다 우선합니다.
 
-AI 파이프라인 코드는 이 브랜치가 아니라 [`perf/pipeline-latency`](https://github.com/snuhcs-course/swpp-2026-project-team-03/tree/perf/pipeline-latency) 브랜치(PR #11, SGS에 배포된 코드)의 `ml/pipeline/`에 있습니다. 앱 브랜치와 git 기록이 이어져 있지 않아 이 브랜치에 합치지 않았습니다.
+**C. 서버 운영 (팀원용)**
 
-팀 계정은 서버에 Pod를 만드는 권한을 줄 수 없어서, 노트북에서 도는 agent가 노트북 로그인으로 GPU Pod를 대신 띄웁니다. 그래서 처리하는 동안 노트북의 터미널 1·2가 켜져 있어야 합니다.
+- 서버(`rocky-api`)와 데이터는 SGS 워크스페이스에 올라가 있습니다. 공개 주소를 열어 두려면 노트북 한 대가 학교 네트워크에서 `kubectl port-forward`와 SSH 터널을 켜 두어야 합니다. 순서와 문제 해결은 [`server/deploy/README.md`](server/deploy/README.md)에 있습니다.
+- Iteration 3까지 필요했던 노트북 agent는 이제 쓰지 않습니다. `rocky-api`가 워크스페이스 서비스 계정으로 GPU·PDF Pod를 직접 만들기 때문에, 노트북이 꺼져도 이미 시작한 곡은 끝까지 처리됩니다.
+- 처음 설정(kubeconfig, API 키 Secret, 팀 서버 nginx)은 [`server/deploy/README.md`](server/deploy/README.md)와 [`server/DEPLOY_ko.md`](server/DEPLOY_ko.md)를 봅니다.
+
+AI 파이프라인 코드는 앱과 git 기록이 이어져 있지 않아 이 브랜치에 넣지 않았습니다. 파이프라인은 [`ml/unified-pipeline`](https://github.com/snuhcs-course/swpp-2026-project-team-03/tree/ml/unified-pipeline)의 `ml/pipeline/`, 박자 정렬은 [`main`](https://github.com/snuhcs-course/swpp-2026-project-team-03/tree/main)의 `ml/beat_align/`, 기타·베이스 TAB은 [`ml/guitar-tab`](https://github.com/snuhcs-course/swpp-2026-project-team-03/tree/ml/guitar-tab)의 `ml/guitar_tab/`에 있습니다.
 
 ---
 
 ## 2. What this demo demonstrates
 
 ### 구현한 화면과 사용자 흐름
-하단 탭은 **홈 / 만드는 중 / 보관함 / 내 밴드** 네 개이고, 내 정보는 홈 오른쪽 위에서 엽니다. 화면 문구는 한국어(기본)와 English를 고를 수 있습니다(로그인 화면 오른쪽 위, 내 정보 > 언어).
+
+하단 탭은 **홈 / 만드는 중 / 보관함 / 내 밴드** 네 개입니다.
 
 | # | 화면 | 기능 |
 |---|---|---|
-| 0 | 처음 켤 때 | 이용 약관 동의(개인 연습용·상업적 이용 금지·책임은 사용자·ROCKY는 채보를 돕는 도구), 동의해야 사용 가능. 그다음 사용 안내 슬라이드 4장(건너뛰기, 다시 보지 않기) |
-| 0-1 | 로그인 · 회원가입 · 내 정보 | 서버 회원 DB. 이메일 회원가입(인증번호 없음, 형식·중복 확인), 프로필 사진, 닉네임·연주 파트 수정, 다크/라이트 모드, 언어, 로그아웃 |
-| 1 | 홈 | 큰 버튼 두 개: **개인 연습용**(내가 연주할 악기만) / **밴드 합주용**(우리 밴드 전원), 접어 둔 '이렇게 만들어요' 3단계(처음 안내 다시 보기) |
-| 2 | 새 악보 – 악기 고르기 (1/2) | 밴드 합주용: 무대 위 악기(드럼·베이스·피아노·기타 1·기타 2)를 눌러 고름. 개인 연습용: 2x2 칸에서 연습할 악기 **한 종류**를 고름(기타는 원곡 대수에 맞춰 1~2대). 두 종류 이상이면 밴드 합주용을 쓰라고 안내. 두 모드 모두 기타 대수에 따라 아래에 안내 |
-| 3 | 새 악보 – 곡 올리기 (2/2) | MP3·WAV를 고르고 곡 이름 확인(한국어·영어·일본어·중국어 등 어떤 글자든) → 악보 만들기 시작. **원곡 악기는 묻지 않고 모델이 판단** |
-| 4 | 만드는 중 | 단계·퍼센트·남은 시간(서버에 올라가면 1%부터). 멈추기(서버 작업 취소). 백그라운드에서도 계속 만들고, 다 되거나 실패하면 휴대폰 알림. 실패는 아래 '실패 처리' |
-| 5 | 결과 | 악기 칩 + 재생 바, 그 아래 악보. 개인 연습용은 고른 악기 악보만, '전체 · 원곡'은 올린 원곡 파일을 재생, 밴드 공유 없음. 파트별 듣기, 연주 중인 마디 따라가기, 두 손가락 확대, 전체 화면, ⋮ 메뉴(보관함 저장·밴드 공유·키 바꾸기). **기타 대수 바꿔서 다시 만들기**(원곡 기타 0~2대를 고르면 우리 밴드·곡 올리기부터 처음부터 다시). 마지막 장 아래 별점(1~5, 서버로 보냄) |
-| 6 | 보관함 | 회원별로 저장한 악보. 이름 바꾸기, 삭제(저장 안 한 결과·밴드에 공유 안 한 악보는 서버 파일도 지움). 악보 파일은 앱 밖으로 내보내지 않음 |
-| 7 | 내 밴드 | 서버 밴드(최대 8명). 만들기·참여(초대 코드 6자리), 멤버와 파트, 밴드에 악보 공유(다른 폰의 멤버도 받음), 이름 수정 |
+| 0 | 회원가입 · 로그인 · 내 정보 | 서버 계정(이메일), 약관 동의, 첫 실행 안내 슬라이드, 프로필 사진, 닉네임 수정, 로그아웃(만드는 중인 곡이 있으면 경고), 한국어/영어 |
+| 1 | 홈 | **밴드 합주용** / **개인 연습용** 선택, "이렇게 만들어요" 안내 |
+| 2 | 악기 선택 | 밴드 합주용: 피아노·드럼·베이스·기타(1~2대) 여러 개. 개인 연습용: 악기 하나. 원곡 구성은 묻지 않고 ROCKY가 곡을 듣고 판단 |
+| 3 | 곡 올리기 | MP3·WAV·FLAC·OGG. 깨진 파일, 오디오가 아닌 파일, 30초 이하 파일은 올리기 전에 바로 안내. 곡 이름 수정 |
+| 4 | 만드는 중 | 단계·퍼센트·남은 시간, 앞 곡을 기다리는 중이면 "대기 중", 취소, 완료·실패 알림. 실패하면 이유를 보여 주고 연결 문제일 때만 다시 시도 |
+| 5 | 결과 | 전체 악보와 악기별 악보(PDF, 기타·베이스는 TAB 포함), 악기별 음원 재생. 재생 중인 마디 칠하기와 자동 넘김, 쪽 넘기기, 두 손가락 확대, 전체 화면, 키 바꾸기, AI가 만든 파트(✨) 표시, 사용 안내, 마지막 쪽 뒤 별점과 의견 |
+| 6 | 보관함 | 완료된 곡 자동 저장. 선택 모드에서 여러 곡을 밴드에 공유하거나 삭제, 이름 바꾸기 |
+| 7 | 내 밴드 | 밴드 만들기·참여(초대 코드), 최대 8명, 멤버마다 여러 악기, 밴드에 공유된 악보 보기 |
 
-**실패 처리** (조수빈 '곡 처리 결과별 동작', 서버 #25)
-| 경우 | 앱 |
-|---|---|
-| 입력 거부(30초 미만·무음·밴드 악기 거의 없음), 작업 컴퓨터(agent) 없음, 업로드 중 서버 재시작, 파일 크기·형식 거절, 올린 음원이 서버에 없음(410) | 실패 팝업(앱 밖이면 알림) + 목록에서 빼고 서버 기록도 지움 → **'새로 만들기'**로 우리 밴드·곡 올리기부터 |
-| PDF 도구 준비 중 인터넷 끊김 | '다시 시도'를 60초 세고 나서 켬 → 같은 곡을 서버에서 PDF만 다시 (`POST /jobs/{id}/retry`) |
-| 시간 초과(90분)·처리 오류 | '다시 시도' 바로 → 같은 곡을 멈춘 단계부터 (채보가 끝났으면 PDF만) |
-| 인터넷 끊김(앱 쪽) | '다시 시도' → 서버 작업에 다시 붙음 (못 올렸으면 다시 올림) |
+### Iteration 4에서 바뀐 점
 
-### Iteration 2 이후 바뀐 점
-- **앱을 AI 파이프라인과 연결했습니다.** 올린 음원이 서버를 거쳐 SGS GPU에서 처리되고, 진행률과 결과(PDF·MIDI·MP3)가 앱에 내려옵니다.
-  - 파이프라인: BS-RoFormer 6-stem 분리 → stem마다 MuScriptor 채보 → Beat This! 박자 정렬 → 기타·베이스 TAB → 원곡에 없는 악기만 MIDI-GPT로 생성 → 전체 악보 → PDF·MP3
-  - 기타는 사용자가 고른 대수대로 나옵니다. 2대를 골랐을 때 원곡에 2대가 있으면 skyline으로 리드·리듬을 나누고, 원곡에 1대면 1대는 채보하고 나머지 1대는 생성합니다. 1대를 골랐는데 원곡에 2대가 있으면 한 사람이 칠 수 있게 합칩니다.
-- 갤럭시(Android 13)에 설치되도록 최소 버전을 Android 14에서 Android 8로 낮췄습니다.
-- 하단 탭 구조로 바꾸고, 악보 만들기를 백그라운드 작업으로 돌려 기다리는 동안 다른 화면을 쓸 수 있게 했습니다.
-- 원곡 밴드 구성을 받아 AI가 새로 만든 파트를 곡마다 구분해 표시합니다.
-- 보컬을 밴드 파트로 추가했습니다. 보컬은 밴드 전체 악보를 봅니다.
-- 나의 밴드(밴드 만들기·참여·악보 공유)를 추가했습니다.
-- 회원가입에 실시간 입력 검사, 이메일·닉네임 중복 확인, 시연용 이메일 인증, 프로필 사진을 넣었습니다. 연주 파트는 하나만 고릅니다.
-- 내 정보에서 닉네임·파트·사진을 바꾸고 다크/라이트 모드를 고를 수 있습니다.
-- 악기 아이콘을 새로 그리고, 안내 문구를 읽기 쉽게 바꿨습니다. 화면은 세로로 고정됩니다.
+**기능 완성과 통합**
+- 회원, 밴드, 밴드에 공유한 악보, 별점이 **서버 DB**에 저장됩니다. 다른 폰에서도 같은 계정으로 들어갑니다 (PR #19, #24).
+- **개인 연습용** 모드를 추가했습니다. 악기 하나만 고르고, 원곡에 있는 악기면 그 파트만 채보해서 더 빨리 끝납니다 (PR #26).
+- **원곡 구성 입력을 없앴습니다.** ROCKY가 곡을 듣고 어떤 파트를 채보하고 어떤 파트를 AI로 만들지 정합니다. 기타 2대인 곡은 기타 1·2 악보가 따로 나옵니다.
+- 처리 중인 곡 **취소**와 저장한 악보의 **키 바꾸기**를 넣었습니다 (PR #12, #13, #20).
+- 악보 PDF를 외부 사이트(Tabtify) 대신 서버에서 **alphaTab**으로 직접 만들고, 기타 튜닝을 표시합니다 (PR #14, #21).
+- 파이프라인이 밴드 곡이 아닌 입력(너무 짧거나 거의 무음, 밴드 악기 소리가 거의 없음)을 거부하고, 쉬는 구간에 잘못 찍힌 음을 지웁니다 (PR #15, #16).
+- PDF 단계가 인터넷 문제로 실패하면 자동으로 다시 시도하고, 실패 이유를 사용자에게 알려 줍니다 (PR #25).
+
+**휴리스틱 평가와 UAT에서 나온 문제 수정**
+- 결과 화면을 정리했습니다: 악기 버튼 고정 배치, 쪽 넘기기, 재생 바는 아래, 핀치 줌·전체 화면 (PR #24, #27).
+- 완료된 곡을 보관함에 **자동 저장**하고, 보관함 선택 모드로 밴드 공유·삭제를 메뉴 밖으로 꺼냈습니다 (PR #27).
+- 실패 안내를 쉬운 말로 바꾸고, 문제 있는 파일은 올리기 전에 거릅니다 (PR #27, #36).
+- 첫 실행 안내와 결과 화면 사용 안내를 넣었습니다. S22·S23 Ultra에서 글자가 잘리던 곳을 고쳤습니다 (PR #27).
+- **악보 따라가기**를 다시 만들었습니다 (PR #33, #34, #35).
+  - 서버가 PDF를 만들 때 마디마다 위치를 함께 저장하고, 앱은 그 위치에 맞춰 마디를 칠합니다.
+  - 전체 악보에서 한 마디씩 밀리던 문제와 개인 연습에서 줄 단위로 칠하던 문제가 사라졌습니다.
+  - 기타·베이스 TAB의 마디 번호를 빨간색에서 검은색으로 바꿨습니다.
+  - 악기를 바꿀 때 첫 쪽이 바로 보이고, 한 번 본 악보는 다시 그리지 않습니다 (31쪽 전체 악보 기준 1~1.4초 → 첫 쪽 0.27초, 다시 열 때 즉시).
+
+**배포**
+- **USB 없이 폰에서 바로 씁니다.** 팀 서버의 공개 주소로 들어온 요청을 SSH 역방향 터널로 SGS의 `rocky-api`에 넘기고, 모든 요청에 API 키를 확인합니다 (PR #28).
+- **노트북 agent를 없앴습니다.** `rocky-api`가 GPU·PDF Pod를 직접 만들고 지웁니다 (PR #28).
+
+**테스트**
+- 앱 단위 테스트, 에뮬레이터 UI 테스트, 서버 테스트가 push마다 GitHub Actions에서 돌아갑니다. 결과와 커버리지는 Wiki의 Testing Documentation 2.2에 있습니다.
 
 ### 시연 범위와 한계
-- 회원·보관함 목록·밴드는 ROCKY 서버에 저장됩니다. 악보 파일은 서버에서 만든 것을 폰에 받아 둡니다.
-- 실제 처리는 SGS GPU를 쓰기 때문에 노트북에서 서버 연결과 agent가 켜져 있어야 합니다 (실행 방법 B). 워크스페이스마다 GPU가 1개라 곡은 한 번에 하나씩 차례로 처리됩니다.
-- 앱이 안드로이드에 의해 완전히 종료되면 만드는 중 목록과 멈춤 알림도 사라집니다(서버 처리는 계속).
-- 악보 파일(PDF·MIDI·MP3)을 휴대폰에 저장하거나 다른 앱으로 보내는 기능은 11/13에 뺐습니다(앱 안 보관함·밴드 공유로만 봄). UAT AT7과 달라졌으므로 문서 확인 필요.
-- 곡마다 모드(`mode`: `band` / `personal`)를 서버에 함께 보냅니다. 서버는 개인 연습용이 악기 한 종류(기타는 2대까지)인지 확인하고, 개인 연습용 악보는 밴드에 공유하지 않습니다(409).
-- 개인 연습용이면 서버가 `unified.py --personal`로 돌립니다. 베이스·키보드·드럼이면 파이프라인이 그 악기 stem과 드럼(박자 보정용)을 먼저 채보해 보고, 곡에 있으면 그것만 채보합니다(MIDI-GPT 생략). 없으면 나머지 stem까지 채보한 뒤 AI로 만듭니다. 기타(1대·2대)는 '기타 대수 바꿔서 다시 만들기'에 원곡의 다른 악기가 모두 필요해서 처음부터 모든 stem을 채보합니다. 밴드 합주용은 예전처럼 모든 stem을 채보합니다. 이 옵션은 `ml/unified-pipeline`의 contract 14가 필요하므로, SGS 볼륨의 `/data/pipeline`을 먼저 갱신한 뒤 서버를 배포해야 합니다.
-- 별점은 `PUT /jobs/{id}/rating`으로 모이고, 팀은 `GET /ratings`(X-Rocky-Key 필요)로 개수·평균·점수별 개수·목록을 봅니다. 로그인 없이 보낸 별점은 한 곡에 하나로 저장돼 나중 것이 앞의 것을 덮어씁니다(앱은 로그인해야 쓰므로 API를 직접 부를 때만 해당).
-- 에뮬레이터에서 한글·이모티콘이 입력되지 않으면 화면 키보드(Gboard)에 한국어를 추가하세요. Mac 하드웨어 키보드로는 한글이 입력되지 않습니다.
+- 공개 주소는 노트북 한 대가 학교 네트워크에서 port-forward와 SSH 터널을 켜 두어야 열립니다. 노트북 없이 상시 운영하려면 터널을 클러스터 안으로 옮겨야 하고, 조교님께 터널 전용 키 발급을 요청해 둔 상태입니다.
+- 워크스페이스의 GPU를 곡마다 하나씩 쓰기 때문에, 여러 명이 동시에 올리면 차례로 처리됩니다.
+- PR #27의 서버 쪽 변경(프로필 사진, 멤버당 여러 악기, 별점 의견)은 다음 서버 배포 때 반영됩니다. 원곡에 기타가 없는데 2대를 요청하면 1대만 만드는 파이프라인 변경은 PR #29(리뷰 중)에 있습니다.
+- 보관함 목록과 내려받은 악보 파일은 폰에 저장됩니다. 같은 계정이어도 다른 폰에서는 보관함 목록이 보이지 않습니다.
+- 원곡 녹음을 들으며 따라가는 기능은 UAT 이후 뺐습니다. 결과 화면은 악보로 합성한 음원만 재생합니다.
 
 ---
 
 ## 3. Demo video
 
+- [Iteration 4 working demo](https://drive.google.com/file/d/1NBejZUPGWrlBinjzxhctGnso7HdQOWc5/view?resourcekey)
+  - 2026-11-18(TA 미팅 전)에 찍은 영상입니다.
+  - 그 뒤 11/20에 병합한 변경은 영상에 없습니다: UAT 피드백 반영(PR #27), 악보 따라가기 재구현과 빠른 악기 전환(PR #33~#35), 노트북 agent 제거(PR #28).
 - [Iteration 3 working demo](https://drive.google.com/file/d/1mpPb0rXEK5a93LJj82WM1YPhiAR9aUGR/view?usp=sharing)
-- [Iteration 2 working demo — 로그인과 Immigrant Song 시연](https://drive.google.com/file/d/1wVii7g0WqUVoUHAEtb1jWcls4gWSXsjV/view?usp=sharing)
-- [Iteration 1 demo — 이전 버전 참고 영상](https://drive.google.com/file/d/16sLdD9x2Bg739iO0UaESiY7LWRzARTw-/view?usp=drive_link)
+- [Iteration 2 working demo](https://drive.google.com/file/d/1wVii7g0WqUVoUHAEtb1jWcls4gWSXsjV/view?usp=sharing)
 
 ---
 
-## 4. 코드 구조
+## 4. 테스트
+
+```bash
+./gradlew :app:testDebugUnitTest            # 앱 단위 테스트 (마디 위치·악보 따라가기·입력 검사·서버 응답 처리 등)
+./gradlew :app:connectedDebugAndroidTest    # 에뮬레이터 필요: 화면 흐름, 서버 연결 e2e
+cd server && pip install -r requirements-dev.txt && pytest -q   # 서버 API
+```
+
+에뮬레이터 테스트는 실제 서버 코드에 가짜 파이프라인(`server/tests/ci_fake_pipeline.py`)을 붙여 업로드부터 결과 화면까지 확인합니다. 시작할 때 기기의 앱 데이터를 지우므로, 직접 쓰는 계정이 있는 기기에서는 돌리지 마세요.
+
+## 5. 코드 구조
+
 ```
 app/src/main/java/com/team3/rocky/
-├─ MainActivity.kt   앱 시작 (테마, 세로 고정, 화면 가장자리까지 그리기)
-├─ RockyApp.kt       화면 이동, 하단 탭, 홈·새 악보·만드는 중·보관함 화면, 실패 팝업
-├─ Onboarding.kt     처음 켤 때 이용 약관 동의, 사용 안내 슬라이드
-├─ BandStage.kt      우리 밴드 악기 고르기(무대)
-├─ ResultScreens.kt  결과(악보 보기·재생·마디 따라가기·키 바꾸기·기타 대수 다시 만들기·별점)
-├─ CommonUi.kt       테마(디자인 A: Pretendard, 다크/라이트), 악기 아이콘, 카드·버튼 모양
-├─ I18n.kt           한국어·English 문구 (tr)
-├─ DemoData.kt       이름만 Demo: 악기 이름·구성 규칙, 보관함 저장(회원별), 파일 공유
-├─ RatingStore.kt    별점 저장·서버 전송(실패하면 나중에 다시)
-├─ auth/             회원가입·로그인(AccountService: 서버 ServerAccounts / 시험용 LocalAccounts), 입력 검사, 화면
-├─ band/             밴드 규칙, 서버 밴드(ServerBandRepository), 폰 밴드 DB(공유 확인용), 화면
-├─ progress/         ScoreJobs(만드는 중 목록·취소·실패 분류·다시 시도), 진행률(SmoothProgress), 완료·실패 알림(JobNotifier)
-├─ score/            마디 위치 계산(MeasureClock·MeasureLayout·ScoreLayout)
-└─ server/           서버 API(RockyApi·MemberApi), 결과 받기(ScoreStore), 서버 파일 정리(ServerCleanup), Backend
+├─ RockyApp.kt         화면 이동, 하단 탭, 홈·악기 선택·곡 올리기·만드는 중·보관함
+├─ ResultScreens.kt    결과 화면 (악보 보기, 재생, 마디 칠하기, 키 바꾸기, 별점)
+├─ ScorePages.kt       악보 PDF를 한 쪽씩 그리고 기억해 두기
+├─ score/              재생 시간 → 마디(MeasureClock), 서버 마디 위치(PrintedMeasures), 그림에서 마디선 찾기(ScoreLayout)
+├─ server/             서버 API(RockyApi), 결과 내려받기·저장(ScoreStore)
+├─ auth/  band/        회원, 밴드 (서버 DB)
+└─ progress/           만드는 중 작업 목록, 진행률
+server/
+├─ rocky_server/       FastAPI 서버: 작업 큐, 결과 파일, 회원·밴드·별점 DB, GPU·PDF Pod 실행
+├─ deploy/             공개 주소: 팀 서버 nginx 설정, SSH 터널, 운영 안내
+└─ k8s/ws2/            SGS 워크스페이스에 올리는 rocky-api Pod
 ```
-
-## 5. 회원 기능
-
-### 회원가입 때 받는 정보
-| 항목 | 필수 | 이유 |
-|---|---|---|
-| 이메일 | 필수 | 로그인 아이디. 나중에 Google·Apple 계정과 연결할 때도 기준이 됨 |
-| 비밀번호 (+ 확인) | 필수 | 영문과 숫자를 포함해 8~64자, 공백 불가 |
-| 닉네임 | 필수 | 앱 안에서 보이는 이름. 2~12자, 한글·영문·숫자·_, 다른 회원과 겹칠 수 없음 |
-| 프로필 사진 | 선택 | 앱 안의 파일로 저장 |
-| 연주하는 파트 | 선택 | 피아노·드럼·베이스·기타·보컬 중 하나. 밴드에서 내 파트로 보임 |
-| 만 14세 이상 확인 | 필수 | 14세 미만은 개인정보 수집에 법정대리인 동의가 필요해서 지금은 가입을 막음 |
-| 이용약관 · 개인정보 수집 동의 | 필수 | 동의한 시각을 저장함. 약관 문구는 시연용 요약이라 공개 전에 정식으로 써야 함 |
-
-실명, 전화번호, 생년월일은 서비스에 쓰이지 않아 받지 않습니다.
-
-### 동작
-- 가입하면 바로 로그인되고 홈으로 갑니다.
-- 로그인 상태는 앱을 껐다 켜도 유지됩니다. 홈 오른쪽 위 "내 정보"에서 닉네임·파트·사진을 바꾸고 로그아웃합니다.
-- 닉네임과 이메일은 입력하는 동안 형식과 중복을 바로 확인합니다.
-- 로그인에 실패하면 이메일이 없는 것인지 비밀번호가 틀린 것인지 구분하지 않고 같은 메시지를 보여줍니다.
-- 보관함은 회원마다 따로 저장됩니다. 이 기능을 넣기 전에 저장한 악보는 보이지 않습니다.
-
-### 저장 방식과 한계
-- 회원 정보는 ROCKY 서버의 회원 DB(`server/rocky_server/accounts.py`, SQLite)에 저장되어 다른 폰에서도 같은 계정으로 로그인합니다. 서버 없이 화면만 시험할 때는 `Backend.local = true`로 폰 안 DB(`rocky_users.db`)를 씁니다.
-- 비밀번호는 원문을 저장하지 않고 해시해 저장합니다.
-- 이메일 인증번호 절차는 2026-11-11에 뺐습니다(이메일은 형식·중복만 확인).
-- 비밀번호 찾기, 회원 탈퇴는 아직 없습니다.
-
-### 테스트
-```bash
-./gradlew :app:testDebugUnitTest            # 입력 검사·비밀번호 해시·악기 구성·밴드 규칙·진행률·마디 위치·별점·서버 API 응답 처리
-./gradlew :app:connectedDebugAndroidTest    # 에뮬레이터 필요: 약관·안내 첫 실행, 회원 DB·밴드 DB(최대 8명)·저장 목록·화면 흐름·서버 연결 e2e
-cd server && pip install -r requirements-dev.txt && pytest -q   # 서버 API·회원·밴드·별점·진행률
-```
-세 가지 모두 push할 때마다 GitHub Actions(`.github/workflows/android-build.yml`)에서 자동으로 돌아갑니다. 에뮬레이터 테스트는 실제 서버 코드에 가짜 파이프라인(`server/tests/ci_fake_pipeline.py`)을 붙여 업로드부터 결과 화면까지 확인합니다.
-화면 흐름 테스트는 회원가입 → 로그아웃 → 틀린 비밀번호 → 로그인 → 앱 재시작 후 로그인 유지까지 확인합니다. 시작할 때 기기의 회원 DB를 지우므로, 직접 만든 계정이 있는 기기에서는 돌리지 마세요.
