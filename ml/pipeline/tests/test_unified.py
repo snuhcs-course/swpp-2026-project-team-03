@@ -13,7 +13,7 @@ import pretty_midi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, merge_stem_midis, merge_tracks, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
+from unified import Runner, STEMS, TRANSCRIBE_STEMS, assemble, cli, describe_tracks, guitar_case, guitars_to_make, merge_stem_midis, merge_tracks, normalize_generated, parse_lineup, present_parts, tab_ready  # noqa: E402
 from publish_scores import publication_ready, publish  # noqa: E402
 
 
@@ -110,6 +110,15 @@ def test_user_lineups_and_four_guitar_cases():
         guitar_case(0, 2)
     with pytest.raises(ValueError, match="exactly one guitar count"):
         parse_lineup("guitar1,guitar2", original=False)
+
+
+def test_no_guitar_heard_but_two_requested_makes_one():
+    assert guitars_to_make(0, 2, original_unknown=True) == 1
+    assert guitar_case(0, guitars_to_make(0, 2, original_unknown=True)) == (None, True)
+    assert guitars_to_make(1, 2, original_unknown=True) == 2
+    assert guitars_to_make(2, 2, original_unknown=True) == 2
+    assert guitars_to_make(0, 1, original_unknown=True) == 1
+    assert guitars_to_make(0, 2, original_unknown=False) == 2  # declared: still rejected by guitar_case
 
 
 def test_known_absent_stems_are_not_merged_or_used_as_gpt_context(tmp_path):
@@ -435,3 +444,138 @@ def test_publication_exports_both_guitars_when_second_is_generated(tmp_path, mon
     assert len(pretty_midi.PrettyMIDI(str(runner.out / "scores" / "guitar_2.mid")).instruments) == 1
     assert {Path(cmd[3]).name for cmd in calls if cmd[0] == "node"} == {"guitar_1.pdf", "guitar_2.pdf"}
     assert publication_ready(runner.out)
+
+
+def test_band_of_two_guitars_on_a_song_without_guitar_gets_one_generated_guitar(tmp_path, monkeypatch):
+    """Whole run: silent guitar stem, other band stems sound. Real input check and note gate decide
+    there is no guitar; the run generates one guitar, the final score has one guitar track and the
+    manifest says guitars_delivered=1 (the server passes it on, the app shows the notice)."""
+    import soundfile as sf
+    import unified
+
+    sr, seconds = 22050, 40
+    t = np.arange(sr * seconds) / sr
+    rng = np.random.default_rng(0)
+    pulse = (np.sin(2 * np.pi * 2 * t) > 0.95).astype(float)
+    audio_by_stem = {
+        "drums": 0.5 * rng.standard_normal(t.size) * pulse,
+        "bass": 0.4 * np.sin(2 * np.pi * 82.4 * t),
+        "guitar": np.zeros(t.size),  # the song has no guitar
+        "piano": 0.3 * np.sin(2 * np.pi * 440 * t),
+        "vocals": 0.2 * np.sin(2 * np.pi * 300 * t),
+        "other": 0.01 * np.sin(2 * np.pi * 660 * t),
+    }
+    song = tmp_path / "song.wav"
+    sf.write(str(song), np.stack([sum(audio_by_stem.values())] * 2, axis=1), sr)
+
+    def notes_midi(program, pitches, path, *, drum=False, step=0.5):
+        midi = pretty_midi.PrettyMIDI()
+        inst = pretty_midi.Instrument(program, is_drum=drum, name=path.stem)
+        for k, start in enumerate(np.arange(0.0, seconds - 1, step)):
+            inst.notes.append(pretty_midi.Note(90, pitches[k % len(pitches)], float(start), float(start) + 0.4))
+        midi.instruments.append(inst)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        midi.write(str(path))
+
+    calls = []
+
+    def fake_command(self, stage, cmd, env=None):
+        calls.append(stage)
+        if stage == "bs_roformer":
+            out = Path(cmd[3])
+            out.mkdir(parents=True, exist_ok=True)
+            for stem, wave in audio_by_stem.items():
+                sf.write(str(out / f"{stem}.wav"), np.stack([wave, wave], axis=1), sr)
+            mix = sum(audio_by_stem[s] for s in ("drums", "bass", "guitar", "piano", "other"))
+            sf.write(str(out / "no_vocals.wav"), np.stack([mix, mix], axis=1), sr)
+        elif stage.startswith("muscriptor_"):
+            stem = stage.removeprefix("muscriptor_")
+            out = Path(cmd[3])
+            if stem == "guitar":
+                # residue from the silent stem: a few notes the note gate must drop
+                midi = pretty_midi.PrettyMIDI()
+                inst = pretty_midi.Instrument(29, name="guitar residue")
+                inst.notes = [pretty_midi.Note(60, 64, s, s + 0.2) for s in (1.0, 7.0, 13.0)]
+                midi.instruments.append(inst)
+                midi.write(str(out))
+            else:
+                program, pitches, drum = {"bass": (33, [40, 43], False), "piano": (0, [69, 72, 76], False),
+                                          "drums": (0, [36, 38, 42], True)}[stem]
+                notes_midi(program, pitches, out, drum=drum)
+        elif stage == "guitar_tab":
+            raise AssertionError("no guitar was heard, so there is no transcribed guitar to TAB")
+        elif stage == "bass_tab":
+            out = Path(cmd[-1])
+            notes_midi(33, [40, 43], out / "bass.mid")
+            (out / "bass.gp5").write_bytes(b"gp5")
+        elif stage == "midigpt":
+            gen_dir = Path(cmd[cmd.index("--out") + 1])
+            assert cmd[3:cmd.index("--out")] == ["guitar"], "only the guitar is missing"
+            notes_midi(29, [52, 55, 59], unified.generated_only(gen_dir, Path(cmd[2]), "guitar"))
+        elif stage == "generated_guitar_tab":
+            out = Path(cmd[3])
+            out.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(cmd[2], out / "guitar.mid")
+            (out / "guitar.gp5").write_bytes(b"gp5")
+        else:
+            raise AssertionError(f"unexpected command {stage}")
+
+    monkeypatch.setattr(Runner, "command", fake_command)
+
+    def detect_beats(path, device=None, checkpoint=None):
+        return list(np.arange(0.0, seconds, 0.5)), list(np.arange(0.0, seconds, 2.0))
+
+    def save_beats(path, beats, downbeats):
+        Path(path).write_text(json.dumps({"beats": list(map(float, beats)),
+                                          "downbeats": list(map(float, downbeats))}), encoding="utf-8")
+
+    def load_beats(path):
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data["beats"], data["downbeats"]
+
+    def align_midi(raw, aligned, beats=None, downbeats=None, drum_sync=True):
+        shutil.copyfile(raw, aligned)
+        count = sum(len(i.notes) for i in pretty_midi.PrettyMIDI(str(aligned)).instruments)
+        return SimpleNamespace(bpm=120.0, meter="4/4", note_count=count, drum_sync=None,
+                               beats_per_bar=4, beat_offset=0, beat_period=0.5, beat_times=list(beats))
+
+    monkeypatch.setitem(sys.modules, "align", SimpleNamespace(
+        detect_beats=detect_beats, save_beats=save_beats, load_beats=load_beats, align_midi=align_midi,
+        snap_to_reference=lambda midi, aligned: (midi, {"moved": 0})))
+
+    def fake_build(source, guitars, basses):
+        score = pretty_midi.PrettyMIDI()
+        score.instruments = [i for i in source.instruments if family_of(i) not in {"guitar", "bass"}] + guitars + basses
+        return score
+
+    from unified import family as family_of
+    monkeypatch.setitem(sys.modules, "full_score", SimpleNamespace(
+        build=fake_build,
+        guitar_tracks=lambda directory: pretty_midi.PrettyMIDI(str(Path(directory) / "guitar.mid")).instruments))
+
+    args = SimpleNamespace(audio=song, output_dir=tmp_path / "out", original="unknown",
+                           requested=["keyboard", "bass", "guitar2", "drums"],
+                           model="model", midigpt_model="yellow_medium", device="cpu",
+                           beat_checkpoint="checkpoint", seed=0, resume=False, no_publish=True,
+                           modules_root=tmp_path, model_python=Path(sys.executable),
+                           tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
+                           bsroformer_lib_dir=tmp_path / "pylib", transcription_workers=2)
+    runner = Runner(args)
+    runner.run()
+
+    manifest = json.loads((tmp_path / "out" / "manifest.json").read_text(encoding="utf-8"))
+    gate = json.loads((tmp_path / "out" / "note_gate.json").read_text(encoding="utf-8"))["stems"]
+    assert gate["guitar"]["notes_final"] == 0                      # the real note gate dropped the residue
+    assert all(gate[s]["notes_final"] > 0 for s in ("bass", "piano", "drums"))
+    assert "guitar" not in manifest["transcribed_parts"]
+    assert manifest["status"] == "complete"
+    assert manifest["original_guitars_inferred"] == 0
+    assert manifest["generated_targets"] == ["guitar"]
+    assert manifest["guitars_delivered"] == 1                      # what the server sends to the app
+    assert manifest["guitar_score_dir"] == "guitar"                # the generated guitar is the only guitar
+    assert "guitar_tab" not in calls and calls.count("generated_guitar_tab") == 1
+    final = pretty_midi.PrettyMIDI(str(tmp_path / "out" / "full_score.mid"))
+    guitars = [i for i in final.instruments if family_of(i) == "guitar"]
+    assert len(guitars) == 1 and guitars[0].notes
+    assert "AI generated" in guitars[0].name
+    assert present_parts(final) == {"piano", "bass", "guitar", "drums"}
