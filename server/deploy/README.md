@@ -17,13 +17,15 @@
 [노트북] kubectl port-forward: 노트북 8081 → pod/rocky-api :8000
  ▼
 gpu22 클러스터 rocky-api pod (볼륨 rocky-data, 노드 ford)
-   곡이 들어오면 [노트북] agent가 GPU pod(rocky-midi-…)를 만들어 처리
+   곡이 들어오면 rocky-api가 직접 GPU pod(rocky-midi-…)와 PDF pod(rocky-pdf-…)를 만들어 처리
 ```
 
-- 노트북이 맡는 일은 세 가지다: port-forward, SSH 터널, agent.
-- 노트북이 꺼지면 서버와 데이터는 그대로지만, 앱의 모든 기능(로그인 포함)이 멈춘다.
+- 노트북이 맡는 일은 두 가지다: port-forward, SSH 터널. 공개 주소로 들어오는 통로만 노트북을 거친다.
+- 곡 처리는 노트북과 상관없다. rocky-api가 워크스페이스 서비스 계정으로 작업 pod를 직접 만든다
+  (`ROCKY_RUNNER=kubernetes`, 2026-11-20부터. 그 전에는 노트북의 agent가 만들었다).
+- 노트북이 꺼지면 서버, 데이터, 이미 시작한 곡 처리는 그대로지만, 앱 접속(로그인 포함)이 멈춘다.
 - 노트북은 **학교 와이파이 또는 학교 VPN**에 있어야 한다. 팀 서버 SSH는 학교 밖에서 막혀 있다. 클러스터(kubectl)는 집에서도 된다.
-- 터널은 **한 번에 노트북 한 대만** 열 수 있다 (팀 서버 18081 포트를 같이 쓴다). agent는 여러 대에서 켜도 된다.
+- 터널은 **한 번에 노트북 한 대만** 열 수 있다 (팀 서버 18081 포트를 같이 쓴다).
 
 ## 2. 파일
 
@@ -31,7 +33,7 @@ gpu22 클러스터 rocky-api pod (볼륨 rocky-data, 노드 ford)
 |---|---|---|
 | `nginx-rocky.conf` | 팀 서버 `/etc/nginx/sites-available/rocky` (+ `sites-enabled/rocky` 링크) | 업로드 200MB, 타임아웃 300초, `X-Rocky-Key` 전달 |
 | `tunnel.sh` | 다리 역할 노트북 | 끊기면 자동으로 다시 연결하는 SSH 역방향 터널 |
-| `../k8s/ws2/api-pod.yaml` | 클러스터 | `ROCKY_API_KEY`를 Secret `rocky-api-key`에서 읽음 |
+| `../k8s/ws2/api-pod.yaml` | 클러스터 | `ROCKY_API_KEY`를 Secret `rocky-api-key`에서 읽음, `ROCKY_RUNNER=kubernetes`로 작업 pod를 직접 만듦 |
 
 ## 3. 처음 한 번만 하는 설정
 
@@ -112,12 +114,6 @@ while true; do kubectl --kubeconfig ~/.kube/gpu22.yaml port-forward pod/rocky-ap
 server/deploy/tunnel.sh
 ```
 
-**터미널 3: agent** (저장소 루트에서)
-
-```bash
-python3 server/agent/rocky_agent.py --kubeconfig ~/.kube/gpu22.yaml --api http://127.0.0.1:8081 --key '<API 키>'
-```
-
 **맥이라면 잠자기 방지:** `caffeinate -dimsu` (전원 연결, 덮개는 열어 둠)
 
 ## 6. 확인
@@ -138,6 +134,7 @@ python3 server/agent/rocky_agent.py --kubeconfig ~/.kube/gpu22.yaml --api http:/
 | 터널: `remote port forwarding failed` | 다른 노트북이 아직 터널을 열고 있음. 그쪽을 먼저 끈다 |
 | 터널: `Connection reset` / `Network is unreachable` | 학교 밖 네트워크. 학교 와이파이나 VPN에 연결 |
 | 브라우저 로그인 창이 뜸 | 클러스터 로그인 토큰 만료(약 1시간마다). 로그인하면 다시 돈다 |
+| 곡이 `pods/status` 403으로 실패 | 워크스페이스 서비스 계정은 `pods/status`를 못 읽는다. `runners.py`가 `read_namespaced_pod`를 쓰는지 확인 |
 | 앱만 401 | 폰 앱 '서버 설정'에 예전 주소나 빈 키가 저장됨. 지우고 다시 연다 |
 
 ## 8. 하면 안 되는 것
