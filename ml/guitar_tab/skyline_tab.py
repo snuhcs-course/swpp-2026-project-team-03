@@ -146,11 +146,10 @@ def decide_split(notes, tuning):
     Checked before chord reduction (after reduction every chord is playable). Returns (split, stats):
     - unplayable = share of onsets whose notes can't be fingered one per string within 4 frets
     - wide = share of onsets whose lowest and highest notes are more than two octaves apart
-    Split only when both are high. Unplayable but narrow = one guitar with extra notes (chord reduction
-    fixes it). Recalibrated for BS-RoFormer stems on 13 songs (2026-11-09): two guitars -> unplayable >= 2.9%
-    and wide >= 4.4%; one guitar -> wide <= 0.6%. (The 2026-10-30 Demucs calibration, 5% and 6%, judged
-    한 페이지가 될 수 있게 (2.9%, 9.8%) as one guitar.) The pipeline also checks the guitar stem's stereo
-    image before this (ml/pipeline/rule_gates.py) and forces a split when two guitars are panned apart.
+    Split only when unplayable >= 0.5% and wide >= 1%. Unplayable but narrow can be one guitar
+    with extra notes, which chord reduction fixes. The pipeline also checks the guitar stem's
+    stereo image before this (ml/pipeline/rule_gates.py) and forces a split when two guitars
+    are panned apart.
     """
     groups = collections.OrderedDict()
     for n in notes:
