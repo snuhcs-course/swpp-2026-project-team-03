@@ -53,6 +53,12 @@ rated jobs for the submission rate because several members may rate one score.
 For the three-arm comparison, filter to the three alpha arm names and distinguish
 `applied_model = assigned_model` from `rule_fallback`. The assignment probabilities
 remain fixed at 1/3 during alpha; ratings do not change them automatically.
+After alpha testing, use the collected ratings and per-model job records to
+choose one of the three arms or roll back to the bundled four-score ExtraTrees
+model. Compare rating distribution and submission rate alongside completion,
+failure, and processing time. A single-arm choice needs a reviewed deployment
+change, while the ExtraTrees rollback already has an explicit classifier option.
+Do not tune this decision on the previously examined 20-song test set.
 The API starts new jobs with `alpha_three_arm` by default. Deploy the matching
 three-arm pipeline and its Python dependencies before deploying this server code;
 no separate activation setting is needed. For new jobs, set
