@@ -53,7 +53,8 @@ def test_lineup_routing_without_gpu(tmp_path, monkeypatch, original, requested, 
                            bsroformer_lib_dir=tmp_path / "pylib",
                            transcription_workers=workers,
                            # one fixture note per stem would count as a sparse stem
-                           min_notes_per_minute=0.0)
+                           min_notes_per_minute=0.0,
+                           guitar_count_classifier="rule")
     if model_count is not None:
         args.guitar_count_classifier = "extra_trees"
 

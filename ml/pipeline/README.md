@@ -35,9 +35,8 @@ one or two guitars, not independent checkboxes. `keyboard` covers piano,
 electric piano and organ. When the original is unknown and guitar notes survive
 the note gate, the configured guitar-count classifier decides whether the
 original has one or two guitars. That decision controls skyline splitting and
-the cases below. The default remains the stereo → skyline rule until the app
-and server are ready to record which model produced a rated result. Select the
-three-model version with `--guitar-count-classifier alpha_three_arm`:
+the cases below. The default is the three-model version; select the earlier
+stereo → skyline rule with `--guitar-count-classifier rule`:
 
 | Original guitars | Requested guitars | Action |
 | --- | --- | --- |
@@ -130,9 +129,12 @@ completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
 
 ## Rule gates: non-band input and notes in resting stems
 
-`rule_gates.py` adds two model-free stages to `unified.py`. The thresholds
-come from 14 band songs and 45 non-band files measured on 2026-11-09
-(`benchmarks/2026-11-09-rule-gates.md`).
+`rule_gates.py` adds two model-free stages to `unified.py`. The input and note
+gate thresholds were measured on 2026-11-09
+(`benchmarks/2026-11-09-rule-gates.md`). The guitar-count stereo thresholds
+were subsequently fixed at correlation < 0.15 and balance < 0.10 using only
+the artist-grouped development songs. The standalone `ml/guitar_tab` module's
+auto-split thresholds are maintained on its branch.
 
 **`input_check`** runs right after `bs_roformer`, on the CPU, before any
 MuScriptor process starts. It rejects the song when it is shorter than 30 s,
@@ -178,8 +180,8 @@ passes them to the app, which can warn that the part may be empty or inaccurate.
 **Guitar count (contract 16).** `alpha_three_arm` records the three frozen
 model predictions and uses only the job's assigned model to decide whether
 the original has one or two guitars. The assignment stays fixed on resume.
-`extra_trees` selects the bundled four-score fallback. The current default
-`rule` selects the earlier stereo → skyline sequence. Known original guitar
+`extra_trees` selects the bundled four-score fallback. `rule` selects the
+stereo → skyline sequence with the development-fitted thresholds. Known original guitar
 counts bypass these classifiers. See `GUITAR_COUNT_MODELS.md` for each model's
 inputs, GPU verification, dependencies, and exact rollback steps.
 

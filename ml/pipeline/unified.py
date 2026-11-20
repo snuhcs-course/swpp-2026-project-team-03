@@ -316,7 +316,7 @@ class Runner:
         self.out = args.output_dir.resolve()
         self.pipeline = Path(__file__).resolve().parent
         self.modules = args.modules_root.resolve()
-        self.guitar_count_classifier = getattr(args, "guitar_count_classifier", "rule")
+        self.guitar_count_classifier = getattr(args, "guitar_count_classifier", "alpha_three_arm")
         self.guitar_count_model = getattr(
             args, "guitar_count_model", self.pipeline / "guitar_count_extra_trees_v1.json")
         self.alpha_enabled = (self.guitar_count_classifier == "alpha_three_arm"
@@ -935,7 +935,7 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--min-notes-per-minute", type=float, default=GateConfig.min_notes_per_minute,
                    help="original unknown: treat a stem with fewer notes as absent (default 20)")
     p.add_argument("--guitar-count-classifier", choices=("alpha_three_arm", "extra_trees", "rule"),
-                   default="rule", help="unknown original: opt-in frozen alpha arms or rollback")
+                   default="alpha_three_arm", help="unknown original: three frozen alpha arms by default; choose a rollback explicitly")
     p.add_argument("--guitar-count-model", type=Path,
                    default=Path(__file__).resolve().parent / "guitar_count_extra_trees_v1.json")
     p.add_argument("--alpha-models-dir", type=Path,

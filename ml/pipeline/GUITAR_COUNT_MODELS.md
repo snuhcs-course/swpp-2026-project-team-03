@@ -25,10 +25,10 @@ assignment probabilities from star ratings.
 
 Known original guitar counts bypass this selection. If stereo measurements
 are unavailable, the pipeline uses its prior rule and marks the model result
-ineligible. The command-line default is still `rule` until the app and server
-can store the assigned model with a user's rating. Opt in explicitly to the
-three-model path. It needs the Python packages in `requirements-alpha.txt` in
-the interpreter that runs `unified.py`.
+ineligible. The command-line default is `alpha_three_arm`. It needs the Python
+packages in `requirements-alpha.txt` in the interpreter that runs `unified.py`.
+The app/server rating linkage is reviewed separately. Deploy the pipeline and
+server changes together before serving alpha users.
 
 ## Bundled rollback model
 
@@ -59,8 +59,7 @@ Keep each already-started three-model job on its recorded assignment when
 using `--resume`. Start a **new output directory** for a fallback run; the
 manifest checks input, settings, model hash, and assigned arm. Do not replace
 model files behind an in-progress job. The earlier sequential stereo → skyline
-method is available with `--guitar-count-classifier rule` and is the current
-CLI default. This gives two rollback steps: three models → four-score
+method is available with `--guitar-count-classifier rule`. This gives two rollback steps: three models → four-score
 ExtraTrees → prior rule.
 
 ## Verification and limits
@@ -72,5 +71,4 @@ checks. Local pipeline tests pass. This verifies a working GPU code path,
 **not** classification accuracy.
 
 PDF/MP3 publication and app/server star-rating linkage were outside this
-check. The three-model path should remain opt-in until those integrations are
-verified.
+check. Verify those integrations before the alpha rollout.
