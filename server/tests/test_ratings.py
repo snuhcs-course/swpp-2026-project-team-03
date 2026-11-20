@@ -13,7 +13,7 @@ def finished_job(c):
 def test_rating_is_saved_and_listed(client):  # noqa: F811
     job = finished_job(client)
     r = client.put(f"/jobs/{job}/rating", json={"stars": 4, "title": "Basket Case", "instruments": ["drums", "guitar", "kazoo"]})
-    assert r.status_code == 200 and r.json() == {"job_id": job, "stars": 4}
+    assert r.status_code == 200 and r.json() == {"job_id": job, "stars": 4, "comment": ""}
     summary = client.get("/ratings").json()
     assert summary["count"] == 1 and summary["average"] == 4.0
     assert summary["histogram"]["4"] == 1
@@ -87,3 +87,30 @@ def test_ratings_and_sign_ups_at_the_same_time_all_land(tmp_path):
         t.join()
     assert errors == []
     assert accounts.ratings()["count"] == 600
+
+
+def test_comment_is_added_after_the_stars(client):  # noqa: F811
+    job = finished_job(client)
+    a = sign_up(client)
+    client.put(f"/jobs/{job}/rating", json={"stars": 4}, headers=auth(a))
+    r = client.put(f"/jobs/{job}/rating", json={"stars": 4, "comment": "  드럼 필인이 좋아요  "}, headers=auth(a))
+    assert r.json()["comment"] == "드럼 필인이 좋아요"
+    # sending the stars again without a comment keeps it
+    client.put(f"/jobs/{job}/rating", json={"stars": 5}, headers=auth(a))
+    item = client.get("/ratings").json()["ratings"][0]
+    assert (item["stars"], item["comment"]) == (5, "드럼 필인이 좋아요")
+
+
+def test_old_database_gets_the_new_columns(tmp_path):
+    import sqlite3
+    from rocky_server.accounts import Accounts
+    db = tmp_path / "rocky.db"
+    old = sqlite3.connect(db)
+    old.executescript("""CREATE TABLE ratings (job_id TEXT NOT NULL, rater INTEGER NOT NULL DEFAULT 0,
+        stars INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', instruments TEXT NOT NULL DEFAULT '',
+        rated_at INTEGER NOT NULL, PRIMARY KEY (job_id, rater));
+        INSERT INTO ratings VALUES ('j1', 0, 3, 't', '', 1);""")
+    old.commit(); old.close()
+    acc = Accounts(db)
+    assert acc.ratings()["ratings"][0]["comment"] == ""
+    assert "photo_at" in {r["name"] for r in acc.db.execute("PRAGMA table_info(users)")}

@@ -42,19 +42,6 @@ class LineupTest {
     @Test fun orderedFollowsScoreOrder() =
         assertEquals(listOf("piano", "bass", "guitar", Demo.GUITAR2), Demo.ordered(setOf(Demo.GUITAR2, "bass", "guitar", "piano")))
 
-    // ----- 기타 대수 바꿔서 다시 만들기 -----
-
-    @Test fun redoKeepsWhatTheModelFoundAndUsesTheChosenGuitarCount() {
-        val found = listOf("bass", "drums", "guitar", "guitar2")
-        assertEquals(listOf("drums", "bass", "guitar"), Demo.redoOriginal(found, 1))
-        assertEquals(listOf("drums", "bass"), Demo.redoOriginal(found, 0))
-        assertEquals(listOf("piano", "drums", "guitar", "guitar2"), Demo.redoOriginal(listOf("piano", "drums"), 2))
-    }
-
-    @Test fun redoIgnoresNamesTheAppDoesNotKnow() {
-        assertEquals(listOf("guitar"), Demo.redoOriginal(listOf("vocals", "other"), 1))
-    }
-
     // ----- 개인 연습용 기타 안내 -----
 
     @Test fun soloGuitarNoteDependsOnTheCount() {

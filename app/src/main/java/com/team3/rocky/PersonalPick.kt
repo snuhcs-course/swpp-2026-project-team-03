@@ -21,6 +21,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,36 +45,25 @@ fun PersonalPickScreen(
     onGuitars: (Int) -> Unit,
     onBack: () -> Unit,
     onNext: () -> Unit,
-    /** 제목 위에 보여줄 안내 (기타 대수 바꿔서 다시 만들 때). */
-    notice: String? = null,
-    /** 이 구성으로는 만들 수 없는 이유. 있으면 '다음'을 막고 아래에 보여준다. */
-    blocked: String? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val guitars = Demo.guitarCount(picked)
     Page(tr("1 / 2단계", "Step 1 of 2"), onBack, actions = { StepBars(1) }, bottom = {
-        Column {
-            if (blocked != null) {
-                Text(blocked, fontSize = 13.sp, color = cs.error, lineHeight = 18.sp)
-                Spacer(Modifier.height(8.dp))
-            }
-            Button(shape = ButtonShape,
-                onClick = onNext, enabled = picked.isNotEmpty() && blocked == null,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-            ) { Text(if (picked.isEmpty()) tr("악기를 골라 주세요", "Pick an instrument") else tr("다음", "Next"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
-        }
+        Button(shape = ButtonShape,
+            onClick = onNext, enabled = picked.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+        ) { Text(if (picked.isEmpty()) tr("악기를 골라 주세요", "Pick an instrument") else tr("다음", "Next"), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
     }) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            if (notice != null) {
-                InfoNote(notice, strong = true)
-                Spacer(Modifier.height(14.dp))
-            }
+        val scroll = rememberScrollState()
+        // 기타를 고르면 칸 아래 안내가 나오므로, 가려지지 않게 끝까지 내려 준다.
+        LaunchedEffect(guitars) { if (guitars > 0) scroll.animateScrollTo(scroll.maxValue) }
+        Column(Modifier.verticalScroll(scroll)) {
             Text(tr("어떤 악기를 연습하나요?", "Which instruments are you practicing?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
             Text(tr("연습할 악기 하나를 골라 주세요. 그 악기의 악보만 만들어요.", "Pick the one instrument you practice. We make just its score."),
                 fontSize = 14.sp, color = cs.onSurfaceVariant, lineHeight = 20.sp)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
             Demo.INSTRUMENTS.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     row.forEach { inst ->
@@ -88,19 +78,19 @@ fun PersonalPickScreen(
             // 기타 대수에 따른 안내. 원곡 기타 대수와 맞추면 가장 치기 좋은 악보가 나온다.
             Demo.guitarNote(guitars)?.let { InfoNote(it); Spacer(Modifier.height(8.dp)) }
             // 서버가 mode=personal 이면 베이스·키보드·드럼은 그 악기 stem(+드럼)만 먼저 채보해 보고, 곡에 있으면 그것만 채보한다.
-            // 기타는 1대·2대 모두 처음부터 4개 악기를 다 채보하므로(기타 대수 다시 만들기에 밴드 전체가 필요) 이 문장을 띄우지 않는다.
+            // 기타는 1대·2대 모두 처음부터 4개 악기를 다 채보하므로 이 문장을 띄우지 않는다.
             if (guitars == 0) {
                 Text(
                     tr("원곡에 있는 악기는 밴드용보다 채보시간이 단축돼요.",
                         "If the song already has this instrument, it's transcribed faster than in band mode."),
-                    fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
+                    fontSize = 14.sp, color = cs.onSurface.copy(alpha = 0.8f), lineHeight = 20.sp,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
             }
             Text(
                 tr("두 종류 이상의 악기 악보가 필요하면 홈에서 '밴드 합주용'으로 만들어 주세요.",
                     "Need scores for more than one instrument? Use 'Band rehearsal' on Home."),
-                fontSize = 13.sp, color = cs.onSurfaceVariant, lineHeight = 18.sp,
+                fontSize = 14.sp, color = cs.onSurface.copy(alpha = 0.8f), lineHeight = 20.sp,
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -127,16 +117,16 @@ fun InstrumentTile(
     val shape = RoundedCornerShape(20.dp)
     val fg = if (on) onFg else cs.onSurface
     Column(
-        modifier.height(132.dp)
+        modifier.height(108.dp)
             .clip(shape)
             .background(if (on) onBg else cs.surface)
             .border(BorderStroke(2.dp, if (on) onBg else cs.surfaceVariant), shape)
             .clickable(onClick = onClick)
-            .padding(14.dp),
+            .padding(12.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            InstrumentIcon(inst, fg, size = 36.dp)
+            InstrumentIcon(inst, fg, size = 32.dp)
             Spacer(Modifier.weight(1f))
             if (onCount != null && !on) Text(tr("1~2대", "1–2"), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1)
         }

@@ -84,6 +84,17 @@ def test_result_passes_the_inferred_guitar_count(tmp_path):
     assert result_files(tmp_path)["original_guitars"] == 2
 
 
+def test_result_says_when_only_one_guitar_was_made(tmp_path):
+    import json
+    write_outputs(tmp_path)
+    assert result_files(tmp_path)["guitars_delivered"] is None
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["original_guitars_inferred"] = 0
+    manifest["guitars_delivered"] = 1
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert result_files(tmp_path)["guitars_delivered"] == 1
+
+
 def test_arrange_progress_moves_forward_and_ends_at_100(tmp_path):
     from rocky_server.progress import arrange_steps
     base = ["bs_roformer", *[f"muscriptor_{s}" for s in STEMS], "merge_stems", "beat_this", "align"]

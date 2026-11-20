@@ -1,7 +1,6 @@
 // AI-generated with Claude Code, 2026-11-13
 package com.team3.rocky
 
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.widthIn
 import android.app.Activity
 import android.content.Context
@@ -43,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -213,13 +213,70 @@ private fun guideSlides() = listOf(
 @Composable
 fun OnboardingDialog(onDone: () -> Unit) {
     val ctx = LocalContext.current
-    val cs = MaterialTheme.colorScheme
     val slides = remember { guideSlides() }
+    GuideDialog(slides, neverStart = FirstRun.guideOff(ctx), showNever = true, onClose = { never ->
+        if (never) FirstRun.setGuideOff(ctx); onDone()
+    })
+}
+
+/** 결과 화면을 처음 열 때 한 번 보여주는 사용 안내. 결과 화면 ⋮ 메뉴의 '사용법 보기'로 다시 본다. */
+object ResultGuide {
+    private const val PREF = "rocky_first_run"
+    private const val KEY = "result_guide_seen"
+    fun seen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
+    fun markSeen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, true).apply()
+}
+
+/** 결과 화면 사용 안내: 악기 고르기, 악보 넘기기·확대, 재생, 마디 따라가기, 키 바꾸기·전체 화면, 공유·별점. */
+@Composable
+fun ResultGuideDialog(personal: Boolean, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val slides = remember(personal) { resultGuideSlides(personal) }
+    GuideDialog(slides, neverStart = false, showNever = false, onClose = { ResultGuide.markSeen(ctx); onDone() })
+}
+
+private fun resultGuideSlides(personal: Boolean) = listOf(
+    if (personal) GuideSlide(
+        tr("연습할 악기의 악보예요", "Your instrument's score"),
+        tr("곡 이름 앞에 연습할 악기가 붙어 있어요. 기타 2대로 만들었으면 위에서 기타 1·기타 2를 골라 봐요.",
+            "The song name starts with your instrument. If you made two guitars, pick Guitar 1 or 2 at the top."),
+    ) { fg, soft -> artParts(fg, soft) } else GuideSlide(
+        tr("악기를 골라 듣고 봐요", "Pick a part to see and hear"),
+        tr("위에서 악기를 누르면 그 악기의 악보와 소리만 나와요. '전체'는 밴드 전체예요. 회색은 이 곡에 없는 악기, ✨는 AI가 만든 파트예요.",
+            "Tap an instrument for its score and sound; 'All' is the whole band. Grey ones aren't in this song, ✨ marks AI-made parts."),
+    ) { fg, soft -> artParts(fg, soft) },
+    GuideSlide(
+        tr("악보는 옆으로 넘겨요", "Swipe through the score"),
+        tr("한 쪽씩 좌우로 넘기고, 두 손가락으로 벌리면 크게 볼 수 있어요. 아래 재생 버튼으로 듣고, 막대를 끌어 원하는 곳으로 옮겨요.",
+            "Swipe left and right page by page, and pinch to zoom. Play at the bottom and drag the bar to jump."),
+    ) { fg, soft -> artPages(fg, soft) },
+    GuideSlide(
+        tr("연주 중인 마디를 따라가요", "Follow the playing bar"),
+        tr("재생하면 지금 연주하는 마디에 색이 칠해지고 악보가 알아서 넘어가요. 오른쪽 위 ⋮ 메뉴에서 끄고 켤 수 있어요.",
+            "While playing, the current bar is highlighted and pages turn by themselves. Turn it on or off in the ⋮ menu."),
+    ) { fg, soft -> artFollow(fg, soft) },
+    GuideSlide(
+        tr("키 바꾸기와 전체 화면", "Change key, full screen"),
+        tr("⋮ 메뉴에서 반 키·한 키씩 키를 바꾸면 악보와 소리를 새 키로 다시 만들어요. 악보 오른쪽 위 버튼으로 전체 화면을 켜요.",
+            "Change the key by half or whole steps in the ⋮ menu; scores and audio are remade. The button on the score opens full screen."),
+    ) { fg, soft -> artKey(fg, soft) },
+    GuideSlide(
+        if (personal) tr("악보를 평가해 주세요", "Rate the score") else tr("밴드와 함께 보고 평가해요", "Share and rate"),
+        if (personal) tr("악보는 보관함에 자동으로 저장돼요. 마지막 쪽 다음 장에서 별점과 의견을 남기면 ROCKY가 더 좋아져요.",
+            "Scores are saved to your library automatically. Rate it on the page after the last one to help ROCKY improve.")
+        else tr("악보는 보관함에 자동으로 저장되고, ⋮ 메뉴의 '밴드에 공유'로 멤버와 함께 봐요. 마지막 쪽 다음 장에서 별점을 남겨 주세요.",
+            "Scores are saved to your library automatically. Use 'Share with a band' in the ⋮ menu, and rate it after the last page."),
+    ) { fg, soft -> artRate(fg, soft) },
+)
+
+/** 안내 슬라이드 창 (처음 안내·결과 화면 안내가 같이 쓴다). */
+@Composable
+private fun GuideDialog(slides: List<GuideSlide>, neverStart: Boolean, showNever: Boolean, onClose: (never: Boolean) -> Unit) {
+    val cs = MaterialTheme.colorScheme
     val pager = rememberPagerState { slides.size }
     val scope = rememberCoroutineScope()
-    var never by remember { mutableStateOf(FirstRun.guideOff(ctx)) }
-    fun close() { if (never) FirstRun.setGuideOff(ctx); onDone() }
-
+    var never by remember { mutableStateOf(neverStart) }
+    fun close() = onClose(never)
     // 모든 장이 같은 크기로 보이게: 창 너비는 최대 360dp, 그림·제목(2줄)·설명(4줄) 칸 높이를 고정한다.
     Dialog(onDismissRequest = { close() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -244,15 +301,16 @@ fun OnboardingDialog(onDone: () -> Unit) {
                             Canvas(Modifier.size(GUIDE_ART - 30.dp).semantics { contentDescription = slide.title }) { slide.art(this, fg, soft) }
                         }
                         Spacer(Modifier.height(20.dp))
-                        // 제목은 두 줄 칸, 설명은 네 줄 칸. 짧은 장도 같은 높이를 차지해서 넘겨도 창 크기가 그대로다.
-                        Box(Modifier.fillMaxWidth().height(58.dp), contentAlignment = Alignment.Center) {
-                            Text(slide.title, fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold,
-                                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        // 모든 장의 제목·설명을 투명하게 겹쳐 두어 가장 긴 장에 맞춰 칸 높이를 잡는다.
+                        // 그래서 넘겨도 창 크기가 그대로이고, 글자를 크게 쓰는 폰(S23 Ultra 등)에서도 잘리지 않는다.
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            slides.forEach { GuideTitle(it.title, Modifier.alpha(0f)) }
+                            GuideTitle(slide.title)
                         }
                         Spacer(Modifier.height(6.dp))
-                        Box(Modifier.fillMaxWidth().height(84.dp), contentAlignment = Alignment.TopCenter) {
-                            Text(slide.body, fontSize = 14.sp, lineHeight = 21.sp, color = cs.onSurfaceVariant,
-                                textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                            slides.forEach { GuideBody(it.body, Modifier.alpha(0f)) }
+                            GuideBody(slide.body)
                         }
                     }
                 }
@@ -268,13 +326,13 @@ fun OnboardingDialog(onDone: () -> Unit) {
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(
+                    if (showNever) Row(
                         Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { never = !never },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(checked = never, onCheckedChange = { never = it })
                         Text(tr("다시 보지 않기", "Don't show again"), fontSize = 13.sp, color = cs.onSurfaceVariant)
-                    }
+                    } else Spacer(Modifier.weight(1f))
                     val last = pager.currentPage == slides.lastIndex
                     // '다음'과 '시작하기'가 같은 너비라 마지막 장에서도 버튼이 움직이지 않는다.
                     Button(
@@ -409,4 +467,97 @@ private fun DrawScope.artScores(fg: Color, soft: Color) {
     }
     spark(80 * u, 72 * u, 9 * u)
     spark(88 * u, 56 * u, 4.5f * u)
+}
+
+@Composable
+private fun GuideTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold,
+        textAlign = TextAlign.Center, modifier = modifier.fillMaxWidth())
+}
+
+@Composable
+private fun GuideBody(text: String, modifier: Modifier = Modifier) {
+    Text(text, fontSize = 14.sp, lineHeight = 21.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center, modifier = modifier.fillMaxWidth())
+}
+
+// ----- 결과 화면 안내 그림 -----
+
+/** 악기 칸 네 개 (하나는 골라짐, 하나는 회색). */
+private fun DrawScope.artParts(fg: Color, soft: Color) {
+    val u = unit()
+    drawRoundRect(soft.copy(alpha = 0.18f), Offset(10 * u, 14 * u), Size(80 * u, 16 * u), CornerRadius(5 * u))
+    val cells = listOf(Offset(10 * u, 36 * u), Offset(52 * u, 36 * u), Offset(10 * u, 58 * u), Offset(52 * u, 58 * u))
+    cells.forEachIndexed { i, o ->
+        val color = when (i) { 1 -> fg; 2 -> soft.copy(alpha = 0.07f); else -> soft.copy(alpha = 0.18f) }
+        drawRoundRect(color, o, Size(38 * u, 16 * u), CornerRadius(5 * u))
+    }
+    // 누르는 손가락
+    drawCircle(Color.White, 6 * u, Offset(78 * u, 50 * u))
+    drawCircle(fg, 6 * u, Offset(78 * u, 50 * u), style = Stroke(1.6f * u))
+    drawCircle(soft.copy(alpha = 0.18f), 12 * u, Offset(78 * u, 50 * u), style = Stroke(1.2f * u))
+}
+
+/** 악보 두 장과 넘기는 화살표. */
+private fun DrawScope.artPages(fg: Color, soft: Color) {
+    val u = unit()
+    listOf(14f, 52f).forEachIndexed { i, x ->
+        drawRoundRect(if (i == 0) Color.White else Color.White.copy(alpha = 0.6f), Offset(x * u, 14 * u), Size(34 * u, 48 * u), CornerRadius(3 * u))
+        for (k in 0..3) for (l in 0..2) {
+            val y = (22 + k * 10 + l * 2) * u
+            drawLine(Color(0xFF555555), Offset((x + 4) * u, y), Offset((x + 30) * u, y), 0.6f * u)
+        }
+    }
+    val arrow = Path().apply { moveTo(40 * u, 76 * u); lineTo(62 * u, 76 * u); moveTo(56 * u, 71 * u); lineTo(62 * u, 76 * u); lineTo(56 * u, 81 * u) }
+    drawPath(arrow, fg, style = Stroke(3f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
+}
+
+/** 악보 한 장, 칠해진 마디, 아래 재생 막대. */
+private fun DrawScope.artFollow(fg: Color, soft: Color) {
+    val u = unit()
+    drawRoundRect(Color.White, Offset(22 * u, 8 * u), Size(56 * u, 60 * u), CornerRadius(3 * u))
+    for (k in 0..3) for (l in 0..2) {
+        val y = (16 + k * 13 + l * 2.5f) * u
+        drawLine(Color(0xFF555555), Offset(26 * u, y), Offset(74 * u, y), 0.6f * u)
+    }
+    drawRect(fg.copy(alpha = 0.25f), Offset(40 * u, 27 * u), Size(16 * u, 10 * u))
+    drawRect(fg, Offset(40 * u, 36 * u), Size(16 * u, 1.6f * u))
+    drawRoundRect(soft.copy(alpha = 0.18f), Offset(14 * u, 80 * u), Size(72 * u, 4 * u), CornerRadius(2 * u))
+    drawRoundRect(fg, Offset(14 * u, 80 * u), Size(30 * u, 4 * u), CornerRadius(2 * u))
+    drawCircle(fg, 4 * u, Offset(44 * u, 82 * u))
+}
+
+/** 위아래 화살표(키)와 전체 화면 모서리. */
+private fun DrawScope.artKey(fg: Color, soft: Color) {
+    val u = unit()
+    val s = Stroke(3.2f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    drawCircle(fg, 20 * u, Offset(32 * u, 50 * u))
+    val up = Path().apply { moveTo(32 * u, 62 * u); lineTo(32 * u, 38 * u); moveTo(25 * u, 45 * u); lineTo(32 * u, 38 * u); lineTo(39 * u, 45 * u) }
+    drawPath(up, Color.White, style = s)
+    drawRoundRect(soft.copy(alpha = 0.18f), Offset(56 * u, 30 * u), Size(36 * u, 40 * u), CornerRadius(6 * u))
+    val corners = Path().apply {
+        moveTo(62 * u, 44 * u); lineTo(62 * u, 36 * u); lineTo(70 * u, 36 * u)
+        moveTo(78 * u, 36 * u); lineTo(86 * u, 36 * u); lineTo(86 * u, 44 * u)
+        moveTo(86 * u, 56 * u); lineTo(86 * u, 64 * u); lineTo(78 * u, 64 * u)
+        moveTo(70 * u, 64 * u); lineTo(62 * u, 64 * u); lineTo(62 * u, 56 * u)
+    }
+    drawPath(corners, fg, style = s)
+}
+
+/** 별 다섯 개 (넷은 칠함). */
+private fun DrawScope.artRate(fg: Color, soft: Color) {
+    val u = unit()
+    for (i in 0 until 5) {
+        val c = Offset((14 + i * 18) * u, 50 * u)
+        val star = Path().apply {
+            for (k in 0 until 10) {
+                val r = (if (k % 2 == 0) 8f else 3.4f) * u
+                val a = Math.toRadians((-90 + k * 36).toDouble())
+                val x = c.x + r * Math.cos(a).toFloat(); val y = c.y + r * Math.sin(a).toFloat()
+                if (k == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+        drawPath(star, if (i < 4) fg else soft.copy(alpha = 0.25f))
+    }
 }

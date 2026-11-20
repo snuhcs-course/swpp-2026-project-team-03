@@ -43,7 +43,7 @@ object JobNotifier {
 
     /** 백그라운드에서 만들던 악보가 다 됐다고 알린다. */
     fun ready(ctx: Context, job: ScoreJob) =
-        post(ctx, job, tr("악보가 완성됐어요", "Your scores are ready"), tr("눌러서 확인해 보세요", "Tap to open ROCKY"))
+        post(ctx, job, tr("악보가 완성됐어요", "Your scores are ready"), tr("보관함에 저장했어요. 눌러서 확인해 보세요", "Saved to your library. Tap to open ROCKY"))
 
     @SuppressLint("MissingPermission")   // 바로 아래 needsPermission()에서 확인한다
     private fun post(ctx: Context, job: ScoreJob, title: String, reason: String) {

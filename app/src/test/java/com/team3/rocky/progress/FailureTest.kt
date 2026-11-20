@@ -18,26 +18,19 @@ class FailureTest {
     private fun server(code: String?, retryable: Boolean?, wait: Int? = null, from: String? = "gpu", message: String? = "서버 안내") =
         JobFailedException("dev text", null, code, message, retryable, wait, from)
 
-    @Test fun pdfNetworkWaitsSixtySecondsAndRedoesOnlyThePdf() {
-        val f = ScoreJobs.classify(server("pdf_network", true, wait = 60, from = "pdf"))
-        assertTrue(f.retry)
-        assertEquals(60, f.waitSec)
-        assertTrue(f.message.contains("1분 뒤에 다시 시도하면"))
-        assertTrue(f.message.contains("PDF만 다시"))
+    // 서버 처리 실패는 retryable이어도 다시 시도를 주지 않는다 (깨진 파일은 다시 해도 안 됨). 연결 문제만 다시 시도.
+    @Test fun serverFailuresAreRemovedEvenIfRetryable() {
+        for (code in listOf("pdf_network", "timeout", "pipeline_error")) {
+            val f = ScoreJobs.classify(server(code, true, wait = 60, from = "pdf"))
+            assertFalse(code, f.retry)
+            assertNull(code, f.waitSec)
+        }
     }
 
-    @Test fun timeoutCanBeRetriedRightAway() {
-        val f = ScoreJobs.classify(server("timeout", true, from = "gpu"))
-        assertTrue(f.retry)
-        assertNull(f.waitSec)
-        assertTrue(f.message.contains("멈춘 곳부터"))
-    }
-
-    @Test fun pipelineErrorAsksToTellTheTeamAfterTwoFailures() {
-        val f = ScoreJobs.classify(server("pipeline_error", true, from = "pdf"))
-        assertTrue(f.retry)
-        assertTrue(f.message.contains("PDF만 다시"))
-        assertTrue(f.message.contains("두 번 연속"))
+    @Test fun pipelineErrorSaysTheFileMayBeBroken() {
+        val f = ScoreJobs.classify(server("pipeline_error", true, from = "gpu"))
+        assertTrue(f.message.contains("깨진 파일"))
+        assertTrue(f.message.contains("새로 만들어"))
     }
 
     @Test fun noAgentAndInterruptedUploadStartOver() {

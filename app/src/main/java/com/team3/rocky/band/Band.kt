@@ -15,14 +15,18 @@ data class Band(
     val createdAt: Long,
 )
 
-/** 밴드 멤버. 한 밴드 안에서 한 사람은 악기 하나를 맡는다. */
+/** 밴드 멤버. 밴드에 참여할 때 이 밴드에서 연주하는 악기를 여러 개 고를 수 있다. */
 data class BandMember(
     val userId: Long,
     val nickname: String,
-    /** piano, drums, bass, guitar, vocal 중 하나 */
+    /** piano, drums, bass, guitar, vocal 중 하나 이상을 쉼표로 이어 쓴 것 (예: "bass,piano") */
     val instrument: String,
     val isOwner: Boolean,
-)
+    /** 서버에 프로필 사진을 올린 시각. 사진이 없으면 null */
+    val photoAt: Long? = null,
+) {
+    val parts: List<String> get() = instrument.split(",").filter { it.isNotBlank() }
+}
 
 /** 밴드에 공유된 악보. 공유한 시점의 악보 정보를 복사해 둔다. */
 data class SharedScore(
@@ -50,6 +54,7 @@ data class BandDetail(
     val scores: List<SharedScore>,
 ) {
     fun instrumentOf(userId: Long): String? = members.firstOrNull { it.userId == userId }?.instrument
+    fun partsOf(userId: Long): List<String> = members.firstOrNull { it.userId == userId }?.parts.orEmpty()
 }
 
 sealed class BandResult {

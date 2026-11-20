@@ -25,13 +25,6 @@ object Demo {
     /** 밴드 구성 화면에 보이는 악기. 기타는 두 번 누르면 두 대(guitar + guitar2)가 된다. */
     val INSTRUMENTS = listOf("piano", "drums", "bass", "guitar")
 
-    /** 기타가 아닌 악기. '기타 대수 바꿔서 다시 만들기'에서 모델이 찾은 그대로 원곡 구성으로 보낸다. */
-    val NON_GUITAR = listOf("piano", "drums", "bass")
-
-    /**
-     * '기타 대수 바꿔서 다시 만들기'의 원곡 구성: 모델이 찾은 원곡 악기 중 기타 아닌 것 + 사용자가 고른 기타 대수.
-     * 앱 이름(guitar2 = 두 번째 기타)으로, 서버가 unified.py --original 형식으로 바꾼다.
-     */
     /**
      * 개인 연습용은 악기 한 종류만 (기타는 1~2대). 다른 악기를 누르면 그 악기로 바뀌고,
      * 고른 악기를 다시 누르면 비운다.
@@ -62,12 +55,6 @@ object Demo {
         else -> null
     }
 
-    fun redoOriginal(found: List<String>, guitars: Int): List<String> {
-        val others = found.filter { it in NON_GUITAR }
-        val g = when (guitars) { 0 -> emptyList(); 1 -> listOf("guitar"); else -> listOf("guitar", GUITAR2) }
-        return ordered(others + g)
-    }
-
     /** 악보가 나오는 순서. */
     val SCORE_ORDER = listOf("piano", "drums", "bass", "guitar", GUITAR2)
 
@@ -81,6 +68,16 @@ object Demo {
     fun kor(i: String) = when (i) {
         "piano" -> tr("피아노", "Piano"); "drums" -> tr("드럼", "Drums"); "bass" -> tr("베이스", "Bass")
         "guitar" -> tr("기타", "Guitar"); GUITAR2 -> tr("기타 2", "Guitar 2"); VOCAL -> tr("보컬", "Vocals"); else -> i
+    }
+
+    /**
+     * 개인 연습용 곡 이름: 원래 곡 이름 뒤에 연습할 악기를 붙인다 (예: '사건의 지평선_드럼'). 이미 붙어 있으면 그대로.
+     * 기타 2대도 '_기타'. 곡 이름 칸 길이 제한(60자)은 붙인 뒤에도 지킨다(긴 곡 이름 쪽을 줄임).
+     */
+    fun personalTitle(lineup: Collection<String>, title: String): String {
+        val inst = SCORE_ORDER.firstOrNull { it in lineup }?.let { if (it == GUITAR2) "guitar" else it } ?: return title
+        val suffix = "_" + kor(inst)
+        return if (title.endsWith(suffix)) title else title.take(60 - suffix.length) + suffix
     }
 
     /** 기타가 두 대인 곡에서는 첫 번째 기타를 '기타 1'로 부른다. */

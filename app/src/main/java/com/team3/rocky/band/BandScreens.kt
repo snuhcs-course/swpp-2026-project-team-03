@@ -1,6 +1,10 @@
 // AI-generated with Claude Code, 2026-10-31
 package com.team3.rocky.band
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import com.team3.rocky.Avatar
+import com.team3.rocky.ProfileStore
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Toast
@@ -9,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -113,8 +118,6 @@ fun BandListScreen(
                         Text(s.band.name, fontWeight = FontWeight.Bold, fontSize = 19.sp, maxLines = 1)
                         Spacer(Modifier.height(4.dp))
                         Text(tr("멤버 ${s.memberCount}명 · 공유 악보 ${s.scoreCount}개", "${s.memberCount} members · ${s.scoreCount} shared scores"), fontSize = 13.sp, color = cs.onSurfaceVariant)
-                        Spacer(Modifier.height(10.dp))
-                        PartBadge(s.myInstrument)
                     }
                 }
                 item { Spacer(Modifier.height(8.dp)) }
@@ -132,14 +135,16 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
     var joinMode by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    // 회원가입 때 고른 첫 악기를 기본 파트로 둔다.
-    var instrument by remember { mutableStateOf(user.instruments.firstOrNull() ?: Demo.PARTS.first()) }
+    // 이 밴드에서 연주하는 악기 (여러 개 가능). 공유된 악보를 열 때 이 악기가 먼저 골라져 있다.
+    var parts by remember { mutableStateOf(emptySet<String>()) }
+    val instrument = Demo.PARTS.filter { it in parts }.joinToString(",")
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
     fun submit() {
         if (busy) return
         focus.clearFocus()
+        if (parts.isEmpty()) { error = tr("이 밴드에서 연주하는 악기를 골라 주세요", "Pick what you play in this band"); return }
         busy = true
         error = null
         scope.launch {
@@ -196,13 +201,29 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
                 EmojiRow { e -> name = BandRules.limitName(name + e); error = null }
             }
             Spacer(Modifier.height(20.dp))
-            Text(tr("이 밴드에서 내 파트", "Your part in this band"), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.primary)
-            Spacer(Modifier.height(4.dp))
-            Text(tr("공유 악보를 열면 내 파트가 먼저 보여요.", "Shared scores open on your part."), fontSize = 14.sp, color = cs.onSurface)
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(tr("이 밴드에서 연주하는 악기", "What you play in this band"), fontWeight = FontWeight.SemiBold)
+            Text(tr("여러 개 고를 수 있어요. 공유된 악보를 열면 이 악기가 먼저 골라져 있어요.", "Pick any. Shared scores open on your instrument."),
+                fontSize = 13.sp, color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Demo.PARTS.forEach { inst ->
-                    PartChip(inst, inst == instrument, Modifier.weight(1f)) { instrument = inst }
+                    val on = inst in parts
+                    val shape = RoundedCornerShape(14.dp)
+                    Column(
+                        Modifier.weight(1f)
+                            .clip(shape)
+                            .background(if (on) cs.primary else cs.surface)
+                            .border(BorderStroke(1.dp, if (on) cs.primary else cs.surfaceVariant), shape)
+                            .clickable { parts = if (on) parts - inst else parts + inst; error = null }
+                            .padding(vertical = 10.dp)
+                            .testTag("part_$inst"),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        val fg = if (on) cs.onPrimary else cs.onSurface
+                        InstrumentIcon(inst, fg, size = 24.dp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(Demo.kor(inst), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1)
+                    }
                 }
             }
             error?.let {
@@ -221,6 +242,7 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
 }
 
 // ---------- 밴드 상세 ----------
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun BandDetailScreen(
     user: User,
@@ -242,7 +264,8 @@ fun BandDetailScreen(
     var renamingBand by remember { mutableStateOf(false) }
     var renamingScore by remember { mutableStateOf<SharedScore?>(null) }
     val d = detail
-    val myPart = d?.instrumentOf(user.id)
+    // 공유 악보를 열면 이 밴드에서 내가 연주하는 악기 중 그 곡에 있는 첫 악기를 먼저 골라 둔다 ('내 파트' 표시는 없음).
+    fun myPartIn(work: com.team3.rocky.Work) = detail?.partsOf(user.id).orEmpty().firstOrNull { it in work.instruments }
     val isOwner = d != null && d.band.ownerId == user.id
 
     Page(d?.band?.name ?: tr("밴드", "Band"), onBack, actions = {
@@ -257,7 +280,7 @@ fun BandDetailScreen(
                 modifier = Modifier.weight(1f).height(52.dp).testTag("band_share_score"), contentPadding = TightButtonPadding,
             ) { Text(tr("악보 공유", "Share a score")) }
             Button(shape = ButtonShape,
-                onClick = { d?.let { onNewScore(it.members.map { m -> m.instrument }) } },
+                onClick = { d?.let { onNewScore(it.members.flatMap { m -> m.parts }) } },
                 enabled = d != null,
                 modifier = Modifier.weight(1f).height(52.dp).testTag("band_new_score"), contentPadding = TightButtonPadding,
             ) { Text(tr("이 밴드로 새 악보", "New score for this band")) }
@@ -300,10 +323,12 @@ fun BandDetailScreen(
                     Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        Modifier.size(42.dp).clip(CircleShape).background(cs.surface),
-                        contentAlignment = Alignment.Center,
-                    ) { InstrumentIcon(m.instrument, cs.primary, size = 24.dp) }
+                    // 회원가입·내 정보에서 올린 프로필 사진. 없으면 기본 프로필.
+                    val photo by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, m.userId, m.photoAt) {
+                        value = if (m.userId == user.id) ProfileStore.load(ctx, user.id) ?: withContext(Dispatchers.IO) { ProfileStore.member(ctx, m.userId, m.photoAt) }
+                        else withContext(Dispatchers.IO) { ProfileStore.member(ctx, m.userId, m.photoAt) }
+                    }
+                    Avatar(photo, m.nickname, 42.dp)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -311,7 +336,7 @@ fun BandDetailScreen(
                             if (m.userId == user.id) Tag(tr("나", "Me"), cs.primary)
                             if (m.isOwner) Tag(tr("방장", "Leader"), cs.secondary)
                         }
-                        Text(Demo.kor(m.instrument), fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        Text(m.parts.joinToString(" · ") { Demo.kor(it) }, fontSize = 13.sp, color = cs.onSurfaceVariant)
                     }
                 }
             }
@@ -329,7 +354,7 @@ fun BandDetailScreen(
                     Modifier.fillMaxWidth()
                         .padding(vertical = 6.dp)
                         .card(RoundedCornerShape(16.dp), cs)
-                        .clickable { onOpenScore(s, myPart) }
+                        .clickable { onOpenScore(s, myPartIn(s.work)) }
                         .padding(16.dp)
                         .testTag("band_score_${s.id}"),
                 ) {
@@ -350,16 +375,15 @@ fun BandDetailScreen(
                         fontSize = 13.sp, color = cs.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // 악기가 많아도(S22) 글자가 세로로 쪼개지지 않게 줄을 넘겨 놓는다. '내 파트' 표시는 하지 않는다.
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         s.work.instruments.forEach { inst ->
-                            val mine = inst == myPart
                             Text(
-                                (if (mine) tr("내 파트 · ", "Mine · ") else "") + Demo.label(inst, s.work.instruments),
-                                fontSize = 12.sp, fontWeight = if (mine) FontWeight.Bold else FontWeight.Normal,
-                                color = if (mine) cs.onPrimary else cs.onSurfaceVariant,
+                                Demo.label(inst, s.work.instruments), maxLines = 1, softWrap = false,
+                                fontSize = 12.sp, color = cs.onSurfaceVariant,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (mine) cs.primary else cs.surfaceVariant)
+                                    .background(cs.surfaceVariant)
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
                             )
                         }
@@ -433,7 +457,7 @@ fun BandDetailScreen(
 fun ShareToBandScreen(
     user: User,
     repo: BandRepository,
-    work: Work,
+    works: List<Work>,
     onBack: () -> Unit,
     onShared: () -> Unit,
     onAddBand: () -> Unit,
@@ -446,7 +470,10 @@ fun ShareToBandScreen(
     Page(tr("밴드에 공유", "Share with a band"), onBack) {
         Text(tr("어느 밴드에 공유할까요?", "Which band gets this score?"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
         Spacer(Modifier.height(6.dp))
-        Text(work.title, color = cs.onSurfaceVariant, maxLines = 1)
+        Text(
+            if (works.size == 1) works[0].title else tr("${works[0].title} 외 ${works.size - 1}곡", "${works[0].title} and ${works.size - 1} more"),
+            color = cs.onSurfaceVariant, maxLines = 1,
+        )
         Spacer(Modifier.height(24.dp))
         val list = bands
         when {
@@ -465,11 +492,14 @@ fun ShareToBandScreen(
                             .card(RoundedCornerShape(16.dp), cs)
                             .clickable {
                                 scope.launch {
-                                    val added = repo.share(user, s.band.id, work)
+                                    val added = works.count { repo.share(user, s.band.id, it) }
                                     Toast.makeText(
                                         ctx,
-                                        if (added) tr("'${s.band.name}'에 공유했어요", "Shared with '${s.band.name}'")
-                                        else tr("이미 '${s.band.name}'에 공유된 악보예요", "Already shared with '${s.band.name}'"),
+                                        when {
+                                            added == 0 -> tr("이미 '${s.band.name}'에 공유된 악보예요", "Already shared with '${s.band.name}'")
+                                            works.size == 1 -> tr("'${s.band.name}'에 공유했어요", "Shared with '${s.band.name}'")
+                                            else -> tr("'${s.band.name}'에 ${added}곡을 공유했어요", "Shared $added with '${s.band.name}'")
+                                        },
                                         Toast.LENGTH_SHORT,
                                     ).show()
                                     onShared()
@@ -568,43 +598,6 @@ private fun Tag(text: String, color: androidx.compose.ui.graphics.Color) {
             .border(BorderStroke(1.dp, color), RoundedCornerShape(6.dp))
             .padding(horizontal = 6.dp, vertical = 1.dp),
     )
-}
-
-@Composable
-private fun PartBadge(inst: String) {
-    val cs = MaterialTheme.colorScheme
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(cs.primary.copy(alpha = 0.14f))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(tr("내 파트  ", "Mine  "), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.primary)
-        InstrumentIcon(inst, cs.primary, size = 16.dp)
-        Text(" ${Demo.kor(inst)}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.primary)
-    }
-}
-
-@Composable
-private fun PartChip(inst: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(14.dp)
-    Column(
-        modifier
-            .clip(shape)
-            .background(if (on) cs.primary else cs.surface)
-            .border(BorderStroke(1.dp, if (on) cs.primary else cs.surfaceVariant), shape)
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp)
-            .testTag("part_$inst"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        val fg = if (on) cs.onPrimary else cs.onSurface
-        InstrumentIcon(inst, fg, size = 26.dp)
-        Spacer(Modifier.height(2.dp))
-        Text(Demo.kor(inst), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
-    }
 }
 
 @Composable

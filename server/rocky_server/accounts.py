@@ -172,9 +172,19 @@ class Accounts:
         self.clock = clock
         with self.lock:
             self.db.executescript(SCHEMA)
+            self._migrate()
             self._remove_old_demo()
 
     # ---------- helpers ----------
+
+    def _migrate(self) -> None:
+        """Columns added after the first release. SQLite cannot add them in CREATE TABLE IF NOT EXISTS."""
+        def add(table: str, column: str, decl: str) -> None:
+            have = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if column not in have:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        add("users", "photo_at", "INTEGER")          # when the profile photo last changed (null = no photo)
+        add("ratings", "comment", "TEXT NOT NULL DEFAULT ''")  # optional words after the stars
 
     def _tx(self):
         return _Tx(self)
@@ -285,10 +295,18 @@ class Accounts:
         return name
 
     @staticmethod
-    def _check_part(instrument: str) -> str:
-        if instrument not in BAND_PARTS:
-            raise AccountError(422, "맡을 악기를 골라 주세요", "instrument")
-        return instrument
+    def _check_parts(instruments) -> str:
+        """What a member plays in this band: one or more parts (the app lets members pick several).
+        Accepts a list or a single name; stored comma-separated in band_members.instrument."""
+        items = instruments if isinstance(instruments, list) else [instruments]
+        parts = list(dict.fromkeys(str(i) for i in items if str(i) in BAND_PARTS))
+        if not parts:
+            raise AccountError(422, "연주하는 악기를 골라 주세요", "instrument")
+        return ",".join(parts)
+
+    @staticmethod
+    def _split(parts: str) -> list[str]:
+        return [i for i in (parts or "").split(",") if i]
 
     def bands_of(self, user: User) -> list[dict]:
         rows = self.db.execute(
@@ -298,19 +316,22 @@ class Accounts:
                FROM bands b JOIN band_members m ON m.band_id = b.id
                WHERE m.user_id = ? ORDER BY m.joined_at DESC, b.id DESC""", (user.id,)).fetchall()
         return [{"band": self._band_json(r), "member_count": r["member_count"], "score_count": r["score_count"],
-                 "my_instrument": r["my_instrument"]} for r in rows]
+                 "my_instrument": (self._split(r["my_instrument"]) or [""])[0],
+                 "my_instruments": self._split(r["my_instrument"])} for r in rows]
 
     def detail(self, user: User, band_id: int) -> dict:
         band = self._member_band(user, band_id)
         members = self.db.execute(
-            """SELECT m.user_id, u.nickname, m.instrument FROM band_members m JOIN users u ON u.id = m.user_id
+            """SELECT m.user_id, u.nickname, u.photo_at, m.instrument FROM band_members m JOIN users u ON u.id = m.user_id
                WHERE m.band_id = ? ORDER BY m.joined_at, m.user_id""", (band_id,)).fetchall()
         scores = self.db.execute(
             """SELECT s.*, u.nickname AS shared_by_name FROM shared_scores s JOIN users u ON u.id = s.shared_by
                WHERE s.band_id = ? ORDER BY s.shared_at DESC, s.id DESC""", (band_id,)).fetchall()
         return {
             "band": self._band_json(band),
-            "members": [{"user_id": m["user_id"], "nickname": m["nickname"], "instrument": m["instrument"],
+            "members": [{"user_id": m["user_id"], "nickname": m["nickname"],
+                         "instrument": (self._split(m["instrument"]) or [""])[0],
+                         "instruments": self._split(m["instrument"]), "photo_at": m["photo_at"],
                          "is_owner": m["user_id"] == band["owner_id"]} for m in members],
             "scores": [{"id": s["id"], "work_id": s["work_id"], "job_id": s["job_id"], "title": s["title"],
                         "instruments": [i for i in s["instruments"].split(",") if i], "date": s["work_date"],
@@ -318,8 +339,8 @@ class Accounts:
                         "shared_by_name": s["shared_by_name"], "shared_at": s["shared_at"]} for s in scores],
         }
 
-    def create_band(self, user: User, name: str, instrument: str) -> dict:
-        name, instrument = self._check_name(name), self._check_part(instrument)
+    def create_band(self, user: User, name: str, instrument) -> dict:
+        name, instrument = self._check_name(name), self._check_parts(instrument)
         with self.lock, self._tx():
             for _ in range(20):
                 code = "".join(secrets.choice(CODE_CHARS) for _ in range(CODE_LENGTH))
@@ -333,8 +354,8 @@ class Accounts:
             self.db.execute("INSERT INTO band_members VALUES (?, ?, ?, ?)", (cur.lastrowid, user.id, instrument, now))
             return self._band_json(self._band(cur.lastrowid))
 
-    def join(self, user: User, code: str, instrument: str) -> dict:
-        code, instrument = normalize_code(code), self._check_part(instrument)
+    def join(self, user: User, code: str, instrument) -> dict:
+        code, instrument = normalize_code(code), self._check_parts(instrument)
         if len(code) != CODE_LENGTH or any(c not in CODE_CHARS for c in code):
             raise AccountError(422, f"초대 코드는 영문·숫자 {CODE_LENGTH}자리예요", "code")
         with self.lock, self._tx():
@@ -418,9 +439,21 @@ class Accounts:
         """Band members open a shared score from the server, so its job must not be deleted."""
         return self._one("SELECT 1 FROM shared_scores WHERE job_id = ?", job_id) is not None
 
+    # ---------- profile photos (the file itself lives next to the database, see app.py) ----------
+
+    def set_photo(self, user: User, present: bool) -> int | None:
+        stamp = self.clock() if present else None
+        with self.lock, self._tx():
+            self.db.execute("UPDATE users SET photo_at = ? WHERE id = ?", (stamp, user.id))
+        return stamp
+
+    def photo_at(self, user_id: int) -> int | None:
+        row = self._one("SELECT photo_at FROM users WHERE id = ?", user_id)
+        return row["photo_at"] if row else None
+
     # ---------- ratings ----------
 
-    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=()) -> dict:
+    def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=(), comment=None) -> dict:
         """Save (or change) one rater's stars for a score.
 
         Ratings sent without a login all count as rater 0, so a later anonymous rating of the same
@@ -429,14 +462,19 @@ class Accounts:
         if isinstance(stars, bool) or not isinstance(stars, int) or not 1 <= stars <= 5:
             raise AccountError(422, "별점은 1에서 5 사이예요", "stars")
         parts = [i for i in instruments if i in BAND_PARTS] if isinstance(instruments, list) else []
+        # The app sends the stars first and the optional comment afterwards; None keeps the earlier comment.
+        words = None if comment is None else str(comment).strip()[:1000]
         # the lock like every other write: _Tx joins a transaction already open on the shared connection
         with self.lock, self._tx():
             self.db.execute(
-                """INSERT INTO ratings (job_id, rater, stars, title, instruments, rated_at) VALUES (?, ?, ?, ?, ?, ?)
+                """INSERT INTO ratings (job_id, rater, stars, title, instruments, rated_at, comment)
+                   VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, ''))
                    ON CONFLICT (job_id, rater) DO UPDATE SET stars = excluded.stars, title = excluded.title,
-                   instruments = excluded.instruments, rated_at = excluded.rated_at""",
-                (job_id, rater.id if rater else 0, stars, str(title)[:200], ",".join(parts), self.clock()))
-        return {"job_id": job_id, "stars": stars}
+                   instruments = excluded.instruments, rated_at = excluded.rated_at,
+                   comment = COALESCE(?, ratings.comment)""",
+                (job_id, rater.id if rater else 0, stars, str(title)[:200], ",".join(parts), self.clock(), words, words))
+            saved = self._one("SELECT comment FROM ratings WHERE job_id = ? AND rater = ?", job_id, rater.id if rater else 0)
+        return {"job_id": job_id, "stars": stars, "comment": saved["comment"] if saved else ""}
 
     def ratings(self) -> dict:
         """Every rating, newest first, with the count and average (for the team)."""
@@ -444,6 +482,7 @@ class Accounts:
             rows = self.db.execute("SELECT * FROM ratings ORDER BY rated_at DESC").fetchall()
         items = [{"job_id": r["job_id"], "stars": r["stars"], "title": r["title"],
                   "instruments": [i for i in r["instruments"].split(",") if i], "rated_at": r["rated_at"],
+                  "comment": r["comment"],
                   "logged_in": r["rater"] != 0} for r in rows]
         average = round(sum(i["stars"] for i in items) / len(items), 2) if items else None
         histogram = {str(n): sum(1 for i in items if i["stars"] == n) for n in range(1, 6)}
