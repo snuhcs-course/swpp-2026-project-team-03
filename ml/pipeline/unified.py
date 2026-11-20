@@ -24,14 +24,13 @@ from typing import Callable
 
 import pretty_midi
 import numpy as np
-from guitar_count_model import load_model as load_guitar_count_model
-from guitar_count_model import predict as predict_guitar_count, split_scores
 from rule_gates import GateConfig, InputRejected, check_input, gate_stem, guitar_stereo
 from separate_bs_roformer import (CHECKPOINT_SHA256, CONFIG_SHA256, NONVOCAL_STEMS,
                                   PACKAGE_VERSION, STEMS, valid_stems)
 
 
 TRANSCRIBE_STEMS = ("drums", "bass", "guitar", "piano")
+ALPHA_ARMS = ("fusion_extra_trees", "fusion_rbf_svm", "fusion_stem_extra_trees")
 HINTS = {
     "drums": "drums",
     "bass": "acoustic_bass,electric_bass",
@@ -327,16 +326,19 @@ class Runner:
         self.alpha_arm = None
         self.alpha_models_sha256 = None
         if self.alpha_enabled:
-            from guitar_count_alpha import ARMS
-            self.alpha_models_dir = self.alpha_models_dir.resolve(strict=True)
-            self.alpha_models_sha256 = digest(self.alpha_models_dir / "manifest.json")
+            self.alpha_models_dir = self.alpha_models_dir.resolve()
+            try:
+                self.alpha_models_sha256 = digest(self.alpha_models_dir / "manifest.json")
+            except OSError:
+                # Preserve the assignment and let the model stage use the rule.
+                pass
             if args.resume and self.manifest_path.exists():
                 saved = json.loads(self.manifest_path.read_text(encoding="utf-8"))
                 self.alpha_arm = saved.get("config", {}).get("guitar_count_arm")
-                if self.alpha_arm not in ARMS:
+                if self.alpha_arm not in ALPHA_ARMS:
                     raise ValueError("Cannot resume without the original alpha assignment")
             else:
-                self.alpha_arm = ARMS[secrets.randbelow(len(ARMS))]
+                self.alpha_arm = ALPHA_ARMS[secrets.randbelow(len(ALPHA_ARMS))]
         if (self.guitar_count_classifier == "extra_trees" and self.original_unknown
                 and self.requested_guitars):
             self.guitar_count_model = self.guitar_count_model.resolve(strict=True)
@@ -463,14 +465,14 @@ class Runner:
 
     def guitar_scores(self, gated_guitar: Path, beats_file: Path,
                       stereo: dict, guitar_code: Path) -> tuple[dict, dict] | None:
-        """Extract the four scores using the development guitar-only path.
+        """Extract the four scores from gated guitar MIDI aligned to the song beats.
 
-        The CV features came from guitar-only gated MIDI aligned to the same
-        Beat This! beats. Aligning the full band here would change the features
-        because drum sync can move pitched notes.
+        Aligning the full band here would change the guitar notes because drum
+        sync can move pitched notes.
         """
         if "corr" not in stereo or "balance" not in stereo:
             return None
+        from guitar_count_model import split_scores
         sys.path.insert(0, str(self.modules / "beat_align"))
         from align import align_midi, load_beats
 
@@ -493,6 +495,8 @@ class Runner:
     def classify_guitars(self, gated_guitar: Path, beats_file: Path,
                          stereo: dict, guitar_code: Path) -> dict:
         """Classify unknown-original guitar count with four-score ExtraTrees."""
+        from guitar_count_model import load_model as load_guitar_count_model
+        from guitar_count_model import predict as predict_guitar_count
         extracted = self.guitar_scores(gated_guitar, beats_file, stereo, guitar_code)
         if extracted is None:
             return {"method": "rule_fallback", "reason": "stereo_scores_unavailable",
@@ -514,6 +518,7 @@ class Runner:
         extracted = self.guitar_scores(gated_guitar, beats_file, stereo, guitar_code)
         if extracted is None:
             return {"method": "rule_fallback", "reason": "stereo_scores_unavailable",
+                    "error": "stereo_scores_unavailable",
                     "two_guitars": bool(stereo.get("two_guitars")), "assigned_arm": self.alpha_arm,
                     "experiment_eligible": False}
         scores, split = extracted
@@ -536,6 +541,26 @@ class Runner:
         if "stem" in blocks:
             result["stem_scores"] = dict(zip(NAMES, blocks["stem"].tolist()))
         return result
+
+    def classify_alpha_with_fallback(self, gated_guitar: Path, beats_file: Path,
+                                     stereo: dict, guitar_code: Path, logits_file: Path,
+                                     roformer_file: Path, guitar_stem: Path) -> dict:
+        """Keep an alpha feature or model failure from failing the user's song."""
+        try:
+            self.stage("roformer_shared", [roformer_file], lambda: self.command(
+                "roformer_shared", [str(self.model_python),
+                    str(self.pipeline / "roformer_shared_feature.py"),
+                    str(self.audio), str(roformer_file),
+                    "--models-dir", str(self.args.bsroformer_models_dir),
+                    "--lib-dir", str(self.args.bsroformer_lib_dir)]),
+                       validate=lambda: valid_feature(roformer_file, 512))
+            return self.classify_alpha(gated_guitar, beats_file, stereo, guitar_code,
+                                       logits_file, roformer_file, guitar_stem)
+        except Exception as exc:
+            return {"method": "rule_fallback", "reason": "alpha_path_error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "assigned_arm": self.alpha_arm, "experiment_eligible": False,
+                    "two_guitars": bool(stereo.get("two_guitars"))}
 
     def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
                         transcribe_set: Callable[[tuple[str, ...], Path], None]
@@ -655,13 +680,10 @@ class Runner:
         def transcribe():
             transcribe_set(todo, jobs_file)
         if transcribe_stems:
-            transcribe_outputs = list(stem_midis.values())
-            if self.alpha_enabled and "guitar" in transcribe_stems:
-                transcribe_outputs.append(logits_file)
-            self.stage("muscriptor_batch", transcribe_outputs, transcribe,
-                       validate=lambda: (all(valid_midi(path) for path in stem_midis.values())
-                                         and (not self.alpha_enabled or "guitar" not in transcribe_stems
-                                              or valid_feature(logits_file, 2790))))
+            # Decoder logits are optional model features. A valid transcription
+            # must still complete when their capture fails; alpha falls back.
+            self.stage("muscriptor_batch", list(stem_midis.values()), transcribe,
+                       validate=lambda: all(valid_midi(path) for path in stem_midis.values()))
 
         # Rule 2: drop notes MuScriptor wrote from the residue of a resting stem,
         # and (original unknown only) treat a stem with very few notes as absent.
@@ -738,23 +760,18 @@ class Runner:
                 self.manifest["guitar_stereo"] = stereo
                 if self.guitar_count_classifier == "alpha_three_arm" and "corr" in stereo:
                     roformer_file = self.out / "roformer_shared.npz"
-                    self.stage("roformer_shared", [roformer_file], lambda: self.command(
-                        "roformer_shared", [str(self.model_python),
-                            str(self.pipeline / "roformer_shared_feature.py"),
-                            str(self.audio), str(roformer_file),
-                            "--models-dir", str(self.args.bsroformer_models_dir),
-                            "--lib-dir", str(self.args.bsroformer_lib_dir)]),
-                               validate=lambda: valid_feature(roformer_file, 512))
                     result_file = self.out / "guitar_count.json"
                     self.stage("guitar_count", [result_file], lambda: atomic_json(
-                        result_file, self.classify_alpha(gated_midis["guitar"], beats_file,
-                            stereo, guitar_code, logits_file, roformer_file,
-                            stems_dir / "guitar.wav")))
+                        result_file, self.classify_alpha_with_fallback(
+                            gated_midis["guitar"], beats_file, stereo, guitar_code,
+                            logits_file, roformer_file, stems_dir / "guitar.wav")))
                     result = json.loads(result_file.read_text(encoding="utf-8"))
                     self.manifest["guitar_count"] = result
-                    split = "always" if result["two_guitars"] else "never"
+                    split = ("always" if result["two_guitars"] else
+                             "auto" if result["method"] == "rule_fallback" else "never")
                 elif self.guitar_count_classifier == "alpha_three_arm":
                     result = {"method": "rule_fallback", "reason": "stereo_scores_unavailable",
+                              "error": "stereo_scores_unavailable",
                               "assigned_arm": self.alpha_arm, "experiment_eligible": False,
                               "two_guitars": bool(stereo.get("two_guitars"))}
                     atomic_json(self.out / "guitar_count.json", result)

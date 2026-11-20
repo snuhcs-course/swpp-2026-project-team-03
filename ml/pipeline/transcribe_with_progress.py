@@ -101,12 +101,27 @@ def main():
         if progress:
             progress.parent.mkdir(parents=True, exist_ok=True)
         progress_file = progress.open("a", buffering=1) if progress else None
+        moments = None
+        capture_error = None
         if logits_output:
-            from decoder_logits_feature import DecoderLogitsMoments
-            moments = DecoderLogitsMoments(model._model.card)
-        else:
-            moments = None
-        hook = model._model.linear.register_forward_hook(moments.hook) if moments else None
+            try:
+                from decoder_logits_feature import DecoderLogitsMoments
+                moments = DecoderLogitsMoments(model._model.card)
+            except Exception as exc:
+                capture_error = exc
+        def safe_hook(*hook_args):
+            nonlocal capture_error
+            if capture_error is None:
+                try:
+                    moments.hook(*hook_args)
+                except Exception as exc:
+                    capture_error = exc
+        hook = None
+        if moments is not None:
+            try:
+                hook = model._model.linear.register_forward_hook(safe_hook)
+            except Exception as exc:
+                capture_error = exc
         try:
             events = []
             started = time.perf_counter()
@@ -132,8 +147,14 @@ def main():
             midi = model.events_to_midi_bytes(iter(events), beat_grid=None, export=ExportOptions())
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(midi)
-            if moments is not None:
-                moments.save(logits_output)
+            if moments is not None and capture_error is None:
+                try:
+                    moments.save(logits_output)
+                except Exception as exc:
+                    capture_error = exc
+            if capture_error is not None:
+                print(f"Optional decoder feature unavailable: {type(capture_error).__name__}: {capture_error}",
+                      file=sys.stderr, flush=True)
             print(f"Saved MIDI to {output}", file=sys.stderr, flush=True)
         finally:
             if hook is not None:

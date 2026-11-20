@@ -11,8 +11,8 @@ frozen guitar-count models. Each returns **one** or **two** original guitars:
 | `fusion_rbf_svm` | RBF SVM | The same inputs |
 | `fusion_stem_extra_trees` | ExtraTrees | The same inputs plus four guitar-stem audio scores |
 
-The three `.joblib` files were fitted on the 103 accepted real development
-songs. Their transforms and classifier parameters are frozen in Git; a job
+The three `.joblib` files contain fitted transforms and classifier parameters;
+they are frozen in Git and a job
 does not fit or update them. The files contain fitted transforms and classifier
 state, not source audio, song metadata, or per-song labels. The RBF SVM's
 classifier state necessarily includes support vectors in transformed feature
@@ -34,15 +34,42 @@ model. Compare rating distribution and submission rate alongside completion,
 failure, and processing time. Keep the 1/3 assignment fixed during alpha.
 Selecting one alpha arm as the sole production model requires a reviewed
 code/configuration change; the ExtraTrees rollback is already bundled below.
-Do not use the previously examined 20-song test set to tune this decision or
-claim an independent result for a model chosen from it.
+Do not use independent evaluation material to tune this decision or claim an
+independent result for a model chosen from that material.
 
 Known original guitar counts bypass this selection. If stereo measurements
-are unavailable, the pipeline uses its prior rule and marks the model result
-ineligible. The command-line default is `alpha_three_arm`. It needs the Python
-packages in `requirements-alpha.txt` in the interpreter that runs `unified.py`.
+are unavailable, or an alpha feature/model step fails, the pipeline uses its
+prior stereo then skyline rule. `guitar_count.json` records `rule_fallback`,
+the error and `experiment_eligible: false`. The command-line default is
+`alpha_three_arm`.
 The app/server rating linkage is reviewed separately. Deploy the pipeline and
 server changes together before serving alpha users.
+
+## Deployment files and environment
+
+Copy these files together to `/data/pipeline` on each serving PVC:
+
+- `unified.py`, `guitar_count_model.py`, `guitar_count_alpha.py`,
+  `guitar_count_extra_trees_v1.json`, `guitar_count_alpha_models/`
+- `decoder_logits_feature.py`, `roformer_shared_feature.py`,
+  `stem_audio_features.py`, `transcribe_with_progress.py`, `rule_gates.py`
+
+Install `requirements-alpha.txt` into `/data/rocky-unified/.venv`, the Python
+environment that runs `unified.py`. First record the installed versions of
+numpy, scipy, scikit-learn, joblib and narwhals, and use a dry run to inspect
+the dependency changes. Install with dependencies enabled; `narwhals` is a
+required package. Check the model environment and a full pipeline smoke run
+before switching API Pods. The TAB subprocess uses its own environment.
+The deployment order is pipeline files and model packages on both PVCs,
+then PR #31's server version. PR merge alone does not update a PVC or Pod.
+
+The RoFormer summary currently requires a second model pass. Stem separation
+delegates to the upstream inference subprocess; changing it to capture a hook
+would change the feature extraction path used by these frozen artifacts.
+`manifest.json` records the extra pass in `stage_seconds.roformer_shared`.
+The isolated GPU smoke (`rocky-alpha-three-arm-smoke-20261120-v4`) recorded
+14.12 seconds for this second pass and 20.45 seconds for stem separation on
+its one input. These are stage timings for that run, not an estimate for all songs.
 
 ## Bundled rollback model
 

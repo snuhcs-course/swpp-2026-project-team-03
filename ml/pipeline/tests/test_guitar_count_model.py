@@ -47,7 +47,7 @@ def test_guitar_only_alignment_for_release_features(tmp_path, monkeypatch):
 
     monkeypatch.setitem(sys.modules, "align", SimpleNamespace(
         load_beats=lambda path: ([0.0, 0.5], [0.0]), align_midi=align))
-    monkeypatch.setattr(unified, "split_scores", lambda *unused: {
+    monkeypatch.setattr(guitar_count_model, "split_scores", lambda *unused: {
         "tuning": "standard", "onsets": 1, "unplayable": 0.02, "wide": 0.03})
     runner = unified.Runner.__new__(unified.Runner)
     runner.out = tmp_path

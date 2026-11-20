@@ -50,6 +50,22 @@ def test_alpha_assignment_survives_resume(tmp_path, monkeypatch):
     assert resumed.alpha_arm == first.alpha_arm
 
 
+def test_missing_alpha_model_directory_does_not_abort_before_rule_fallback(tmp_path):
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"fixture")
+    args = SimpleNamespace(audio=audio, output_dir=tmp_path / "out", original="unknown",
+                           requested="guitar1", model="large", midigpt_model="yellow_medium",
+                           device="cpu", beat_checkpoint="checkpoint", seed=0, resume=False,
+                           modules_root=tmp_path, model_python=Path(sys.executable),
+                           tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path,
+                           bsroformer_lib_dir=tmp_path,
+                           guitar_count_classifier="alpha_three_arm",
+                           alpha_models_dir=tmp_path / "missing-models")
+    runner = unified.Runner(args)
+    assert runner.alpha_arm in guitar_count_alpha.ARMS
+    assert runner.alpha_models_sha256 is None
+
+
 @pytest.mark.parametrize("arm", guitar_count_alpha.ARMS)
 def test_assigned_arm_alone_drives_guitar_count(tmp_path, monkeypatch, arm):
     directory = Path(guitar_count_alpha.__file__).parent / "guitar_count_alpha_models"
@@ -74,6 +90,31 @@ def test_assigned_arm_alone_drives_guitar_count(tmp_path, monkeypatch, arm):
     assert result["count"] == result["candidate_predictions"][arm]["count"]
     assert result["two_guitars"] is (result["count"] == 2)
     assert bool(stem_calls) is (arm == "fusion_stem_extra_trees")
+
+
+@pytest.mark.parametrize("failure", ["roformer", "model"])
+def test_alpha_failure_uses_rule_without_eligibility(tmp_path, failure):
+    runner = unified.Runner.__new__(unified.Runner)
+    runner.alpha_arm = guitar_count_alpha.ARMS[0]
+    runner.out = tmp_path
+    runner.audio = tmp_path / "song.wav"
+    runner.pipeline = tmp_path
+    runner.model_python = Path(sys.executable)
+    runner.args = SimpleNamespace(bsroformer_models_dir=tmp_path, bsroformer_lib_dir=tmp_path)
+    if failure == "roformer":
+        runner.stage = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("missing model"))
+    else:
+        runner.stage = lambda *args, **kwargs: None
+        runner.classify_alpha = lambda *args: (_ for _ in ()).throw(ValueError("invalid feature"))
+    result = runner.classify_alpha_with_fallback(
+        tmp_path / "guitar.mid", tmp_path / "beats.json",
+        {"corr": 0.1, "two_guitars": False}, tmp_path,
+        tmp_path / "logits.npz", tmp_path / "roformer.npz", tmp_path / "stem.wav")
+    assert result["method"] == "rule_fallback"
+    assert result["assigned_arm"] == runner.alpha_arm
+    assert result["experiment_eligible"] is False
+    assert result["two_guitars"] is False
+    assert "error" in result
 
 
 def test_tab_subprocess_uses_its_own_python_packages(tmp_path, monkeypatch):
