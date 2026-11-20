@@ -1,0 +1,13 @@
+# Persistent volume for the pipeline on SGS (model weights, input audio, outputs).
+# 20Gi of the workspace's 50Gi storage quota; cannot be resized after creation.
+# The team volume already exists. Apply this only to create it in a new
+# workspace; on an existing one Kubernetes rejects it as an immutable change.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: muscriptor-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
