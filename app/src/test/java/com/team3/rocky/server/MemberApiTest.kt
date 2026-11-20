@@ -49,9 +49,9 @@ class MemberApiTest {
     }
 
     @Test fun nonJsonErrorFallsBackToHttpCode() {
-        FakeHttp(mapOf("PATCH /me" to (500 to "oops".toByteArray()))).use { s ->
+        FakeHttp(mapOf("GET /me" to (500 to "oops".toByteArray()))).use { s ->
             try {
-                MemberApi(s.url, "", "t").patch("/me", JSONObject())
+                MemberApi(s.url, "", "t").get("/me")
                 fail("거절되어야 함")
             } catch (e: MemberApiException) {
                 assertEquals(500, e.code)

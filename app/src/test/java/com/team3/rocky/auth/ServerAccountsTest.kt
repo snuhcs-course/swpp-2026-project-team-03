@@ -34,19 +34,18 @@ class ServerAccountsTest {
         }
     }
 
+    // 데스크톱 JVM의 HttpURLConnection은 PATCH를 못 보내서 updateProfile은 에뮬레이터 테스트(ServerBandRepositoryTest)에서 본다.
     @Test fun duplicateEmailOrNicknameBecomesDuplicateException() {
-        FakeHttp(mapOf(
-            "POST /auth/signup" to json(409, """{"detail":"이미 가입된 이메일이에요","field":"email"}"""),
-            "PATCH /me" to json(409, """{"detail":"이미 사용 중인 닉네임이에요","field":"nickname"}"""),
-        )).use { s ->
-            val a = accounts(s)
+        FakeHttp(mapOf("POST /auth/signup" to json(409, """{"detail":"이미 가입된 이메일이에요","field":"email"}"""))).use { s ->
             try {
-                a.signUp("a@b.com", "12345678a", "가나", emptyList(), 0); fail()
+                accounts(s).signUp("a@b.com", "12345678a", "가나", emptyList(), 0); fail()
             } catch (e: UserDatabase.DuplicateException) {
                 assertEquals("email", e.column)
             }
+        }
+        FakeHttp(mapOf("POST /auth/signup" to json(409, """{"detail":"이미 사용 중인 닉네임이에요","field":"nickname"}"""))).use { s ->
             try {
-                a.updateProfile(Session(User(4, "a@b.com", "가나", emptyList(), AuthProvider.EMAIL, 0), "t"), "다라", emptyList()); fail()
+                accounts(s).signUp("a@b.com", "12345678a", "가나", emptyList(), 0); fail()
             } catch (e: UserDatabase.DuplicateException) {
                 assertEquals(UserDatabase.C_NICKNAME, e.column)
             }
@@ -70,18 +69,16 @@ class ServerAccountsTest {
         }
     }
 
-    @Test fun takenChecksAndProfileUpdate() {
+    @Test fun takenChecks() {
         FakeHttp(mapOf(
             "GET /auth/taken?email=a%40b.com" to json(200, """{"taken":true}"""),
             "GET /auth/taken?nickname=%EB%8B%A4%EB%9D%BC" to json(200, """{"taken":false}"""),
-            "PATCH /me" to json(200, userJson.replace("가나", "다라")),
         )).use { s ->
             val a = accounts(s)
             val me = Session(User(4, "a@b.com", "가나", emptyList(), AuthProvider.EMAIL, 0), "tok")
             assertTrue(a.emailTaken("a@b.com"))
             assertFalse(a.nicknameTaken("다라", me))
             assertEquals("Bearer tok", s.requests[1].headers["authorization"])
-            assertEquals("다라", a.updateProfile(me, "다라", listOf("bass")).nickname)
         }
     }
 
