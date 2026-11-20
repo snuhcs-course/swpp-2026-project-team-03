@@ -97,7 +97,11 @@ object ScoreStore {
     fun download(ctx: Context, server: ScoreServer, jobId: String, workId: Long): LocalScore {
         val result = server.result(jobId)
         val d = dir(ctx, workId).apply { mkdirs() }
-        for (path in files(result)) server.download(jobId, path, File(d, path))
+        for (path in files(result)) {
+            val dest = File(d, path)
+            require(dest.canonicalPath.startsWith(d.canonicalPath + File.separator)) { "잘못된 결과 경로" }
+            server.download(jobId, path, dest)
+        }
         // result.json은 마지막에 써서, 이 파일이 있으면 받기가 끝난 것으로 본다.
         File(d, RESULT).writeText(toJson(result))
         return LocalScore(d, result)

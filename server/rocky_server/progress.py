@@ -209,10 +209,17 @@ def result_files(run: Path) -> dict:
     }
 
 
+def inside_run(rel) -> bool:
+    """A result path that stays inside the run folder (no absolute path, no "..")."""
+    return isinstance(rel, str) and bool(rel) and not Path(rel).is_absolute() and ".." not in Path(rel).parts
+
+
 def allowed_paths(result: dict) -> set[str]:
+    """Files of a result that may be downloaded. score_outputs.json is written by our own pipeline,
+    but a path in it that points outside the run folder is never served."""
     paths = set()
     for entry in [result["full_band"], *result["instruments"].values()]:
         paths.update(entry[k] for k in ("pdf", "midi", "mp3", "measures") if entry.get(k))
     if result.get("measure_times"):
         paths.add(result["measure_times"])
-    return paths
+    return {path for path in paths if inside_run(path)}
