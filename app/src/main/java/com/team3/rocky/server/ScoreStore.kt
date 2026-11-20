@@ -32,6 +32,7 @@ class LocalScore(val dir: File, val result: JobResult, val semitones: Int = 0) {
     fun pdf(part: String?): File? = file(entry(part)?.pdf)
     fun midi(part: String?): File? = file(entry(part)?.midi)
     fun mp3(part: String?): File? = file(entry(part)?.mp3)
+    fun measures(part: String?): File? = file(entry(part)?.measures)
 
     /** 재생할 파일: MP3가 있으면 MP3, 없으면 MIDI (둘 다 악보로 합성한 소리, 원곡 아님). */
     fun audio(part: String?): File? = mp3(part) ?: midi(part)
@@ -85,11 +86,7 @@ object ScoreStore {
         val jobId = ApiJson.result(original.readText()).id
         val target = variantDir(root, semitones).apply { mkdirs() }
         val result = server.transpose(jobId, semitones)
-        val paths = buildSet {
-            for (p in listOf(result.fullBand) + result.instruments.values) {
-                add(p.pdf); p.midi?.let(::add); p.mp3?.let(::add)
-            }
-        }
+        val paths = files(result)
         for (path in paths) {
             val dest = File(target, path)
             require(dest.canonicalPath.startsWith(target.canonicalPath + File.separator)) { "잘못된 결과 경로" }
@@ -104,20 +101,23 @@ object ScoreStore {
     fun download(ctx: Context, server: ScoreServer, jobId: String, workId: Long): LocalScore {
         val result = server.result(jobId)
         val d = dir(ctx, workId).apply { mkdirs() }
-        val paths = buildSet {
-            for (p in listOf(result.fullBand) + result.instruments.values) {
-                add(p.pdf); p.midi?.let(::add); p.mp3?.let(::add)
-            }
-        }
-        for (path in paths) server.download(jobId, path, File(d, path))
+        for (path in files(result)) server.download(jobId, path, File(d, path))
         // result.json은 마지막에 써서, 이 파일이 있으면 받기가 끝난 것으로 본다.
         File(d, RESULT).writeText(toJson(result))
         return LocalScore(d, result)
     }
 
+    /** 결과에 들어 있는 받을 파일 (PDF, MIDI, MP3, 마디 위치). */
+    private fun files(result: JobResult): Set<String> = buildSet {
+        for (p in listOf(result.fullBand) + result.instruments.values) {
+            add(p.pdf); p.midi?.let(::add); p.mp3?.let(::add); p.measures?.let(::add)
+        }
+    }
+
     private fun toJson(r: JobResult): String {
         fun part(p: ScorePart) = org.json.JSONObject().put("pdf", p.pdf).put("midi", p.midi ?: org.json.JSONObject.NULL)
             .put("pages", p.pages ?: org.json.JSONObject.NULL).put("mp3", p.mp3 ?: org.json.JSONObject.NULL)
+            .put("measures", p.measures ?: org.json.JSONObject.NULL)
         val inst = org.json.JSONObject()
         r.instruments.forEach { (k, v) -> inst.put(k, part(v)) }
         return org.json.JSONObject()

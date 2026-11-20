@@ -179,15 +179,23 @@ def result_files(run: Path) -> dict:
         mp3 = present((part_audio.get(part) or {}).get("mp3"))
         if mp3:
             entry["mp3"] = mp3
+        measures = present(info.get("measures"))
+        if measures:  # where each measure is printed (publish_scores.py write_measures)
+            entry["measures"] = measures
         parts[part] = entry
     full = {"pdf": contract["full_band"]["pdf"], "pages": contract["full_band"].get("pages"),
             "midi": contract.get("full_score_midi", "full_score.mid")}
     band_mp3 = present((audio.get("full_band") or {}).get("mp3"))
     if band_mp3:
         full["mp3"] = band_mp3
+    full_measures = present(contract["full_band"].get("measures"))
+    if full_measures:
+        full["measures"] = full_measures
     return {
         "full_band": full,
         "instruments": parts,
+        # when each measure starts in the uploaded recording (null for runs from before 2026-11-20)
+        "measure_times": present(contract.get("measure_times")),
         "original_parts": manifest.get("original_parts", []),
         "generated_parts": manifest.get("generated_targets", []),
         # how many guitars the pipeline heard in the song (null when it could not tell)
@@ -204,5 +212,7 @@ def result_files(run: Path) -> dict:
 def allowed_paths(result: dict) -> set[str]:
     paths = set()
     for entry in [result["full_band"], *result["instruments"].values()]:
-        paths.update(entry[k] for k in ("pdf", "midi", "mp3") if entry.get(k))
+        paths.update(entry[k] for k in ("pdf", "midi", "mp3", "measures") if entry.get(k))
+    if result.get("measure_times"):
+        paths.add(result["measure_times"])
     return paths

@@ -232,7 +232,8 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         # Only files listed in the result can be downloaded (no other paths on the volume).
         if rel not in allowed_paths(result_files(run)):
             raise HTTPException(404, "not a result file")
-        media = {"pdf": "application/pdf", "mp3": "audio/mpeg"}.get(rel.rsplit(".", 1)[-1], "audio/midi")
+        media = {"pdf": "application/pdf", "mp3": "audio/mpeg", "json": "application/json"}.get(
+            rel.rsplit(".", 1)[-1], "audio/midi")
         return FileResponse(run / rel, media_type=media, filename=Path(rel).name)
 
     def transposed_run(job_id: str, semitones: int) -> Path:
@@ -332,7 +333,8 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         result = transposed_result(job_id, semitones)
         if rel not in allowed_paths(result):
             raise HTTPException(404, "not a result file")
-        media = {"pdf": "application/pdf", "mp3": "audio/mpeg"}.get(rel.rsplit(".", 1)[-1], "audio/midi")
+        media = {"pdf": "application/pdf", "mp3": "audio/mpeg", "json": "application/json"}.get(
+            rel.rsplit(".", 1)[-1], "audio/midi")
         return FileResponse(run / rel, media_type=media, filename=Path(rel).name)
 
     # ---- members ----

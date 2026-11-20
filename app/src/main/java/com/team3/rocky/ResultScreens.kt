@@ -105,6 +105,7 @@ import com.team3.rocky.server.RockyApi
 import com.team3.rocky.score.MeasureBox
 import com.team3.rocky.score.MeasureClock
 import com.team3.rocky.score.MeasureLayout
+import com.team3.rocky.score.PrintedMeasures
 import com.team3.rocky.score.ScoreLayout
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
@@ -231,10 +232,14 @@ fun ResultScreen(
         // 키를 바꾸면 local이 새 결과로 바뀐다. 이번에 그릴 결과를 하나로 정해 둔다.
         val currentScore = local
         // 빈 여백을 잘라낸 그림으로 마디도 찾아서, 칠하는 위치와 그림이 맞게 한다.
-        val bitmaps = withContext(Dispatchers.IO) {
+        val rendered = withContext(Dispatchers.IO) {
             currentScore?.pdf(serverPart(scoreBase))
                 ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
-                .orEmpty().map { trimMargins(it) }
+                .orEmpty()
+        }
+        val crops = rendered.map { marginCrop(it) }
+        val bitmaps = rendered.zip(crops).map { (b, c) ->
+            if (c == null) b else android.graphics.Bitmap.createBitmap(b, c.left, c.top, c.width(), c.height())
         }
         pages = bitmaps.map { it.asImageBitmap() }
         // 악보를 먼저 보여 주고, 마디 위치는 그 뒤에 찾는다 (페이지가 많으면 1–2초 걸린다).
@@ -244,6 +249,16 @@ fun ResultScreen(
         }
         clock = c
         if (c == null) return@LaunchedEffect
+        // 서버가 적어 둔 마디 위치가 있으면 그대로 쓴다. 악보와 MIDI는 둘 다 0번 박에서 시작하므로
+        // 마디 수가 같거나, 악보 끝에 빈 마디가 하나 더 있을 때만 믿는다. 다르면 그림에서 찾는다.
+        val printed = withContext(Dispatchers.IO) {
+            currentScore?.measures(serverPart(scoreBase))?.let { f -> runCatching { PrintedMeasures.parse(f.readText()) }.getOrNull() }
+        }?.takeIf { it.count == c.count || it.count == c.count + 1 }
+        if (printed != null) {
+            measures = printed.layout(rendered.map { it.width }, crops.map { (it?.left ?: 0) to (it?.top ?: 0) })
+                .takeIf { it.count > 0 }
+            if (measures != null) return@LaunchedEffect
+        }
         measures = withContext(Dispatchers.Default) {
             runCatching {
                 MeasureLayout.build(bitmaps.map { b ->
@@ -794,13 +809,14 @@ private fun Modifier.bleed(side: androidx.compose.ui.unit.Dp): Modifier = layout
 }
 
 /**
- * 악보 그림의 위아래·양옆 빈 여백을 잘라낸다 (흰색이거나 투명한 칸은 여백으로 본다).
+ * 악보 그림의 위아래·양옆 빈 여백을 잘라낼 범위 (흰색이거나 투명한 칸은 여백으로 본다). null이면 자르지 않는다.
  * 여백이 크면 악보가 작고 휑해 보여서, 글자·음표가 있는 곳 둘레에 조금만 남긴다.
+ * 잘라낸 만큼 서버의 마디 위치([PrintedMeasures])를 옮겨야 해서 범위를 돌려준다.
  */
-internal fun trimMargins(src: android.graphics.Bitmap, pad: Int = 24): android.graphics.Bitmap {
+internal fun marginCrop(src: android.graphics.Bitmap, pad: Int = 24): android.graphics.Rect? {
     val w = src.width
     val h = src.height
-    if (w < 4 || h < 4) return src
+    if (w < 4 || h < 4) return null
     val px = IntArray(w * h)
     src.getPixels(px, 0, w, 0, 0, w, h)
     var left = w; var right = -1; var topY = h; var bottom = -1
@@ -818,12 +834,12 @@ internal fun trimMargins(src: android.graphics.Bitmap, pad: Int = 24): android.g
             if (y > bottom) bottom = y
         }
     }
-    if (right < 0) return src
+    if (right < 0) return null
     val l = (left - pad).coerceAtLeast(0)
     val t = (topY - pad).coerceAtLeast(0)
     val r = (right + pad).coerceAtMost(w - 1)
     val b = (bottom + pad).coerceAtMost(h - 1)
-    return android.graphics.Bitmap.createBitmap(src, l, t, r - l + 1, b - t + 1)
+    return android.graphics.Rect(l, t, r + 1, b + 1)
 }
 
 /** 네 모서리 꺾쇠. [exit]면 안쪽을 향한다. */
