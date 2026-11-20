@@ -29,6 +29,12 @@ import pretty_midi
 # Map them only in notation inputs; full_score.mid remains untouched.
 DRUM_NOTATION_MAP = {39: 38, 70: 54, 82: 44}  # clap->snare, maracas->tambourine, shaker->pedal hi-hat
 GP5_PDF_CONVERTER = "gp5-alphatab"
+# Where each measure is printed, for the app to highlight while it plays (scores/<key>.measures.json).
+# MuseScore 3 writes measure boxes to .mpos at 3600 units per inch (50 per PDF point; checked against
+# the printed barlines). convert.js lays an invisible link over every alphaTab measure instead, and
+# Chrome stores each link in the PDF with its page and rectangle.
+MPOS_UNITS_PER_PT = 50.0
+MEASURE_LINK = b"https://measure.rocky.invalid/"
 
 
 def score_part_name(track: pretty_midi.Instrument, guitar_number: int = 0) -> tuple[str, str]:
@@ -174,6 +180,109 @@ def pdf_pages(path: Path, pdfinfo: str) -> int:
     if not match or int(match.group(1)) < 1:
         raise ValueError(f"PDF has no readable pages: {path}")
     return int(match.group(1))
+
+
+def pdf_page_sizes(path: Path, pdfinfo: str, pages: int) -> list[list[float]]:
+    result = subprocess.run([pdfinfo, "-f", "1", "-l", str(pages), str(path)],
+                            capture_output=True, text=True, check=True)
+    sizes = [[float(w), float(h)] for w, h in
+             re.findall(r"^Page\s+\d+\s+size:\s*([\d.]+) x ([\d.]+) pts", result.stdout, re.MULTILINE)]
+    if len(sizes) != pages:
+        raise ValueError(f"pdfinfo listed {len(sizes)} page sizes for {pages} pages: {path}")
+    return sizes
+
+
+def mpos_measures(mpos: Path) -> list[list[list[float]]]:
+    """MuseScore measure positions: [[page, x, y, width, height]] per measure, in PDF points from the
+    page's top left. Each box spans every staff of its system."""
+    elements = sorted(ET.parse(mpos).getroot().iter("element"), key=lambda e: int(e.get("id")))
+    return [[[int(e.get("page")), *(round(float(e.get(k)) / MPOS_UNITS_PER_PT, 2)
+                                     for k in ("x", "y", "sx", "sy"))]] for e in elements]
+
+
+_PDF_OBJECT = re.compile(rb"(?<![0-9])(\d+) 0 obj\b(.*?)\bendobj", re.S)
+_PDF_REFS = rb"\[((?:\s*\d+ 0 R)*)\s*\]"
+
+
+def link_measures(pdf: Path, strip: bool = True) -> tuple[list[list[list[float]]], list[list[float]]]:
+    """Measure boxes from the links convert.js lays over every alphaTab measure.
+
+    Chrome (Skia) writes pages and link annotations as plain dictionaries, so a few patterns are enough.
+    The link URIs end in <track>/<measure>; a PDF with two tracks gives two boxes per measure.
+    With strip, the page /Annots entries are blanked (same length, so the cross-reference table stays
+    valid) so the links are not clickable in a PDF viewer. Returns ([], []) when there are no links."""
+    data = pdf.read_bytes()
+    if MEASURE_LINK not in data:
+        return [], []
+    objects = {int(m.group(1)): m.group(2) for m in _PDF_OBJECT.finditer(data)}
+
+    def refs(body: bytes, key: bytes) -> list[int]:
+        found = re.search(rb"/" + key + rb"\s*" + _PDF_REFS, body)
+        return [int(n) for n in re.findall(rb"(\d+) 0 R", found.group(1))] if found else []
+
+    def numbers(body: bytes, key: bytes) -> list[float]:
+        found = re.search(rb"/" + key + rb"\s*\[([^\]]*)\]", body)
+        return [float(v) for v in found.group(1).split()] if found else []
+
+    catalog = next(body for body in objects.values() if re.search(rb"/Type\s*/Catalog\b", body))
+    pages: list[int] = []
+    def walk(number: int) -> None:
+        body = objects[number]
+        if re.search(rb"/Type\s*/Pages\b", body):
+            for kid in refs(body, b"Kids"):
+                walk(kid)
+        else:
+            pages.append(number)
+    walk(int(re.search(rb"/Pages\s+(\d+) 0 R", catalog).group(1)))
+
+    sizes, boxes = [], {}
+    for page_index, number in enumerate(pages):
+        x0, y0, x1, y1 = numbers(objects[number], b"MediaBox")
+        sizes.append([round(x1 - x0, 2), round(y1 - y0, 2)])
+        for annot in refs(objects[number], b"Annots"):
+            uri = re.search(rb"/URI\s*\(([^)]*)\)", objects[annot])
+            if not uri or not uri.group(1).startswith(MEASURE_LINK):
+                continue
+            track, measure = (int(v) for v in uri.group(1)[len(MEASURE_LINK):].split(b"/"))
+            left, bottom, right, top = numbers(objects[annot], b"Rect")
+            boxes.setdefault(measure, []).append((track, [page_index, round(left - x0, 2), round(y1 - top, 2),
+                                                          round(right - left, 2), round(top - bottom, 2)]))
+    if sorted(boxes) != list(range(len(boxes))):
+        raise ValueError(f"measure links skip a measure: {pdf}")
+    if strip:
+        blank = lambda m: b" " * len(m.group(0))
+        pdf.write_bytes(re.sub(rb"/Annots\s*" + _PDF_REFS, blank, data))
+    return [[box for _, box in sorted(boxes[m])] for m in range(len(boxes))], sizes
+
+
+def has_measures(layout: Path) -> bool:
+    try:
+        return bool(json.loads(layout.read_text(encoding="utf-8")).get("measures"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def measure_times(alignment: dict, measures: int) -> list[float]:
+    """When each score measure starts in the original recording (s), from the beats align.py used:
+    original beat i was placed at score beat i + beat_offset, so measure m starts at original beat
+    m * beats_per_bar - beat_offset. Beats past either end continue at beat_period."""
+    beats = [float(t) for t in alignment.get("beat_times") or []]
+    per_bar = int(alignment.get("beats_per_bar") or 0)
+    if len(beats) < 2 or per_bar < 1 or measures < 1:
+        return []
+    offset = int(alignment.get("beat_offset") or 0)
+    period = float(alignment.get("beat_period") or 0) or (beats[-1] - beats[0]) / (len(beats) - 1)
+    times = []
+    for m in range(measures):
+        index = m * per_bar - offset
+        if index < 0:
+            t = beats[0] + index * period
+        elif index >= len(beats):
+            t = beats[-1] + (index - (len(beats) - 1)) * period
+        else:
+            t = beats[index]
+        times.append(round(t, 4))
+    return times
 
 
 def check_mp3(path: Path) -> None:
@@ -344,16 +453,47 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
 
     def render_pdf(key: str, source: Path, converter: str, command: list[str], tracks: list[dict]) -> None:
         target = out / f"{key}.pdf"
+        layout = out / f"{key}.measures.json"
         prior = previous.get("full_band", {}) if key == "full_band" else previous.get("instruments", {}).get(key, {})
-        if force or prior.get("converter") != converter or not unchanged(target, source, prior):
+        # A TAB PDF from before measure links cannot be read for measure positions: draw it again.
+        rendered = (force or prior.get("converter") != converter or not unchanged(target, source, prior)
+                    or (converter == GP5_PDF_CONVERTER and not layout.is_file()))
+        if rendered:
             target.unlink(missing_ok=True)
             subprocess.run(command, check=True)
         pages = pdf_pages(target, pdfinfo)
+        if rendered or not layout.is_file():
+            write_measures(key, source, converter, target, layout, pages)
         outputs[key] = {"pdf": target.relative_to(run).as_posix(),
                         "source": source.relative_to(run).as_posix(),
                         "source_sha256": sha256(source), "converter": converter,
                         "tracks": tracks, "pages": pages, "bytes": target.stat().st_size,
                         "sha256": sha256(target)}
+        if has_measures(layout):  # an empty file only records that reading positions failed
+            outputs[key]["measures"] = layout.relative_to(run).as_posix()
+
+    def write_measures(key: str, source: Path, converter: str, target: Path, layout: Path, pages: int) -> None:
+        """scores/<key>.measures.json: where each measure is printed. Optional: the app falls back to
+        reading barlines from the page image, so any failure here is only logged and never fails the
+        PDF stage. The file is written even then (with no measures), so a later publish of the same
+        PDF does not run MuseScore or redraw the TAB again just to fail the same way."""
+        boxes, sizes, error = [], [], None
+        mpos = out / f"{key}.mpos"
+        try:
+            if converter == GP5_PDF_CONVERTER:
+                boxes, sizes = link_measures(target)
+            else:
+                subprocess.run([musescore, "-o", str(mpos), str(source)], check=True)
+                boxes, sizes = mpos_measures(mpos), pdf_page_sizes(target, pdfinfo, pages)
+        except Exception as exc:  # optional output: see above
+            boxes, sizes, error = [], [], f"{type(exc).__name__}: {exc}"
+            print(f"measure positions for {key} skipped: {error}", flush=True)
+        finally:
+            mpos.unlink(missing_ok=True)
+        if not boxes and error is None:
+            error = "no measure positions found"
+        write_json(layout, {"version": 1, "unit": "pt", "origin": "top-left", "pages": sizes,
+                            "measures": boxes, **({"error": error} if error else {})})
 
     def render_audio(key: str, source: Path, tracks: list[dict]) -> None:
         def task() -> None:
@@ -503,6 +643,14 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                 "audio": {"full_band": audio_outputs["band"],
                           "instruments": {part: audio_outputs[part] for part in ("guitar", "bass", "piano", "drums", *extra_keys)
                                           if part in audio_outputs}}}
+    # When each measure starts in the original recording, for following the uploaded song.
+    starts = measure_times(manifest.get("alignment") or {}, int(len(score.get_downbeats())) + 1)
+    times_path = out / "measure_times.json"
+    if starts:
+        write_json(times_path, {"version": 1, "unit": "s", "starts": starts})
+        contract["measure_times"] = times_path.relative_to(run).as_posix()
+    else:
+        times_path.unlink(missing_ok=True)
     contract_path = out / "score_outputs.json"
     write_json(contract_path, contract)
     manifest["score_outputs"] = contract_path.relative_to(run).as_posix()
