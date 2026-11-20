@@ -104,7 +104,7 @@ class ScoreJob(
 
     /** 완성되면 결과 화면에서 쓰는 작업 정보 (id가 같아서 저장 여부·서버 결과 파일을 맞출 수 있다). */
     fun toWork() = Work(
-        id = id, title = title, instruments = if (oneGuitarOnly) lineup - Demo.GUITAR2 else lineup,
+        id = id, title = title, instruments = ScoreJobs.savedInstruments(lineup, oneGuitarOnly),
         date = SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.KOREA).format(Date(id)),
         original = original,
         unrecognized = unrecognized,
@@ -254,7 +254,7 @@ object ScoreJobs {
         val faint = Demo.faintParts(job.lineup, job.claimed, local.result.faintParts)
             .filter { it !in local.result.generatedParts }
         job.unrecognized = faint
-        job.oneGuitarOnly = local.oneGuitarOnly && Demo.GUITAR2 in job.lineup
+        job.oneGuitarOnly = oneGuitarOnly(job.lineup, local.result)
         // ⚠️ 파트는 AI가 만든 것이 아니라 원곡에서 옮긴 파트이므로 ✨ 대상에서 뺀다.
         job.original = Demo.ordered(
             originalFromServer(job.lineup, local.result.originalParts, local.result.generatedParts) + faint,
@@ -436,6 +436,17 @@ object ScoreJobs {
         jobs.clear()
         stopped = null
     }
+
+    /**
+     * 기타 2대를 골랐는데 원곡에 기타가 없어서 파이프라인이 기타를 1대만 만들었는지
+     * (서버 결과 guitars_delivered = 1). 그러면 결과 화면에 안내를 띄우고 기타 1대 곡으로 저장한다.
+     */
+    fun oneGuitarOnly(lineup: List<String>, result: com.team3.rocky.server.JobResult): Boolean =
+        result.guitarsDelivered == 1 && Demo.GUITAR2 in lineup
+
+    /** 보관함에 저장할 악기들. 기타를 1대만 만들었으면 기타 2 칸을 뺀다. */
+    fun savedInstruments(lineup: List<String>, oneGuitarOnly: Boolean): List<String> =
+        if (oneGuitarOnly) lineup - Demo.GUITAR2 else lineup
 
     /** 앱의 파트 이름 → 서버(unified.py --requested)의 악기 이름. 기타 2대도 guitar 하나로 보낸다. */
     fun requestedParts(parts: List<String>): List<String> =

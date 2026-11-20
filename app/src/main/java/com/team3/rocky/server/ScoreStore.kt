@@ -114,7 +114,8 @@ object ScoreStore {
         }
     }
 
-    private fun toJson(r: JobResult): String {
+    /** 폰에 저장하는 result.json. [ApiJson.result]로 다시 읽는다. */
+    internal fun toJson(r: JobResult): String {
         fun part(p: ScorePart) = org.json.JSONObject().put("pdf", p.pdf).put("midi", p.midi ?: org.json.JSONObject.NULL)
             .put("pages", p.pages ?: org.json.JSONObject.NULL).put("mp3", p.mp3 ?: org.json.JSONObject.NULL)
             .put("measures", p.measures ?: org.json.JSONObject.NULL)
