@@ -24,6 +24,26 @@ def pod_file(name):
     return state / f"{name}.json"
 
 
+def process_alive(pid):
+    if os.name == "nt":
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        try:
+            return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
 if args[:3] == ["create", "-f", "-"]:
     refusals = state / "quota_refusals"
     left = int(refusals.read_text()) if refusals.exists() else int(os.environ.get("FAKE_KUBE_QUOTA_REFUSALS", "0"))
@@ -57,7 +77,14 @@ elif args[:2] == ["get", "pod"]:
     # A different fake_kubectl process handles every request, so it cannot waitpid() on
     # the child started by `create`. The fake pipeline leaves a portable exit marker.
     exit_file = state / f"{args[2]}.exit"
-    phase = ("Succeeded" if exit_file.read_text() == "0" else "Failed") if exit_file.exists() else "Running"
+    if exit_file.exists():
+        phase = "Succeeded" if exit_file.read_text() == "0" else "Failed"
+    else:
+        if process_alive(pod["_pid"]):
+            phase = "Running"
+        else:
+            # The process may have written the marker between the first check and now.
+            phase = ("Succeeded" if exit_file.read_text() == "0" else "Failed") if exit_file.exists() else "Failed"
     pod["status"] = {"phase": phase, "conditions": []}
     print(json.dumps(pod))
 elif args[:1] == ["logs"]:

@@ -35,6 +35,8 @@ def model_assignment(run: Path, *, completed_only: bool = False) -> dict:
     config = manifest.get("config")
     if not isinstance(config, dict):
         return empty
+    if config.get("requested_guitars") == 0:
+        return empty
     result = manifest.get("guitar_count")
     classifier = config.get("guitar_count_classifier")
     if classifier == "alpha_three_arm":
@@ -71,6 +73,8 @@ def model_assignment(run: Path, *, completed_only: bool = False) -> dict:
             return {**record, "applied_model": result["method"], "model_sha256": model_hash,
                     "predicted_guitars": count}
         return record
+    if classifier == "rule":
+        return {**empty, "assigned_model": "rule", "applied_model": "rule"}
     return empty
 
 

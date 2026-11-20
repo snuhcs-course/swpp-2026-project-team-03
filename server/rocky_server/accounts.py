@@ -176,8 +176,7 @@ CREATE TABLE IF NOT EXISTS experiment_jobs (
     model_manifest_sha256 TEXT,
     assignment_probability REAL,
     predicted_guitars INTEGER,
-    experiment_eligible INTEGER,
-    deleted_at REAL
+    experiment_eligible INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_experiment_jobs_model ON experiment_jobs(assigned_model, state);
 """
@@ -482,7 +481,7 @@ class Accounts:
 
     # ---------- ratings ----------
 
-    def record_experiment_job(self, job, model: dict | None = None, *, deleted_at: float | None = None) -> None:
+    def record_experiment_job(self, job, model: dict | None = None) -> None:
         """Persist every job outcome so unrated and failed jobs remain in the alpha denominator."""
         model = model or {}
         duration = (round(max(0.0, job.finished_at - job.started_at), 3)
@@ -493,29 +492,36 @@ class Accounts:
                        job_id, state, created_at, started_at, finished_at, processing_seconds,
                        failure_code, rejection_reason, assigned_model, applied_model, model_sha256,
                        model_manifest_sha256, assignment_probability, predicted_guitars,
-                       experiment_eligible, deleted_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       experiment_eligible)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(job_id) DO UPDATE SET
                        state = excluded.state, started_at = excluded.started_at,
                        finished_at = excluded.finished_at, processing_seconds = excluded.processing_seconds,
                        failure_code = excluded.failure_code, rejection_reason = excluded.rejection_reason,
-                       assigned_model = COALESCE(experiment_jobs.assigned_model, excluded.assigned_model),
-                       applied_model = COALESCE(excluded.applied_model, experiment_jobs.applied_model),
-                       model_sha256 = COALESCE(excluded.model_sha256, experiment_jobs.model_sha256),
-                       model_manifest_sha256 = COALESCE(excluded.model_manifest_sha256,
-                                                        experiment_jobs.model_manifest_sha256),
-                       assignment_probability = COALESCE(excluded.assignment_probability,
-                                                         experiment_jobs.assignment_probability),
-                       predicted_guitars = COALESCE(excluded.predicted_guitars,
-                                                    experiment_jobs.predicted_guitars),
-                       experiment_eligible = COALESCE(excluded.experiment_eligible,
-                                                      experiment_jobs.experiment_eligible),
-                       deleted_at = COALESCE(experiment_jobs.deleted_at, excluded.deleted_at)""",
+                       assigned_model = COALESCE(excluded.assigned_model, experiment_jobs.assigned_model),
+                       applied_model = CASE WHEN excluded.assigned_model IS NOT NULL
+                                            THEN excluded.applied_model ELSE experiment_jobs.applied_model END,
+                       model_sha256 = CASE WHEN excluded.assigned_model IS NOT NULL
+                                           THEN excluded.model_sha256 ELSE experiment_jobs.model_sha256 END,
+                       model_manifest_sha256 = CASE WHEN excluded.assigned_model IS NOT NULL
+                                                    THEN excluded.model_manifest_sha256 ELSE experiment_jobs.model_manifest_sha256 END,
+                       assignment_probability = CASE WHEN excluded.assigned_model IS NOT NULL
+                                                     THEN excluded.assignment_probability ELSE experiment_jobs.assignment_probability END,
+                       predicted_guitars = CASE WHEN excluded.assigned_model IS NOT NULL
+                                                THEN excluded.predicted_guitars ELSE experiment_jobs.predicted_guitars END,
+                       experiment_eligible = CASE WHEN excluded.assigned_model IS NOT NULL
+                                                  THEN excluded.experiment_eligible ELSE experiment_jobs.experiment_eligible END""",
                 (job.id, job.state, job.created_at, job.started_at, job.finished_at, duration,
                  job.error_code, job.reason, model.get("assigned_model"), model.get("applied_model"),
                  model.get("model_sha256"), model.get("model_manifest_sha256"),
                  model.get("assignment_probability"), model.get("predicted_guitars"),
-                 model.get("experiment_eligible"), deleted_at))
+                 model.get("experiment_eligible")))
+
+    def delete_experiment_job(self, job_id: str) -> None:
+        """Delete per-song analysis and ratings when the song is deleted (NFR-07)."""
+        with self.lock, self._tx():
+            self.db.execute("DELETE FROM experiment_jobs WHERE job_id = ?", (job_id,))
+            self.db.execute("DELETE FROM ratings WHERE job_id = ?", (job_id,))
 
     def rate(self, job_id: str, stars, rater: User | None, title: str = "", instruments=(),
              comment=None, *, model: dict | None = None) -> dict:

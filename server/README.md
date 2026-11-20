@@ -42,13 +42,14 @@ namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
 | `GET` | `/jobs/{id}/transpositions/{semitones}/files/{path}` | Download a PDF, MIDI or MP3 from that offset. |
 | `DELETE` | `/jobs/{id}` | Deletes the job record, upload, run folder, result files and key changes → `{"id", "deleted", "pending"}`. A queued song is removed at once. A running song is cancelled the same way as `POST /jobs/{id}/cancel` and removed when its Pod has stopped (`pending: true`). A job shared to a band is not deleted (`409`), because band members open it from the server. |
 | `PUT` | `/jobs/{id}/rating` | Save or change a 1–5 star rating and an optional comment. For a completed score, the server copies its assigned guitar-count model from the pipeline manifest into the rating row; the client cannot specify a model. |
-| `GET` | `/ratings` | List ratings with `job_id`, `stars`, `comment`, `assigned_model`, `applied_model`, `model_sha256`, `assignment_probability`, and `predicted_guitars`. These fields stay in SQLite after the score files are deleted. A null model means no verified model attribution. A `rule_fallback` applied model means the assigned arm was not used for that score. |
+| `GET` | `/ratings` | List ratings with `job_id`, `stars`, `comment`, `assigned_model`, `applied_model`, `model_sha256`, `assignment_probability`, and `predicted_guitars`. Deleting the song removes its ratings. A null model means no verified model attribution. A `rule_fallback` applied model means the assigned arm was not used for that score. |
 
 `rocky.db` also keeps one `experiment_jobs` row per job, including jobs without a rating.
 The row records the assigned and applied model, version hashes, probability, state,
-failure code, start/finish times, and `processing_seconds` (worker start to terminal state;
-queue time is excluded). Deleting score files marks `deleted_at` but retains this
-minimal analysis row. Join `experiment_jobs` to `ratings` by `job_id`; count distinct
+failure code, start/finish times, and `processing_seconds` (latest worker attempt
+from claim to terminal state; queue and API downtime after a restart are excluded).
+Deleting a song also removes its analysis row and ratings under NFR-07.
+Join `experiment_jobs` to `ratings` by `job_id`; count distinct
 rated jobs for the submission rate because several members may rate one score.
 For the three-arm comparison, filter to the three alpha arm names and distinguish
 `applied_model = assigned_model` from `rule_fallback`. The assignment probabilities
@@ -58,12 +59,16 @@ choose one of the three arms or roll back to the bundled four-score ExtraTrees
 model. Compare rating distribution and submission rate alongside completion,
 failure, and processing time. A single-arm choice needs a reviewed deployment
 change, while the ExtraTrees rollback already has an explicit classifier option.
-Do not tune this decision on the previously examined 20-song test set.
+Do not tune this decision on independent evaluation material.
 The API starts new jobs with `alpha_three_arm` by default. Deploy the matching
 three-arm pipeline and its Python dependencies before deploying this server code;
 no separate activation setting is needed. For new jobs, set
 `ROCKY_GUITAR_COUNT_CLASSIFIER=extra_trees` or `rule` to roll back. The server
-passes that choice explicitly to the GPU pipeline. The assigned arm is written by the GPU
+passes an override explicitly to the GPU pipeline; the default relies on the
+pipeline's own `alpha_three_arm` default. Validate
+`ROCKY_GUITAR_COUNT_CLASSIFIER` at API startup. A custom `ROCKY_MIDI_CMD`
+must include `{guitar_count}` to support an explicit rollback override.
+The assigned arm is written by the GPU
 pipeline into each job's manifest, then copied into `experiment_jobs`.
 
 Key changes run in a CPU Pod. `transpose_scores.py` shifts pitched MIDI notes and

@@ -63,7 +63,8 @@ class JobStore:
             d.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
         self.on_save: Callable[[Job], None] | None = None
-        self.on_purge: Callable[[Job], None] | None = None
+        self.on_purge: Callable[[str], None] | None = None
+        self._recorded_state: dict[str, tuple] = {}
 
     def path(self, job_id: str) -> Path:
         return self.root / f"{job_id}.json"
@@ -78,9 +79,13 @@ class JobStore:
         tmp = self.path(job.id).with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(job), ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path(job.id))
-        if self.on_save is not None:
+        # Progress-note updates are frequent; the analysis ledger only needs
+        # lifecycle changes. Avoid manifest reads and SQLite writes on each note.
+        state = (job.state, job.started_at, job.finished_at, job.error_code, job.reason)
+        if self.on_save is not None and self._recorded_state.get(job.id) != state:
             try:
                 self.on_save(job)
+                self._recorded_state[job.id] = state
             except Exception:
                 logging.exception("Could not record experiment state for job %s", job.id)
 
@@ -105,7 +110,7 @@ class JobStore:
         self.save(job)
         return job
 
-    # ---- delete (NFR-07): the user removed the song, so the server keeps nothing of it ----
+    # ---- delete (NFR-07): remove the song and its experiment row ----
 
     def tombstone(self, job_id: str) -> Path:
         """Marks a job the user deleted while it was still running; it is purged when it stops."""
@@ -116,17 +121,14 @@ class JobStore:
 
     def purge(self, job_id: str) -> None:
         """Remove the record, log, upload, run folder (results and key changes) and the mark."""
-        job = self.get(job_id)
-        if job is not None and self.on_purge is not None:
-            try:
-                self.on_purge(job)
-            except Exception:
-                logging.exception("Could not record experiment deletion for job %s", job_id)
+        if self.on_purge is not None:
+            self.on_purge(job_id)
         shutil.rmtree(self.run_dir(job_id), ignore_errors=True)
         for f in self.inputs.glob(f"{job_id}.*"):
             f.unlink(missing_ok=True)
         for f in (self.log(job_id), self.path(job_id), self.tombstone(job_id)):
             f.unlink(missing_ok=True)
+        self._recorded_state.pop(job_id, None)
 
     def update(self, job: Job, **changes) -> Job:
         with self.lock:
@@ -178,7 +180,9 @@ class Worker:
                 self.store.purge(job.id)
                 continue
             if job.state in ("running", "publishing"):
-                self.store.update(job, state="queued")
+                # A restarted attempt starts its own timer when claimed; do not
+                # count API downtime or the new queue wait as processing time.
+                self.store.update(job, state="queued", started_at=None, finished_at=None)
             elif job.state == "cancelling":
                 # The request was already persisted. Never restart its pipeline.
                 self.store.update(job, state="cancelled", finished_at=time.time())

@@ -44,7 +44,7 @@ def test_solo_practice_passes_personal_to_unified():
 
 def test_three_arm_is_default_and_rule_rollback_is_explicit(monkeypatch):
     default = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
-    assert "--guitar-count-classifier alpha_three_arm" in default.spec.containers[0].args[0]
+    assert "--guitar-count-classifier" not in default.spec.containers[0].args[0]
     monkeypatch.setenv("ROCKY_GUITAR_COUNT_CLASSIFIER", "rule")
     rollback = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
     assert "--guitar-count-classifier rule" in rollback.spec.containers[0].args[0]
@@ -53,7 +53,8 @@ def test_three_arm_is_default_and_rule_rollback_is_explicit(monkeypatch):
     commands = []
     monkeypatch.setattr(local, "_run", lambda _job, template, *_args: commands.append(template))
     local.run_midi("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", Path("/log"))
-    assert commands and commands[0].endswith("--guitar-count-classifier alpha_three_arm")
+    assert commands and "{guitar_count}" in commands[0]
+    assert "--guitar-count-classifier alpha_three_arm" not in commands[0]
 
 
 def test_pdf_pod_has_no_gpu():

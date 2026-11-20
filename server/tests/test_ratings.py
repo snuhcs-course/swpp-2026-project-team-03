@@ -103,7 +103,7 @@ def test_comment_is_added_after_the_stars(client):  # noqa: F811
     assert (item["stars"], item["comment"]) == (5, "드럼 필인이 좋아요")
 
 
-def test_rating_links_job_and_server_assigned_model_after_files_are_deleted(client):  # noqa: F811
+def test_rating_links_job_and_server_assigned_model_until_song_is_deleted(client):  # noqa: F811
     job = finished_job(client)
     run = client.app_state.store.run_dir(job)
     run.mkdir(parents=True)
@@ -122,7 +122,6 @@ def test_rating_links_job_and_server_assigned_model_after_files_are_deleted(clie
     assert response.status_code == 200
     response = client.put(f"/jobs/{job}/rating", json={"stars": 4, "comment": "좋아요"})
     assert response.json()["comment"] == "좋아요"
-    client.app_state.store.purge(job)
     item = client.get("/ratings").json()["ratings"][0]
     assert (item["job_id"], item["stars"], item["assigned_model"], item["applied_model"]) == (
         job, 4, arm, arm)
@@ -130,6 +129,8 @@ def test_rating_links_job_and_server_assigned_model_after_files_are_deleted(clie
     assert item["model_sha256"] == model_hash
     assert item["assignment_probability"] == 1 / 3
     assert item["predicted_guitars"] == 2
+    client.app_state.store.purge(job)
+    assert client.get("/ratings").json()["count"] == 0
 
 
 def test_fallback_rating_is_not_attributed_to_the_assigned_arm(client):  # noqa: F811

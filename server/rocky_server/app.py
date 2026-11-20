@@ -47,7 +47,7 @@ from .jobs import JobStore, RetryRefused, Worker
 from .lineup import APP_PARTS, LineupError, pipeline_args
 from .progress import allowed_paths, result_files, run_progress
 from .rating_model import model_assignment, rating_model
-from .runners import make_runner
+from .runners import guitar_count_option, make_runner
 
 INSTRUMENTS = ("piano", "guitar", "bass", "drums")
 AUDIO_EXT = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
@@ -58,18 +58,19 @@ MODES = ("band", "personal")
 
 def create_app(store: JobStore | None = None, runner=None, start_worker: bool = True,
                accounts: Accounts | None = None) -> FastAPI:
+    guitar_count_option()  # fail at startup for a mistyped classifier setting
     store = store or JobStore(Path(os.environ.get("ROCKY_HOME", "/data/rocky-unified/app")),
                               Path(os.environ.get("ROCKY_RUNS", "/data/rocky-unified/runs")),
                               Path(os.environ.get("ROCKY_INPUTS", "/data/input/app")))
     runner = runner or make_runner(os.environ.get("ROCKY_RUNNER", "kubernetes"))
     accounts = accounts or Accounts(store.root / "rocky.db")
     store.on_save = lambda job: accounts.record_experiment_job(job, model_assignment(store.run_dir(job.id)))
-    store.on_purge = lambda job: accounts.record_experiment_job(
-        job, model_assignment(store.run_dir(job.id)), deleted_at=time.time())
+    store.on_purge = accounts.delete_experiment_job
     for existing in store.all():
-        accounts.record_experiment_job(
-            existing, model_assignment(store.run_dir(existing.id)),
-            deleted_at=time.time() if store.is_deleted(existing.id) else None)
+        if store.is_deleted(existing.id):
+            accounts.delete_experiment_job(existing.id)
+        else:
+            accounts.record_experiment_job(existing, model_assignment(store.run_dir(existing.id)))
     worker = Worker(store, runner, int(os.environ.get("ROCKY_PARALLEL", "1")))
     api_key = os.environ.get("ROCKY_API_KEY", "")
     max_bytes = int(os.environ.get("ROCKY_MAX_UPLOAD_MB", "60")) * CHUNK
@@ -147,13 +148,11 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
                 size += len(chunk)
                 if size > max_bytes:
                     out.close()
-                    target.unlink(missing_ok=True)
-                    store.path(job.id).unlink(missing_ok=True)
+                    store.purge(job.id)
                     raise HTTPException(413, f"file is larger than {max_bytes // CHUNK} MB")
                 out.write(chunk)
         if size == 0:
-            target.unlink(missing_ok=True)
-            store.path(job.id).unlink(missing_ok=True)
+            store.purge(job.id)
             raise HTTPException(422, "empty file")
         store.update(job, filename=target.name, state="queued")
         if store.is_deleted(job.id):  # deleted while the file was still arriving
