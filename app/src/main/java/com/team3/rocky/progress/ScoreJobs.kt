@@ -477,7 +477,7 @@ object ScoreJobs {
         is ApiException -> when (e.code) {
             401 -> tr("접속할 수 없어요. 연결 설정을 확인해 주세요.", "Can't connect. Check the connection settings.")
             413 -> tr("파일이 너무 커요. 더 짧은 곡이나 MP3 파일로 올려 주세요.", "The file is too big. Try a shorter song or an MP3.")
-            415 -> tr("MP3나 WAV 파일만 올릴 수 있어요.", "Only MP3 or WAV files can be used.")
+            415 -> tr("MP3·WAV·FLAC·OGG 파일만 올릴 수 있어요.", "Only MP3, WAV, FLAC or OGG files can be used.")
             // 422는 악기 구성·모드·기타 대수 등 여러 입력 검사에서 온다: 한 가지 이유로 단정하지 않는다.
             422 -> tr(
                 "고른 악기 구성으로는 만들 수 없어요. 새로 만들기에서 악기를 다시 골라 주세요.",

@@ -194,7 +194,7 @@ private fun guideSlides() = listOf(
     ) { fg, soft -> artBand(fg, soft) },
     GuideSlide(
         tr("곡을 올려요", "Upload the song"),
-        tr("MP3나 WAV 파일을 고르면 끝이에요. 원곡에 어떤 악기가 있는지는 ROCKY가 들어 보고 알아서 판단해요.", "Pick an MP3 or WAV file and you're done. ROCKY listens and works out the song's instruments."),
+        tr("MP3·WAV·FLAC·OGG 파일을 고르면 끝이에요. 원곡에 어떤 악기가 있는지는 ROCKY가 들어 보고 알아서 판단해요.", "Pick an MP3, WAV, FLAC or OGG file and you're done. ROCKY listens and works out the song's instruments."),
     ) { fg, soft -> artUpload(fg, soft) },
     GuideSlide(
         tr("ROCKY가 당신을 위한 악보를 만들어요", "ROCKY makes scores just for you"),
