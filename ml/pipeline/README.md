@@ -32,9 +32,11 @@ The app sends an original lineup (`--original unknown` for the entire song, or
 selected `keyboard,bass,guitar1/guitar2,drums`) and a required output lineup
 (`--requested` with the same instrument names). `guitar1` and `guitar2` mean
 one or two guitars, not independent checkboxes. `keyboard` covers piano,
-electric piano and organ. When the original is unknown, skyline first decides
-whether its guitar TAB should split; that result is treated as one or two
-original guitars for the same cases below:
+electric piano and organ. When the original is unknown and guitar notes survive
+the note gate, the configured guitar-count classifier decides whether the
+original has one or two guitars. That decision controls skyline splitting and
+the cases below. The default is the three-model version; select the earlier
+stereo → skyline rule with `--guitar-count-classifier rule`:
 
 | Original guitars | Requested guitars | Action |
 | --- | --- | --- |
@@ -111,9 +113,8 @@ can be changed with the two `--bsroformer-*` options. The sample command uses
 `--no-publish` because the GPU image may lack the PDF/MP3 tools;
 omit it once those tools are available to produce all deliverables.
 
-The piano-stem merge raised the manifest contract to version 9, and the rule
-gates below raised it to version 11. Start a **new** output directory; older
-`manifest.json` files cannot be resumed with this code.
+The current manifest contract is **16**. Start a **new** output directory;
+older `manifest.json` files cannot be resumed with this code.
 
 `--requested` is required. The output directory must be new, or contain a
 `manifest.json` from the same input and configuration when `--resume` is used.
@@ -128,9 +129,12 @@ completion. `--no-publish` stops after MIDI/GP5 for diagnostics; rerun with
 
 ## Rule gates: non-band input and notes in resting stems
 
-`rule_gates.py` adds two model-free stages to `unified.py`. The thresholds
-come from 14 band songs and 45 non-band files measured on 2026-11-09
-(`benchmarks/2026-11-09-rule-gates.md`).
+`rule_gates.py` adds two model-free stages to `unified.py`. The input and note
+gate thresholds were measured on 2026-11-09
+(`benchmarks/2026-11-09-rule-gates.md`). The guitar-count stereo thresholds
+were subsequently fixed at correlation < 0.15 and balance < 0.10 using only
+the artist-grouped development songs. The standalone `ml/guitar_tab` module's
+auto-split thresholds are maintained on its branch.
 
 **`input_check`** runs right after `bs_roformer`, on the CPU, before any
 MuScriptor process starts. It rejects the song when it is shorter than 30 s,
@@ -173,14 +177,13 @@ A declared instrument that the gate would empty or that keeps fewer than
 `manifest.json` `faint_parts` (`piano`, `guitar`, `bass`, `drums`); the server
 passes them to the app, which can warn that the part may be empty or inaccurate.
 
-**`guitar_stereo`** (contract 13) runs before the guitar TAB when the original
-lineup is unknown. If the guitar stem's left and right channels are nearly
-unrelated (median 1 s correlation below 0.2) and balanced (median energy
-balance below 0.17), two guitars are panned apart and `skyline_tab.py` gets
-`--split always`. Otherwise its chord rule decides (`ml/guitar_tab`, recalibrated
-on 2026-11-09). This catches two guitars that play the same chords in the same
-register, such as 21 Guns. The result is kept in `guitar_stereo.json` and
-`manifest.json` `guitar_stereo`.
+**Guitar count (contract 16).** `alpha_three_arm` records the three frozen
+model predictions and uses only the job's assigned model to decide whether
+the original has one or two guitars. The assignment stays fixed on resume.
+`extra_trees` selects the bundled four-score fallback. `rule` selects the
+stereo → skyline sequence with the development-fitted thresholds. Known original guitar
+counts bypass these classifiers. See `GUITAR_COUNT_MODELS.md` for each model's
+inputs, GPU verification, dependencies, and exact rollback steps.
 
 A stem treated as absent behaves like an instrument missing from the original:
 if the user's lineup asks for it, MIDI-GPT generates it. When the original is

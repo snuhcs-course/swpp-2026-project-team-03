@@ -30,7 +30,8 @@ def one_track(part, start=0.0, notes=1):
     return score
 
 
-def run_personal(tmp_path, monkeypatch, requested, *, in_song=True, workers=1, personal=True, absent=()):
+def run_personal(tmp_path, monkeypatch, requested, *, in_song=True, workers=1,
+                 personal=True, absent=(), capture_logits=True):
     audio = tmp_path / "song.wav"
     sf.write(str(audio), np.zeros((16000, 2), dtype="float32"), 8000, subtype="FLOAT")
     args = SimpleNamespace(audio=audio, output_dir=tmp_path / "run", original="unknown",
@@ -93,6 +94,8 @@ def run_personal(tmp_path, monkeypatch, requested, *, in_song=True, workers=1, p
             jobs = json.loads(Path(command[command.index("--jobs-file") + 1]).read_text(encoding="utf-8"))
             for job in jobs:
                 transcribe(job["stem"], job["output"])
+                if capture_logits and job.get("decoder_logits_output"):
+                    np.savez_compressed(job["decoder_logits_output"], feature=np.zeros(2790))
         elif stage.startswith("muscriptor_"):
             transcribe(stage.removeprefix("muscriptor_"), command[3])
         elif stage in {"guitar_tab", "generated_guitar_tab"}:
@@ -188,3 +191,10 @@ def test_guitar_solo_transcribes_every_stem_for_the_guitar_count_redo(tmp_path, 
         # one guitar in the song: the second is generated with the whole band as context
         midigpt = next(command for stage, command in commands if stage == "midigpt")
         assert midigpt[3:midigpt.index("--out")] == ["guitar"]
+
+
+def test_missing_decoder_feature_keeps_song_on_rule_path(tmp_path, monkeypatch):
+    runner, _, result, _ = run_personal(tmp_path, monkeypatch, "guitar1", capture_logits=False)
+    assert result.instruments
+    assert runner.manifest["guitar_count"]["method"] == "rule_fallback"
+    assert runner.manifest["guitar_count"]["experiment_eligible"] is False

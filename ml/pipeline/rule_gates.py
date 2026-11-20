@@ -58,8 +58,8 @@ class GateConfig:
     # sparse-stem rule, original lineup unknown only
     min_notes_per_minute: float = 20.0
     # two-guitar stereo check, original lineup unknown only: two guitars panned apart
-    stereo_max_corr: float = 0.2        # median left/right correlation of 1 s windows below this ...
-    stereo_max_balance: float = 0.17    # ... and median |L-R| energy balance below this -> two guitars
+    stereo_max_corr: float = 0.15       # development-fitted stereo rule: median 1 s correlation below this ...
+    stereo_max_balance: float = 0.10    # ... and median |L-R| energy balance below this -> two guitars
     hop: int = 1024
 
     def as_dict(self) -> dict:
