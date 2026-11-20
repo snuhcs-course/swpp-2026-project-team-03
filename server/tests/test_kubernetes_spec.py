@@ -75,6 +75,10 @@ class FakeCore:
         self.pods[pod.metadata.name] = 0
 
     def read_namespaced_pod_status(self, name, ns):
+        # the workspace service account may not read the status subresource (403 on SGS)
+        raise client.exceptions.ApiException(status=403, reason="Forbidden")
+
+    def read_namespaced_pod(self, name, ns):
         if name not in self.pods:
             raise client.exceptions.ApiException(status=404)
         self.pods[name] += 1
