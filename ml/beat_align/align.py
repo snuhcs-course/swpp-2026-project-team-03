@@ -33,7 +33,7 @@ import argparse
 import json
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
@@ -80,6 +80,11 @@ class AlignResult:
     compound: bool = False
     downbeat_shift: int = 0
     drum_sync: DrumSyncResult | None = None
+    # The beat times (s) the notes were aligned to and the beat length used before the first and after
+    # the last of them. Score beat k sits at original-audio beat k - beat_offset
+    # (publish_scores.py measure_times).
+    beat_times: list[float] = field(default_factory=list)
+    beat_period: float = 0.0
 
     @property
     def meter(self) -> str:
@@ -464,7 +469,8 @@ def align_pretty_midi(midi: pretty_midi.PrettyMIDI, beats: Sequence[float],
         out.time_signature_changes.append(pretty_midi.TimeSignature(beats_per_bar, 4, 0))
     return out, AlignResult(bpm=bpm, note_count=note_count, beat_offset=beat_offset,
                             beats_per_bar=beats_per_bar, triplet_beats=len(triplet_beats),
-                            compound=compound, downbeat_shift=downbeat_shift)
+                            compound=compound, downbeat_shift=downbeat_shift,
+                            beat_times=[float(t) for t in beats], beat_period=float(median_interval))
 
 
 def align_midi(midi_path: str | Path, out_path: str | Path, *,
