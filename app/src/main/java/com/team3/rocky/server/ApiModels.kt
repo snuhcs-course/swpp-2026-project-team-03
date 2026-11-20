@@ -47,7 +47,10 @@ data class JobStatus(
 }
 
 /** 결과 파일 하나 묶음: PDF 악보, MIDI, 재생용 MP3. 경로는 서버의 작업 폴더 기준 상대 경로. */
-data class ScorePart(val pdf: String, val midi: String?, val pages: Int?, val mp3: String? = null)
+/** [measures]: 서버가 악보를 그리면서 적어 둔 마디 위치 JSON (없으면 앱이 그림에서 마디선을 찾는다). */
+data class ScorePart(
+    val pdf: String, val midi: String?, val pages: Int?, val mp3: String? = null, val measures: String? = null,
+)
 
 /** GET /jobs/{id}/result 응답. */
 data class JobResult(
@@ -115,7 +118,8 @@ object ApiJson {
     fun jobState(text: String): String = JSONObject(text).getString("state")
 
     private fun part(o: JSONObject) =
-        ScorePart(o.getString("pdf"), o.stringOrNull("midi"), o.intOrNull("pages"), o.stringOrNull("mp3"))
+        ScorePart(o.getString("pdf"), o.stringOrNull("midi"), o.intOrNull("pages"), o.stringOrNull("mp3"),
+            o.stringOrNull("measures"))
 
     private fun JSONObject.intOrNull(key: String) = if (has(key) && !isNull(key)) getInt(key) else null
     private fun JSONObject.stringOrNull(key: String) = if (has(key) && !isNull(key)) getString(key) else null

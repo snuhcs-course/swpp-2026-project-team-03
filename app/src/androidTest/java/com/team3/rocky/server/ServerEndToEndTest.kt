@@ -14,6 +14,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.team3.rocky.ResultScreen
 import com.team3.rocky.RockyTheme
+import com.team3.rocky.renderScorePages
 import com.team3.rocky.progress.AudioFile
 import com.team3.rocky.progress.ScoreJob
 import com.team3.rocky.progress.ScoreJobs
@@ -77,7 +78,7 @@ class ServerEndToEndTest {
         assertNotNull(local.midi("guitar"))
         assertNotNull(local.audio(null))            // 밴드 전체 MP3
         assertEquals(local.pdf("guitar"), local.pdf("guitar2"))  // 원곡 기타 2대 → 기타 악보 하나
-        assertTrue(PdfPages.render(local.pdf(null)!!, 600).isNotEmpty())
+        assertTrue(kotlinx.coroutines.runBlocking { renderScorePages(local.pdf(null)!!, 600) {} }.images.isNotEmpty())
 
         // 결과 화면: 서버 PDF가 그림으로 보인다
         val work = job.toWork()

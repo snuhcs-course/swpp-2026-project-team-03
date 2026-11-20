@@ -31,6 +31,12 @@ class MeasureLayout(val boxes: List<MeasureBox>, val exact: Boolean) {
             }
             if (measures == null || measures <= 0) return MeasureLayout(emptyList(), exact = false)
 
+            // 몇 개만 놓친 경우(3% 이내, 예: TAB 몇 줄의 마디선): 찾은 마디를 MIDI 마디 수에 비례해 맞춘다.
+            // 줄 단위로는 맞고, 마디는 많아야 한두 칸 어긋난다.
+            if (detected.isNotEmpty() && abs(detected.size - measures) <= maxOf(1, measures * 3 / 100)) {
+                return MeasureLayout(List(measures) { i -> detected[(i.toLong() * detected.size / measures).toInt()] }, exact = false)
+            }
+
             // 아니면 MIDI 마디 수를 줄 길이에 비례해 나눈다 (줄마다 마디 수가 비슷하다고 본다).
             val widths = systems.map { (_, s) -> (s.right - s.left).coerceAtLeast(1).toDouble() }
             val total = widths.sum()

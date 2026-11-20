@@ -99,12 +99,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.team3.rocky.server.LocalScore
-import com.team3.rocky.server.PdfPages
 import com.team3.rocky.server.ScoreStore
 import com.team3.rocky.server.RockyApi
 import com.team3.rocky.score.MeasureBox
 import com.team3.rocky.score.MeasureClock
 import com.team3.rocky.score.MeasureLayout
+import com.team3.rocky.score.PrintedMeasures
 import com.team3.rocky.score.ScoreLayout
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
@@ -226,17 +226,29 @@ fun ResultScreen(
     var clock by remember { mutableStateOf<MeasureClock?>(null) }
     val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
     LaunchedEffect(scoreBase, local?.semitones) {
-        pages = null
+        // 새 악보의 첫 쪽이 나올 때까지는 보던 악보를 그대로 둔다 (빈 화면이 깜빡이지 않게). 칠하기만 지운다.
         measures = null
         // 키를 바꾸면 local이 새 결과로 바뀐다. 이번에 그릴 결과를 하나로 정해 둔다.
         val currentScore = local
+        val pdf = currentScore?.pdf(serverPart(scoreBase))
         // 빈 여백을 잘라낸 그림으로 마디도 찾아서, 칠하는 위치와 그림이 맞게 한다.
-        val bitmaps = withContext(Dispatchers.IO) {
-            currentScore?.pdf(serverPart(scoreBase))
-                ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
-                .orEmpty().map { trimMargins(it) }
+        // 한 번 그린 악보는 기억해 두고, 처음 그릴 때는 한 쪽씩 그리면서 바로 보여 준다.
+        val loaded: ScorePages = if (pdf == null) ScorePages.EMPTY else {
+            val key = ScorePageCache.key(pdf, widthPx)
+            ScorePageCache.get(key) ?: try {
+                renderScorePages(pdf, widthPx) { partial ->
+                    withContext(Dispatchers.Main) { pages = partial.images }
+                }.also { ScorePageCache.put(key, it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ScorePages.EMPTY
+            }
         }
-        pages = bitmaps.map { it.asImageBitmap() }
+        pages = loaded.images
+        val rendered = loaded.widths
+        val crops = loaded.crops
+        val bitmaps = loaded.bitmaps
         // 악보를 먼저 보여 주고, 마디 위치는 그 뒤에 찾는다 (페이지가 많으면 1–2초 걸린다).
         val c = withContext(Dispatchers.IO) {
             // 파트 MIDI가 없으면 밴드 전체 MIDI로 센다 (박자와 템포는 파트마다 같다).
@@ -244,6 +256,16 @@ fun ResultScreen(
         }
         clock = c
         if (c == null) return@LaunchedEffect
+        // 서버가 적어 둔 마디 위치가 있으면 그대로 쓴다. 악보와 MIDI는 둘 다 0번 박에서 시작하므로
+        // 마디 수가 같거나, 악보 끝에 빈 마디가 하나 더 있을 때만 믿는다. 다르면 그림에서 찾는다.
+        val printed = withContext(Dispatchers.IO) {
+            currentScore?.measures(serverPart(scoreBase))?.let { f -> runCatching { PrintedMeasures.parse(f.readText()) }.getOrNull() }
+        }?.takeIf { it.count == c.count || it.count == c.count + 1 }
+        if (printed != null) {
+            measures = printed.layout(rendered, crops)
+                .takeIf { it.count > 0 }
+            if (measures != null) return@LaunchedEffect
+        }
         measures = withContext(Dispatchers.Default) {
             runCatching {
                 MeasureLayout.build(bitmaps.map { b ->
@@ -794,36 +816,40 @@ private fun Modifier.bleed(side: androidx.compose.ui.unit.Dp): Modifier = layout
 }
 
 /**
- * 악보 그림의 위아래·양옆 빈 여백을 잘라낸다 (흰색이거나 투명한 칸은 여백으로 본다).
+ * 악보 그림의 위아래·양옆 빈 여백을 잘라낼 범위 (흰색이거나 투명한 칸은 여백으로 본다). null이면 자르지 않는다.
  * 여백이 크면 악보가 작고 휑해 보여서, 글자·음표가 있는 곳 둘레에 조금만 남긴다.
+ * 잘라낸 만큼 서버의 마디 위치([PrintedMeasures])를 옮겨야 해서 범위를 돌려준다.
  */
-internal fun trimMargins(src: android.graphics.Bitmap, pad: Int = 24): android.graphics.Bitmap {
+internal fun marginCrop(src: android.graphics.Bitmap, pad: Int = 24): android.graphics.Rect? {
     val w = src.width
     val h = src.height
-    if (w < 4 || h < 4) return src
-    val px = IntArray(w * h)
-    src.getPixels(px, 0, w, 0, 0, w, h)
-    var left = w; var right = -1; var topY = h; var bottom = -1
-    for (y in 0 until h) {
-        val row = y * w
-        for (x in 0 until w) {
-            val c = px[row + x]
-            val a = c ushr 24
-            if (a < 40) continue
-            val lum = ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10
-            if (lum > 200) continue
-            if (x < left) left = x
-            if (x > right) right = x
-            if (y < topY) topY = y
-            if (y > bottom) bottom = y
-        }
+    if (w < 4 || h < 4) return null
+    // 한 줄씩 읽고, 위·아래는 처음 만나는 글자에서, 양옆은 지금까지 찾은 범위 바깥만 본다.
+    // 페이지 전체를 훑을 때보다 몇 배 빠르다 (여백은 대부분 바로 끝난다).
+    val row = IntArray(w)
+    fun ink(c: Int): Boolean {
+        if (c ushr 24 < 40) return false
+        return ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10 <= 200
     }
-    if (right < 0) return src
+    fun read(y: Int) = src.getPixels(row, 0, w, 0, y, w, 1)
+    fun rowHasInk(y: Int): Boolean { read(y); return row.any { ink(it) } }
+    val topY = (0 until h).firstOrNull { rowHasInk(it) } ?: return null
+    val bottom = (h - 1 downTo topY).first { rowHasInk(it) }
+    var left = w
+    var right = -1
+    for (y in topY..bottom) {
+        read(y)
+        var x = 0
+        while (x < left) { if (ink(row[x])) { left = x; break }; x++ }
+        x = w - 1
+        while (x > right) { if (ink(row[x])) { right = x; break }; x-- }
+    }
+    if (right < 0) return null
     val l = (left - pad).coerceAtLeast(0)
     val t = (topY - pad).coerceAtLeast(0)
     val r = (right + pad).coerceAtMost(w - 1)
     val b = (bottom + pad).coerceAtMost(h - 1)
-    return android.graphics.Bitmap.createBitmap(src, l, t, r - l + 1, b - t + 1)
+    return android.graphics.Rect(l, t, r + 1, b + 1)
 }
 
 /** 네 모서리 꺾쇠. [exit]면 안쪽을 향한다. */

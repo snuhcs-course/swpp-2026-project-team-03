@@ -1,3 +1,4 @@
+import json
 import time
 import threading
 
@@ -60,6 +61,22 @@ def test_only_listed_files_can_be_downloaded(setup):
     worker.run(store.get(job_id))
     for rel in ("manifest.json", "../app/" + job_id + ".json", "stems/vocals.wav"):
         assert client.get(f"/jobs/{job_id}/files/{rel}").status_code == 404
+
+
+def test_paths_outside_the_run_are_never_served(setup, tmp_path):
+    client, store, _, worker = setup()
+    job_id = upload(client).json()["id"]
+    worker.run(store.get(job_id))
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not a score")
+    contract_path = store.run_dir(job_id) / "scores" / "score_outputs.json"
+    contract = json.loads(contract_path.read_text())
+    contract["full_band"]["pdf"] = str(secret)                        # absolute
+    contract["instruments"]["piano"]["pdf"] = "../../secret.txt"     # climbs out of the run
+    contract_path.write_text(json.dumps(contract))
+    assert client.get(f"/jobs/{job_id}/files/{secret}").status_code == 404
+    assert client.get(f"/jobs/{job_id}/files/../../secret.txt").status_code == 404
+    assert client.get(f"/jobs/{job_id}/files/scores/guitar.mid").status_code == 200
 
 
 def test_transposition_renders_and_caches_complete_band_and_parts(setup):
