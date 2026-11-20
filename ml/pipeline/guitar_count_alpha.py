@@ -19,12 +19,14 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_models(directory: Path) -> dict:
+def load_models(directory: Path, arms: tuple[str, ...] = ARMS) -> dict:
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     if tuple(manifest["arms"]) != ARMS or manifest["format_version"] != 1:
         raise ValueError("Unexpected alpha model manifest")
+    if not arms or any(arm not in ARMS for arm in arms):
+        raise ValueError("Unknown alpha model assignment")
     artifacts = {}
-    for arm in ARMS:
+    for arm in arms:
         path = directory / f"{arm}.joblib"
         if digest(path) != manifest["arms"][arm]["sha256"]:
             raise ValueError(f"Alpha model digest mismatch: {arm}")
@@ -51,7 +53,7 @@ def vector(artifact: dict, blocks: dict[str, np.ndarray]) -> np.ndarray:
 
 def predictions(artifacts: dict, blocks: dict[str, np.ndarray]) -> dict:
     result = {}
-    for arm in ARMS:
+    for arm in artifacts:
         artifact = artifacts[arm]
         value = vector(artifact, blocks)
         classifier = artifact["classifier"]

@@ -508,9 +508,8 @@ class Runner:
     def classify_alpha(self, gated_guitar: Path, beats_file: Path, stereo: dict,
                        guitar_code: Path, logits_file: Path, roformer_file: Path,
                        guitar_stem: Path) -> dict:
-        """Predict all frozen arms and apply the persisted random assignment."""
+        """Run only the persisted random assignment's frozen classifier."""
         from guitar_count_alpha import load_models, predictions
-        from stem_audio_features import NAMES, extract
 
         extracted = self.guitar_scores(gated_guitar, beats_file, stereo, guitar_code)
         if extracted is None:
@@ -520,18 +519,23 @@ class Runner:
         scores, split = extracted
         blocks = {"rules": np.array([scores[name] for name in ("corr", "balance", "unplayable", "wide")]),
                   "muscriptor": np.load(logits_file)["feature"],
-                  "roformer": np.load(roformer_file)["feature"],
-                  "stem": extract(guitar_stem)}
-        all_predictions = predictions(load_models(self.alpha_models_dir), blocks)
-        selected = all_predictions[self.alpha_arm]
-        return {"method": "alpha_three_arm", "assigned_arm": self.alpha_arm,
+                  "roformer": np.load(roformer_file)["feature"]}
+        if self.alpha_arm == "fusion_stem_extra_trees":
+            from stem_audio_features import NAMES, extract
+            blocks["stem"] = extract(guitar_stem)
+        selected = predictions(
+            load_models(self.alpha_models_dir, (self.alpha_arm,)), blocks)[self.alpha_arm]
+        result = {"method": "alpha_three_arm", "assigned_arm": self.alpha_arm,
                 "assignment_probability": 1 / 3,
                 "model_sha256": json.loads((self.alpha_models_dir / "manifest.json").read_text(
                     encoding="utf-8"))["arms"][self.alpha_arm]["sha256"],
                 "experiment_eligible": True, "count": selected["count"],
                 "two_guitars": selected["count"] == 2,
-                "candidate_predictions": all_predictions, "scores": scores, "split": split,
-                "stem_scores": dict(zip(NAMES, blocks["stem"].tolist()))}
+                "candidate_predictions": {self.alpha_arm: selected},
+                "scores": scores, "split": split}
+        if "stem" in blocks:
+            result["stem_scores"] = dict(zip(NAMES, blocks["stem"].tolist()))
+        return result
 
     def probe_requested(self, stems_dir: Path, midi_dir: Path, no_vocals: Path,
                         transcribe_set: Callable[[tuple[str, ...], Path], None]

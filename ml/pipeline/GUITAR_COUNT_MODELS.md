@@ -11,17 +11,31 @@ frozen guitar-count models. Each returns **one** or **two** original guitars:
 | `fusion_rbf_svm` | RBF SVM | The same inputs |
 | `fusion_stem_extra_trees` | ExtraTrees | The same inputs plus four guitar-stem audio scores |
 
-The three `.joblib` files contain fitted transforms and classifier state,
-not source audio, song metadata, or per-song labels. The RBF SVM's classifier
-state necessarily includes support vectors in transformed feature space.
+The three `.joblib` files were fitted on the 103 accepted real development
+songs. Their transforms and classifier parameters are frozen in Git; a job
+does not fit or update them. The files contain fitted transforms and classifier
+state, not source audio, song metadata, or per-song labels. The RBF SVM's
+classifier state necessarily includes support vectors in transformed feature
+space.
 
 With `--guitar-count-classifier alpha_three_arm`, a new job receives one model
 with probability 1/3. `manifest.json` stores the assignment and reuses it on
-resume. `guitar_count.json` stores all three predictions and the selected
-model's count. Only the selected count controls guitar TAB split/compression
-and any second-guitar generation. The model scores are uncalibrated and do not
-change the assignment. This Git change does not update model weights or
-assignment probabilities from star ratings.
+resume. Only that model is loaded and run for the job. `guitar_count.json`
+stores its prediction and selected count. Only that count controls guitar TAB
+split/compression and any second-guitar generation. The model scores are
+uncalibrated and do not change the assignment. This Git change does not update
+model weights or assignment probabilities from star ratings.
+
+## Decision after alpha testing
+
+After alpha testing, use the collected ratings and per-model job records to
+choose one of the three arms or roll back to the bundled four-score ExtraTrees
+model. Compare rating distribution and submission rate alongside completion,
+failure, and processing time. Keep the 1/3 assignment fixed during alpha.
+Selecting one alpha arm as the sole production model requires a reviewed
+code/configuration change; the ExtraTrees rollback is already bundled below.
+Do not use the previously examined 20-song test set to tune this decision or
+claim an independent result for a model chosen from it.
 
 Known original guitar counts bypass this selection. If stereo measurements
 are unavailable, the pipeline uses its prior rule and marks the model result

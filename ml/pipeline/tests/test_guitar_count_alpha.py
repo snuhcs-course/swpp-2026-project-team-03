@@ -56,7 +56,9 @@ def test_assigned_arm_alone_drives_guitar_count(tmp_path, monkeypatch, arm):
     mu, ro = tmp_path / "mu.npz", tmp_path / "ro.npz"
     np.savez_compressed(mu, feature=np.zeros(2790))
     np.savez_compressed(ro, feature=np.zeros(512))
-    monkeypatch.setattr(stem_audio_features, "extract", lambda unused: np.zeros(4))
+    stem_calls = []
+    monkeypatch.setattr(stem_audio_features, "extract", lambda unused: (
+        stem_calls.append(True) or np.zeros(4)))
     runner = unified.Runner.__new__(unified.Runner)
     runner.alpha_arm = arm
     runner.alpha_models_dir = directory
@@ -68,8 +70,10 @@ def test_assigned_arm_alone_drives_guitar_count(tmp_path, monkeypatch, arm):
                                    mu, ro, tmp_path / "guitar.wav")
     assert result["assigned_arm"] == arm
     assert result["experiment_eligible"] is True
+    assert tuple(result["candidate_predictions"]) == (arm,)
     assert result["count"] == result["candidate_predictions"][arm]["count"]
     assert result["two_guitars"] is (result["count"] == 2)
+    assert bool(stem_calls) is (arm == "fusion_stem_extra_trees")
 
 
 def test_tab_subprocess_uses_its_own_python_packages(tmp_path, monkeypatch):
