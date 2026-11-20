@@ -44,11 +44,9 @@ TRANSIENT_MARKER = "ROCKY_TRANSIENT_FAILURE"
 
 
 def guitar_count_option() -> str:
-    """Only pass a new CLI flag when the alpha pipeline is explicitly enabled."""
-    choice = os.environ.get("ROCKY_GUITAR_COUNT_CLASSIFIER", "").strip()
-    if choice in ("", "rule"):
-        return ""
-    if choice not in ("alpha_three_arm", "extra_trees"):
+    """Use the alpha arms by default; pass rollback choices explicitly."""
+    choice = os.environ.get("ROCKY_GUITAR_COUNT_CLASSIFIER", "alpha_three_arm").strip()
+    if choice not in ("alpha_three_arm", "extra_trees", "rule"):
         raise ValueError("ROCKY_GUITAR_COUNT_CLASSIFIER must be rule, alpha_three_arm, or extra_trees")
     return choice
 
@@ -134,7 +132,7 @@ class SubprocessRunner:
     def run_midi(self, job_id: str, audio: Path, run: Path, requested: str, log: Path,
                  note=lambda _msg: None, original: str = "unknown", personal: bool = False) -> None:
         classifier = guitar_count_option()
-        template = self.midi_cmd + (f" --guitar-count-classifier {classifier}" if classifier else "")
+        template = self.midi_cmd + f" --guitar-count-classifier {classifier}"
         self._run(job_id, template, audio, run, requested, log, original, personal)
 
     def run_pdf(self, job_id: str, run: Path, log: Path, note=lambda _msg: None) -> None:
@@ -253,7 +251,7 @@ class KubernetesRunner:
             '--original "$ROCKY_ORIGINAL" --requested "$ROCKY_REQUESTED" ${ROCKY_PERSONAL:+--personal} '
             '--bsroformer-models-dir /data/bsrofo/models --bsroformer-lib-dir /data/bsrofo/pylib '
             '--resume --no-publish'
-            + (f' --guitar-count-classifier {classifier}' if classifier else ''))
+            + f' --guitar-count-classifier {classifier}')
         env = {"ROCKY_INPUT_AUDIO": str(audio), "ROCKY_OUTPUT_DIR": str(run),
                "ROCKY_ORIGINAL": original, "ROCKY_REQUESTED": requested,
                "ROCKY_PERSONAL": "1" if personal else "",

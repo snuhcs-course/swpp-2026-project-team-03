@@ -42,12 +42,13 @@ def test_solo_practice_passes_personal_to_unified():
     assert env(solo)["ROCKY_PERSONAL"] == "1" and env(band)["ROCKY_PERSONAL"] == ""
 
 
-def test_three_arm_flag_is_opt_in_for_pods_and_subprocess(monkeypatch):
+def test_three_arm_is_default_and_rule_rollback_is_explicit(monkeypatch):
     default = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
-    assert "--guitar-count-classifier" not in default.spec.containers[0].args[0]
-    monkeypatch.setenv("ROCKY_GUITAR_COUNT_CLASSIFIER", "alpha_three_arm")
-    alpha = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
-    assert "--guitar-count-classifier alpha_three_arm" in alpha.spec.containers[0].args[0]
+    assert "--guitar-count-classifier alpha_three_arm" in default.spec.containers[0].args[0]
+    monkeypatch.setenv("ROCKY_GUITAR_COUNT_CLASSIFIER", "rule")
+    rollback = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "guitar", "unknown")
+    assert "--guitar-count-classifier rule" in rollback.spec.containers[0].args[0]
+    monkeypatch.delenv("ROCKY_GUITAR_COUNT_CLASSIFIER")
     local = SubprocessRunner()
     commands = []
     monkeypatch.setattr(local, "_run", lambda _job, template, *_args: commands.append(template))

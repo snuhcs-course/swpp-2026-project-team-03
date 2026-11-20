@@ -135,6 +135,7 @@ k5 apply -f server/k8s/api-pod.yaml
 k5 logs -f rocky-api        # 1~2분 뒤 "Uvicorn running on http://0.0.0.0:8000" 가 보이면 Ctrl+C
 ```
 - 서버 코드를 다시 올릴 때: 1) 실행 → `k5 delete pod rocky-api` → `k5 apply -f server/k8s/api-pod.yaml`
+- **기타 대수 alpha 배포:** 모델 PR #30의 파이프라인 코드·모델 파일·`requirements-alpha.txt` 의존성과 학습 임계값의 기타 TAB 모듈을 볼륨에 반영한 뒤 이 서버 버전으로 API Pod를 재시작한다. 새 서버 코드는 별도 활성화 환경변수 없이 새 작업에 `alpha_three_arm`을 전달한다. GitHub PR 병합만으로 PVC 코드나 실행 중인 Pod가 갱신되지는 않는다. 롤백은 새 API Pod에 `ROCKY_GUITAR_COUNT_CLASSIFIER=extra_trees` 또는 `rule`을 지정한다.
 - **PDF 도구 설치 파일 (워크스페이스마다 한 번):** PDF·키 변경 Pod는 MuseScore 3·Poppler를 `/data/cache/pdf-debs`의 .deb로 설치하고, 없을 때만 우분투 미러에서 받는다 (11/12 미러 연결이 끊겨 GPU 단계가 끝난 곡이 PDF에서 실패했음). 그 폴더는 이렇게 만든다
   ```bash
   k5 apply -f server/k8s/pdf-debs-pod.yaml      # 2는 k22, server/k8s/ws2/pdf-debs-pod.yaml

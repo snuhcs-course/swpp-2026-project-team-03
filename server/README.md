@@ -53,9 +53,11 @@ rated jobs for the submission rate because several members may rate one score.
 For the three-arm comparison, filter to the three alpha arm names and distinguish
 `applied_model = assigned_model` from `rule_fallback`. The assignment probabilities
 remain fixed at 1/3 during alpha; ratings do not change them automatically.
-After deploying the three-arm pipeline, set `ROCKY_GUITAR_COUNT_CLASSIFIER=alpha_three_arm`
-on the API Pod to opt in. Without it, the server sends no new classifier flag and
-keeps the existing pipeline behavior. The assigned arm is written by the GPU
+The API starts new jobs with `alpha_three_arm` by default. Deploy the matching
+three-arm pipeline and its Python dependencies before deploying this server code;
+no separate activation setting is needed. For new jobs, set
+`ROCKY_GUITAR_COUNT_CLASSIFIER=extra_trees` or `rule` to roll back. The server
+passes that choice explicitly to the GPU pipeline. The assigned arm is written by the GPU
 pipeline into each job's manifest, then copied into `experiment_jobs`.
 
 Key changes run in a CPU Pod. `transpose_scores.py` shifts pitched MIDI notes and
