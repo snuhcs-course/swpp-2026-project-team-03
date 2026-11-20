@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
 
 /**
  * 곡을 고르자마자 폰에서 바로 확인한다 (서버까지 보내서 몇 분 기다린 뒤에 거절당하지 않게).
- * - 확장자만 MP3·WAV이고 실제로는 다른 파일이거나 깨진 파일 → [Broken]
+ * - 확장자만 MP3·WAV·FLAC·OGG이고 실제로는 다른 파일이거나 깨진 파일 → [Broken]
  * - 30초 이하 → [TooShort] (서버 파이프라인도 30초 미만은 거절한다)
  */
 object AudioCheck {

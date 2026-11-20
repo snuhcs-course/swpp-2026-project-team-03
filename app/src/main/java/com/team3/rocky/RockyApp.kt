@@ -656,7 +656,7 @@ fun HomeTab(
                     HowStep("1", tr("연습 방식과 악기 고르기", "Pick a mode and instruments"),
                         tr("혼자면 내 악기, 합주면 우리 밴드 악기를 골라요", "Your instruments, or your band's"))
                     HowStep("2", tr("곡 올리기", "Upload a song"),
-                        tr("MP3나 WAV 파일을 올려요", "Upload an MP3 or WAV file"))
+                        tr("MP3·WAV·FLAC·OGG 파일을 올려요", "Upload an MP3, WAV, FLAC or OGG file"))
                     HowStep("3", tr("나만의 악보 받기", "Get your own scores"),
                         tr("고른 악기마다 악보가 나와요", "A score for each instrument you picked"), last = true)
                     TextButton(onClick = { guide = true }) {
@@ -1144,8 +1144,6 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
 }
 
 // ---------- 3. 곡 올리기 ----------
-/** 고를 수 있는 곡 파일 (Req&Spec: MP3·WAV). 파일 앱에서 이 형식만 보이게 한다. */
-private val PICK_TYPES = arrayOf("audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave")
 
 /** 곡 이름 최대 글자 수 (보관함 이름 바꾸기와 같다). 일본어·한자·이모티콘도 한 글자로 센다. */
 const val TITLE_MAX = 60
@@ -1175,8 +1173,8 @@ fun UploadScreen(onBack: () -> Unit, onStart: (title: String, audio: AudioFile) 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             val name = fileName(ctx, uri)
-            if (name.substringAfterLast('.').lowercase() !in listOf("mp3", "wav")) {
-                Toast.makeText(ctx, tr("MP3나 WAV 파일만 고를 수 있어요", "Please pick an MP3 or WAV file"), Toast.LENGTH_LONG).show()
+            if (!isSupportedAudio(name)) {
+                Toast.makeText(ctx, tr("MP3·WAV·FLAC·OGG 파일만 고를 수 있어요", "Please pick an MP3, WAV, FLAC or OGG file"), Toast.LENGTH_LONG).show()
                 return@rememberLauncherForActivityResult
             }
             checking = true
@@ -1203,7 +1201,7 @@ fun UploadScreen(onBack: () -> Unit, onStart: (title: String, audio: AudioFile) 
             text = {
                 Text(
                     if (r is AudioCheck.Result.TooShort) tr("${r.seconds}초짜리 파일이에요. 30초가 넘는 곡을 골라 주세요.", "This file is ${r.seconds} seconds long. Please pick a song longer than 30 seconds.")
-                    else tr("MP3·WAV가 아니거나 깨진 파일이에요. 파일을 다시 확인하고 다른 파일을 골라 주세요.", "It isn't a real MP3/WAV or the file is damaged. Please check the file and pick another one."),
+                    else tr("음원 파일이 아니거나 깨진 파일이에요. 파일을 다시 확인하고 다른 파일을 골라 주세요.", "It isn't a real audio file or the file is damaged. Please check the file and pick another one."),
                 )
             },
             confirmButton = {
@@ -1233,7 +1231,7 @@ fun UploadScreen(onBack: () -> Unit, onStart: (title: String, audio: AudioFile) 
         Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(tr("곡을 골라주세요", "Pick a song"), fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
             Spacer(Modifier.height(8.dp))
-            Text(tr("MP3 · WAV 파일 · 원곡 악기는 ROCKY가 들어 보고 알아서 판단해요", "MP3 or WAV · ROCKY works out the song's instruments"), color = cs.onSurfaceVariant, lineHeight = 22.sp)
+            Text(tr("MP3 · WAV · FLAC · OGG 파일 · 원곡 악기는 ROCKY가 들어 보고 알아서 판단해요", "MP3, WAV, FLAC or OGG · ROCKY works out the song's instruments"), color = cs.onSurfaceVariant, lineHeight = 22.sp)
             Spacer(Modifier.height(20.dp))
             Column(
                 Modifier.fillMaxWidth().height(170.dp)
