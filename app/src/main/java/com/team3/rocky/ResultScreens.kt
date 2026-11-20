@@ -99,7 +99,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.team3.rocky.server.LocalScore
-import com.team3.rocky.server.PdfPages
 import com.team3.rocky.server.ScoreStore
 import com.team3.rocky.server.RockyApi
 import com.team3.rocky.score.MeasureBox
@@ -227,21 +226,29 @@ fun ResultScreen(
     var clock by remember { mutableStateOf<MeasureClock?>(null) }
     val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
     LaunchedEffect(scoreBase, local?.semitones) {
-        pages = null
+        // 새 악보의 첫 쪽이 나올 때까지는 보던 악보를 그대로 둔다 (빈 화면이 깜빡이지 않게). 칠하기만 지운다.
         measures = null
         // 키를 바꾸면 local이 새 결과로 바뀐다. 이번에 그릴 결과를 하나로 정해 둔다.
         val currentScore = local
+        val pdf = currentScore?.pdf(serverPart(scoreBase))
         // 빈 여백을 잘라낸 그림으로 마디도 찾아서, 칠하는 위치와 그림이 맞게 한다.
-        val rendered = withContext(Dispatchers.IO) {
-            currentScore?.pdf(serverPart(scoreBase))
-                ?.let { runCatching { PdfPages.render(it, widthPx) }.getOrNull() }
-                .orEmpty()
+        // 한 번 그린 악보는 기억해 두고, 처음 그릴 때는 한 쪽씩 그리면서 바로 보여 준다.
+        val loaded: ScorePages = if (pdf == null) ScorePages.EMPTY else {
+            val key = ScorePageCache.key(pdf, widthPx)
+            ScorePageCache.get(key) ?: try {
+                renderScorePages(pdf, widthPx) { partial ->
+                    withContext(Dispatchers.Main) { pages = partial.images }
+                }.also { ScorePageCache.put(key, it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ScorePages.EMPTY
+            }
         }
-        val crops = rendered.map { marginCrop(it) }
-        val bitmaps = rendered.zip(crops).map { (b, c) ->
-            if (c == null) b else android.graphics.Bitmap.createBitmap(b, c.left, c.top, c.width(), c.height())
-        }
-        pages = bitmaps.map { it.asImageBitmap() }
+        pages = loaded.images
+        val rendered = loaded.widths
+        val crops = loaded.crops
+        val bitmaps = loaded.bitmaps
         // 악보를 먼저 보여 주고, 마디 위치는 그 뒤에 찾는다 (페이지가 많으면 1–2초 걸린다).
         val c = withContext(Dispatchers.IO) {
             // 파트 MIDI가 없으면 밴드 전체 MIDI로 센다 (박자와 템포는 파트마다 같다).
@@ -255,7 +262,7 @@ fun ResultScreen(
             currentScore?.measures(serverPart(scoreBase))?.let { f -> runCatching { PrintedMeasures.parse(f.readText()) }.getOrNull() }
         }?.takeIf { it.count == c.count || it.count == c.count + 1 }
         if (printed != null) {
-            measures = printed.layout(rendered.map { it.width }, crops.map { (it?.left ?: 0) to (it?.top ?: 0) })
+            measures = printed.layout(rendered, crops)
                 .takeIf { it.count > 0 }
             if (measures != null) return@LaunchedEffect
         }
@@ -817,22 +824,25 @@ internal fun marginCrop(src: android.graphics.Bitmap, pad: Int = 24): android.gr
     val w = src.width
     val h = src.height
     if (w < 4 || h < 4) return null
-    val px = IntArray(w * h)
-    src.getPixels(px, 0, w, 0, 0, w, h)
-    var left = w; var right = -1; var topY = h; var bottom = -1
-    for (y in 0 until h) {
-        val row = y * w
-        for (x in 0 until w) {
-            val c = px[row + x]
-            val a = c ushr 24
-            if (a < 40) continue
-            val lum = ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10
-            if (lum > 200) continue
-            if (x < left) left = x
-            if (x > right) right = x
-            if (y < topY) topY = y
-            if (y > bottom) bottom = y
-        }
+    // 한 줄씩 읽고, 위·아래는 처음 만나는 글자에서, 양옆은 지금까지 찾은 범위 바깥만 본다.
+    // 페이지 전체를 훑을 때보다 몇 배 빠르다 (여백은 대부분 바로 끝난다).
+    val row = IntArray(w)
+    fun ink(c: Int): Boolean {
+        if (c ushr 24 < 40) return false
+        return ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10 <= 200
+    }
+    fun read(y: Int) = src.getPixels(row, 0, w, 0, y, w, 1)
+    fun rowHasInk(y: Int): Boolean { read(y); return row.any { ink(it) } }
+    val topY = (0 until h).firstOrNull { rowHasInk(it) } ?: return null
+    val bottom = (h - 1 downTo topY).first { rowHasInk(it) }
+    var left = w
+    var right = -1
+    for (y in topY..bottom) {
+        read(y)
+        var x = 0
+        while (x < left) { if (ink(row[x])) { left = x; break }; x++ }
+        x = w - 1
+        while (x > right) { if (ink(row[x])) { right = x; break }; x-- }
     }
     if (right < 0) return null
     val l = (left - pad).coerceAtLeast(0)

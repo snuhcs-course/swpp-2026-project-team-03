@@ -2,10 +2,6 @@
 package com.team3.rocky.server
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Color
-import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
 import java.io.File
 
 /**
@@ -129,22 +125,4 @@ object ScoreStore {
             .put("guitars_delivered", r.guitarsDelivered ?: org.json.JSONObject.NULL)
             .toString()
     }
-}
-
-/** PDF 악보를 화면 너비에 맞춘 그림으로 바꾼다. 페이지가 많으면 오래 걸리니 IO 스레드에서. */
-object PdfPages {
-    fun render(file: File, widthPx: Int, maxPages: Int = 30): List<Bitmap> =
-        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-            PdfRenderer(fd).use { pdf ->
-                (0 until minOf(pdf.pageCount, maxPages)).map { i ->
-                    pdf.openPage(i).use { page ->
-                        val h = (widthPx.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
-                        Bitmap.createBitmap(widthPx, h, Bitmap.Config.ARGB_8888).also { bmp ->
-                            bmp.eraseColor(Color.WHITE)
-                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        }
-                    }
-                }
-            }
-        }
 }
