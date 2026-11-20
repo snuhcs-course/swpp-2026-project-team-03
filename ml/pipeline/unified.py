@@ -578,9 +578,9 @@ class Runner:
                                            "drum_sync_moved": result.drum_sync.moved_notes if result.drum_sync else 0,
                                            # publish_scores.py turns these into scores/measure_times.json so the
                                            # app can follow the original recording measure by measure
-                                           # (older align.py has no beat_times: then nothing is saved)
-                                           "beats_per_bar": result.beats_per_bar,
-                                           "beat_offset": result.beat_offset,
+                                           # (an older align.py has no beat_times: then nothing is saved)
+                                           "beats_per_bar": getattr(result, "beats_per_bar", 0),
+                                           "beat_offset": getattr(result, "beat_offset", 0),
                                            "beat_period": getattr(result, "beat_period", 0.0),
                                            "beat_times": getattr(result, "beat_times", [])}
         self.stage("align", [aligned], align)

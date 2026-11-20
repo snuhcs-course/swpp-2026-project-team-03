@@ -255,6 +255,13 @@ def link_measures(pdf: Path, strip: bool = True) -> tuple[list[list[list[float]]
     return [[box for _, box in sorted(boxes[m])] for m in range(len(boxes))], sizes
 
 
+def has_measures(layout: Path) -> bool:
+    try:
+        return bool(json.loads(layout.read_text(encoding="utf-8")).get("measures"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def measure_times(alignment: dict, measures: int) -> list[float]:
     """When each score measure starts in the original recording (s), from the beats align.py used:
     original beat i was placed at score beat i + beat_offset, so measure m starts at original beat
@@ -462,26 +469,31 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
                         "source_sha256": sha256(source), "converter": converter,
                         "tracks": tracks, "pages": pages, "bytes": target.stat().st_size,
                         "sha256": sha256(target)}
-        if layout.is_file():
+        if has_measures(layout):  # an empty file only records that reading positions failed
             outputs[key]["measures"] = layout.relative_to(run).as_posix()
 
     def write_measures(key: str, source: Path, converter: str, target: Path, layout: Path, pages: int) -> None:
         """scores/<key>.measures.json: where each measure is printed. Optional: the app falls back to
-        reading barlines from the page image when it is missing, so a failure here is only logged."""
-        layout.unlink(missing_ok=True)
+        reading barlines from the page image, so any failure here is only logged and never fails the
+        PDF stage. The file is written even then (with no measures), so a later publish of the same
+        PDF does not run MuseScore or redraw the TAB again just to fail the same way."""
+        boxes, sizes, error = [], [], None
+        mpos = out / f"{key}.mpos"
         try:
             if converter == GP5_PDF_CONVERTER:
                 boxes, sizes = link_measures(target)
             else:
-                mpos = out / f"{key}.mpos"
                 subprocess.run([musescore, "-o", str(mpos), str(source)], check=True)
                 boxes, sizes = mpos_measures(mpos), pdf_page_sizes(target, pdfinfo, pages)
-                mpos.unlink(missing_ok=True)
-            if boxes:
-                write_json(layout, {"version": 1, "unit": "pt", "origin": "top-left",
-                                    "pages": sizes, "measures": boxes})
-        except (OSError, ValueError, subprocess.CalledProcessError, ET.ParseError) as exc:
-            print(f"measure positions for {key} skipped: {exc}", flush=True)
+        except Exception as exc:  # optional output: see above
+            boxes, sizes, error = [], [], f"{type(exc).__name__}: {exc}"
+            print(f"measure positions for {key} skipped: {error}", flush=True)
+        finally:
+            mpos.unlink(missing_ok=True)
+        if not boxes and error is None:
+            error = "no measure positions found"
+        write_json(layout, {"version": 1, "unit": "pt", "origin": "top-left", "pages": sizes,
+                            "measures": boxes, **({"error": error} if error else {})})
 
     def render_audio(key: str, source: Path, tracks: list[dict]) -> None:
         def task() -> None:
