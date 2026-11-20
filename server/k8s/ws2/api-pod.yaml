@@ -36,10 +36,10 @@ spec:
           cd /data/server && exec uvicorn rocky_server.app:app_from_env --factory
           --host 0.0.0.0 --port 8000
       env:
-        # The team accounts cannot grant this pod permission to create Pods (no Role/RoleBinding),
-        # so a laptop agent (server/agent/rocky_agent.py) starts the GPU and PDF Pods for it.
+        # The workspace's default service account can create, watch and delete Pods (checked
+        # 2026-11-20), so this pod starts the GPU and PDF Pods itself; no laptop agent is needed.
         - name: ROCKY_RUNNER
-          value: agent
+          value: kubernetes
         # GPU and PDF Pods go to the node that holds this workspace's volume
         - name: ROCKY_NODE
           value: ford
