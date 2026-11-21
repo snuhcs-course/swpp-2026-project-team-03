@@ -27,11 +27,12 @@ Settings (environment variables):
   ROCKY_API_KEY     if set, every request needs header X-Rocky-Key with this value
   ROCKY_MAX_UPLOAD_MB  upload size limit (default 60)
   ROCKY_PARALLEL    songs processed at once = GPUs usable at once (default 1)
-  ROCKY_MIDI_CPU, ROCKY_MIDI_MEMORY  limits of each GPU Pod (default 8 and 32Gi)
+  ROCKY_MIDI_CPU, ROCKY_MIDI_MEMORY  limits of each GPU Pod (default 4 and 16Gi)
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -68,8 +69,12 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     store.on_save = lambda job: accounts.record_experiment_job(job, model_assignment(store.run_dir(job.id)))
     store.on_purge = accounts.delete_experiment_job
     for existing in store.all():
-        if not store.is_deleted(existing.id):  # Worker.start purges deleted songs and their rows
+        if store.is_deleted(existing.id):  # Worker.start purges deleted songs and their rows
+            continue
+        try:
             accounts.record_experiment_job(existing, model_assignment(store.run_dir(existing.id)))
+        except Exception:  # analysis records must not keep the API from starting
+            logging.exception("Could not record experiment state for job %s", existing.id)
     worker = Worker(store, runner, int(os.environ.get("ROCKY_PARALLEL", "1")))
     api_key = os.environ.get("ROCKY_API_KEY", "")
     max_bytes = int(os.environ.get("ROCKY_MAX_UPLOAD_MB", "60")) * CHUNK

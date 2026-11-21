@@ -77,7 +77,9 @@ def model_assignment(run: Path, *, completed_only: bool = False) -> dict:
                     "predicted_guitars": count}
         return record
     if classifier == "rule":
-        return {**empty, "assigned_model": "rule", "applied_model": "rule"}
+        # The rule was applied only if the run reached the guitar stereo check.
+        applied = "rule" if isinstance(manifest.get("guitar_stereo"), dict) else None
+        return {**empty, "assigned_model": "rule", "applied_model": applied}
     return empty
 
 

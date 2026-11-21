@@ -188,3 +188,127 @@ def test_rollback_model_is_not_recorded_when_it_did_not_run(tmp_path, classifier
     (run / "manifest.json").write_text(json.dumps({"status": "complete", "config": {
         "guitar_count_classifier": classifier, "original": "unknown", "requested_guitars": 2}}))
     assert rating_model(run)["assigned_model"] == classifier
+    if classifier == "rule":
+        assert rating_model(run)["applied_model"] is None  # the guitar stage was not reached
+        (run / "manifest.json").write_text(json.dumps({"status": "complete", "guitar_stereo": {}, "config": {
+            "guitar_count_classifier": classifier, "original": "unknown", "requested_guitars": 2}}))
+        assert rating_model(run)["applied_model"] == "rule"
+
+
+def queued_job(store, title="song"):
+    job = store.create(title, "", ["guitar"])
+    store.update(job, state="queued")
+    return job
+
+
+def test_delete_reports_pending_until_rows_are_gone_and_worker_retries(tmp_path):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    job = store.create("gone", "", ["guitar"])
+    store.update(job, state="failed")
+    worker = Worker(store, FakeRunner())
+    calls = []
+
+    def flaky(job_id):
+        calls.append(job_id)
+        if len(calls) == 1:
+            raise OSError("database or disk is full")
+
+    store.on_purge = flaky
+    assert worker.delete(job.id) == "pending"
+    assert store.is_deleted(job.id)
+    worker._settle_unfinished()
+    assert store.get(job.id) is None and not store.is_deleted(job.id)
+    assert store.pending_purges == set() and calls == [job.id, job.id]
+
+
+def test_file_delete_error_still_removes_database_rows(tmp_path, monkeypatch):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    job = store.create("gone", "", ["guitar"])
+    audio = store.inputs / f"{job.id}.wav"
+    audio.write_bytes(b"audio")
+    rows = []
+    store.on_purge = rows.append
+    real_unlink = type(audio).unlink
+
+    def denied(path, *args, **kwargs):
+        if path == audio:
+            raise PermissionError("denied")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(audio), "unlink", denied)
+    assert store.purge(job.id) is False
+    assert rows == [job.id] and store.is_deleted(job.id)
+    monkeypatch.setattr(type(audio), "unlink", real_unlink)
+    assert store.purge(job.id) is True
+    assert not audio.exists() and store.get(job.id) is None
+
+
+def test_hidden_deleted_job_does_not_take_a_queue_position(tmp_path):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    hidden, real = queued_job(store, "hidden"), queued_job(store, "real")
+    store.tombstone(hidden.id).touch()
+    assert Worker(store, FakeRunner()).queue_position(real.id) == 1
+
+
+def test_stranded_running_job_gets_a_final_state_once_storage_recovers(tmp_path):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    job = store.create("stuck", "", ["guitar"])
+    store.update(job, state="running", started_at=1.0)
+    worker = Worker(store, FakeRunner())
+    worker.stranded.add(job.id)
+    real_update, failed = store.update, []
+
+    def full_disk_once(*args, **kwargs):
+        if not failed:
+            failed.append(True)
+            raise OSError("no space left on device")
+        return real_update(*args, **kwargs)
+
+    store.update = full_disk_once
+    worker._settle_unfinished()
+    assert store.get(job.id).state == "running" and worker.stranded == {job.id}
+    worker._settle_unfinished()
+    saved = store.get(job.id)
+    assert saved.state == "failed" and saved.retryable and worker.stranded == set()
+
+
+def test_worker_survives_a_claim_error(tmp_path):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    job = queued_job(store)
+    worker = Worker(store, FakeRunner())
+    real_claim, seen = worker.claim, []
+
+    class Stop(BaseException):
+        pass
+
+    def claim():
+        if not seen:
+            seen.append("error")
+            raise OSError("no space left on device")
+        return real_claim()
+
+    def run(claimed):
+        seen.append(claimed.id)
+        raise Stop
+
+    class NoWait:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def wait(self, timeout=None): pass
+
+    worker.claim, worker.run, worker.cond = claim, run, NoWait()
+    with pytest.raises(Stop):
+        worker._loop()
+    assert seen == ["error", job.id]
+
+
+def test_startup_survives_an_experiment_record_error(tmp_path, monkeypatch):
+    from rocky_server.accounts import Accounts
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    store.create("older", "", ["guitar"])
+
+    def full_disk(*_args, **_kwargs):
+        raise OSError("database or disk is full")
+
+    monkeypatch.setattr(Accounts, "record_experiment_job", full_disk)
+    assert create_app(store, FakeRunner(), start_worker=False) is not None

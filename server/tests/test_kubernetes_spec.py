@@ -27,8 +27,8 @@ def test_midi_pod_matches_example_yaml():
     assert spec.restart_policy == "Never"
     assert spec.node_selector == {"kubernetes.io/hostname": "ferrari"}
     assert c.resources.limits["nvidia.com/gpu"] == "1"
-    assert c.resources.limits["cpu"] == "8"
-    assert c.resources.limits["memory"] == "32Gi"
+    assert c.resources.limits["cpu"] == "4"
+    assert c.resources.limits["memory"] == "16Gi"
     assert c.resources.requests == {"cpu": "0", "memory": "0", "ephemeral-storage": "0"}
     assert env["ROCKY_REQUESTED"] == "keyboard,drums" and env["ROCKY_ORIGINAL"] == "unknown"
     for part in ("/data/pipeline/unified.py", "--original", "--resume", "--no-publish", "--bsroformer-models-dir"):
@@ -37,10 +37,10 @@ def test_midi_pod_matches_example_yaml():
 
 
 def test_gpu_pod_size_comes_from_the_workspace_env(monkeypatch):
-    monkeypatch.setenv("ROCKY_MIDI_CPU", "4")
-    monkeypatch.setenv("ROCKY_MIDI_MEMORY", "16Gi")
+    monkeypatch.setenv("ROCKY_MIDI_CPU", "6")
+    monkeypatch.setenv("ROCKY_MIDI_MEMORY", "24Gi")
     limits = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass").spec.containers[0].resources.limits
-    assert (limits["cpu"], limits["memory"], limits["nvidia.com/gpu"]) == ("4", "16Gi", "1")
+    assert (limits["cpu"], limits["memory"], limits["nvidia.com/gpu"]) == ("6", "24Gi", "1")
 
 
 def test_solo_practice_passes_personal_to_unified():

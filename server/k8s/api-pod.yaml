@@ -43,7 +43,7 @@ spec:
         # At most two active songs; extra jobs stay queued.
         - name: ROCKY_PARALLEL
           value: "2"
-        # gpu05 GPU Pod size; other workspaces keep the 8 CPU / 32Gi default.
+        # GPU Pod size; two of these must fit the workspace's 16 CPU quota.
         - name: ROCKY_MIDI_CPU
           value: "4"
         - name: ROCKY_MIDI_MEMORY
