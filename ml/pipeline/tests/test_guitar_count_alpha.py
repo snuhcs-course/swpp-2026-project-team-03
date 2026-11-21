@@ -50,6 +50,48 @@ def test_alpha_assignment_survives_resume(tmp_path, monkeypatch):
     assert resumed.alpha_arm == first.alpha_arm
 
 
+def alpha_args(tmp_path, audio, resume):
+    model_dir = Path(guitar_count_alpha.__file__).parent / "guitar_count_alpha_models"
+    return SimpleNamespace(audio=audio, output_dir=tmp_path / "out", original="unknown",
+                           requested="guitar1", model="large", midigpt_model="yellow_medium",
+                           device="cpu", beat_checkpoint="checkpoint", seed=0, resume=resume,
+                           modules_root=tmp_path, model_python=Path(sys.executable),
+                           tab_python=Path(sys.executable), bsroformer_models_dir=tmp_path / "models",
+                           bsroformer_lib_dir=tmp_path / "pylib",
+                           guitar_count_classifier="alpha_three_arm", alpha_models_dir=model_dir)
+
+
+def test_failed_pre_alpha_run_restarts_with_a_new_assignment(tmp_path):
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"fixture")
+    out = tmp_path / "out"
+    (out / "stems").mkdir(parents=True)
+    (out / "stems" / "old.wav").write_bytes(b"old")
+    (out / "manifest.json").write_text(json.dumps({
+        "config": {"audio_sha256": unified.digest(audio), "pipeline_contract": 15},
+        "completed": ["separate"], "status": "failed"}))
+    resumed = unified.Runner(alpha_args(tmp_path, audio, True))
+    assert resumed.alpha_arm in guitar_count_alpha.ARMS
+    assert resumed.manifest["completed"] == []
+    assert not (out / "stems").exists() and audio.is_file()
+
+
+@pytest.mark.parametrize("old", [{"status": "complete", "same_audio": True},
+                                 {"status": "failed", "same_audio": False}])
+def test_other_pre_alpha_manifests_are_not_cleared(tmp_path, old):
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"fixture")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "keep.mid").write_bytes(b"keep")
+    sha = unified.digest(audio) if old["same_audio"] else "0" * 64
+    (out / "manifest.json").write_text(json.dumps({
+        "config": {"audio_sha256": sha}, "completed": [], "status": old["status"]}))
+    with pytest.raises(ValueError, match="original alpha assignment"):
+        unified.Runner(alpha_args(tmp_path, audio, True))
+    assert (out / "keep.mid").is_file()
+
+
 def test_missing_alpha_model_directory_does_not_abort_before_rule_fallback(tmp_path):
     audio = tmp_path / "song.wav"
     audio.write_bytes(b"fixture")

@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -346,9 +347,14 @@ class Runner:
                 pass
             if args.resume and self.manifest_path.exists():
                 saved = json.loads(self.manifest_path.read_text(encoding="utf-8"))
-                self.alpha_arm = saved.get("config", {}).get("guitar_count_arm")
-                if self.alpha_arm not in ALPHA_ARMS:
-                    raise ValueError("Cannot resume without the original alpha assignment")
+                if self.is_unfinished_pre_alpha_run(saved):
+                    # Its stages were made under an older config and cannot be reused.
+                    self.clear_output_dir()
+                    self.alpha_arm = ALPHA_ARMS[secrets.randbelow(len(ALPHA_ARMS))]
+                else:
+                    self.alpha_arm = saved.get("config", {}).get("guitar_count_arm")
+                    if self.alpha_arm not in ALPHA_ARMS:
+                        raise ValueError("Cannot resume without the original alpha assignment")
             else:
                 self.alpha_arm = ALPHA_ARMS[secrets.randbelow(len(ALPHA_ARMS))]
         if (self.guitar_count_classifier == "extra_trees" and self.original_unknown
@@ -401,6 +407,21 @@ class Runner:
             self.manifest = {"config": self.config, "completed": [], "status": "running"}
             atomic_json(self.manifest_path, self.manifest)
         (self.out / "logs").mkdir(exist_ok=True)
+
+    def is_unfinished_pre_alpha_run(self, saved: dict) -> bool:
+        """A failed run of this same audio from before alpha assignment existed."""
+        config = saved.get("config")
+        return (isinstance(config, dict) and "guitar_count_arm" not in config
+                and saved.get("status") != "complete"
+                and config.get("audio_sha256") == digest(self.audio))
+
+    def clear_output_dir(self) -> None:
+        """Remove derived files; the input audio must live outside the run folder."""
+        out = self.out.resolve()
+        if self.audio.resolve().is_relative_to(out):
+            raise ValueError("Cannot restart a run whose input audio is inside its output directory")
+        for child in out.iterdir():
+            shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
 
     def command(self, stage: str, cmd: list[str], env: dict | None = None) -> None:
         log_path = self.out / "logs" / f"{stage}.log"
