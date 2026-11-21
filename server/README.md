@@ -4,25 +4,26 @@ HTTP API between the Android app and the GPU pipeline
 (`ml/pipeline/unified.py` on the `ml/unified-pipeline` branch).
 
 ```
-app ──upload──▶ API pod (CPU, always on) ──asks──▶ laptop agent ──creates──▶ GPU Pod: unified.py
-                     │                                                        CPU Pod: publish_scores.py
+app ──upload──▶ API pod (CPU, always on) ──creates──▶ GPU Pod: unified.py
+                     │                             └─────▶ CPU Pod: publish_scores.py
                      └── reads manifest.json / progress.jsonl / scores/ on the shared volume
 ```
 
-On SGS the team accounts may create Pods but not Roles/RoleBindings, so the API
-pod cannot be given permission to create Pods. With `ROCKY_RUNNER=agent` (used by
-`k8s/api-pod.yaml`) the API queues Pod requests and `agent/rocky_agent.py`, run on a
-laptop logged in with kubectl, creates them, waits out the GPU quota, watches them,
-reports the result through `/agent/*` and deletes them. Step-by-step deployment in
-Korean: `DEPLOY_ko.md`.
+On SGS the workspace's default service account can create, read, and delete Pods.
+With `ROCKY_RUNNER=kubernetes`, the API creates and watches its own work Pods;
+`ROCKY_RUNNER=agent` remains an optional legacy path. The laptop is not needed
+for job orchestration. The separate public network bridge still depends on its
+own tunnel until that deployment is changed.
 
 For Android Emulator verification of alphaTab, cancellation, and key changes,
 see `EMULATOR_TEST_ko.md`.
 
 The API pod has no GPU, so the 30-minute idle-GPU rule does not apply to it.
 A GPU is used only while a song's GPU Pod runs. `ROCKY_PARALLEL` controls how
-many songs can be in flight; the others wait in upload order. The current SGS
-namespace has a one-GPU quota and the production API uses `ROCKY_PARALLEL=1`.
+many songs can be in flight; the others wait in upload order. The gpu05/ferrari
+manifest uses `ROCKY_PARALLEL=2` and 4 CPU / 16Gi per GPU Pod. The separate
+gpu22/ford manifest remains at `ROCKY_PARALLEL=1` until its quota, GPU capacity,
+and two-upload flow are verified there. See `deploy/parallel2-gpu05.md`.
 
 ## API
 

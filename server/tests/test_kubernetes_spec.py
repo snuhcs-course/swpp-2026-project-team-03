@@ -27,7 +27,9 @@ def test_midi_pod_matches_example_yaml():
     assert spec.restart_policy == "Never"
     assert spec.node_selector == {"kubernetes.io/hostname": "ferrari"}
     assert c.resources.limits["nvidia.com/gpu"] == "1"
-    assert c.resources.requests == {"cpu": "0", "memory": "0"}
+    assert c.resources.limits["cpu"] == "4"
+    assert c.resources.limits["memory"] == "16Gi"
+    assert c.resources.requests == {"cpu": "0", "memory": "0", "ephemeral-storage": "0"}
     assert env["ROCKY_REQUESTED"] == "keyboard,drums" and env["ROCKY_ORIGINAL"] == "unknown"
     for part in ("/data/pipeline/unified.py", "--original", "--resume", "--no-publish", "--bsroformer-models-dir"):
         assert part in c.args[0]

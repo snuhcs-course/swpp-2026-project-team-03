@@ -1,10 +1,8 @@
-# The ROCKY API: a CPU-only pod that stays up (no GPU, so the 30-minute idle-GPU
-# rule does not apply). For each uploaded song it asks the laptop agent to start a
-# GPU Pod (unified.py) and then a CPU Pod (publish_scores.py). Code is read from /data/server.
+# gpu05/ferrari API: two concurrent song workers. The API creates one GPU Pod
+# and then one CPU publication Pod per song. Code is read from /data/server.
 #
-#   kubectl apply -f server/k8s/api-pod.yaml
-#   kubectl port-forward pod/rocky-api 8000:8000   # from the laptop the phone is plugged into
-#   python3 server/agent/rocky_agent.py            # on the same laptop, in another terminal
+#   After checking no jobs are active: kubectl replace --force -f server/k8s/api-pod.yaml
+#   kubectl port-forward pod/rocky-api 8000:8000   # for local API access when needed
 apiVersion: v1
 kind: Pod
 metadata:
@@ -36,13 +34,15 @@ spec:
           cd /data/server && exec uvicorn rocky_server.app:app_from_env --factory
           --host 0.0.0.0 --port 8000
       env:
-        # The team accounts cannot grant this pod permission to create Pods (no Role/RoleBinding),
-        # so a laptop agent (server/agent/rocky_agent.py) starts the GPU and PDF Pods for it.
         - name: ROCKY_RUNNER
-          value: agent
-        # one GPU per workspace: one song at a time, the rest wait in order
+          value: kubernetes
+        - name: ROCKY_NODE
+          value: ferrari
+        - name: ROCKY_PVC
+          value: muscriptor-data
+        # At most two active songs; extra jobs stay queued.
         - name: ROCKY_PARALLEL
-          value: "1"
+          value: "2"
         # whole songs as WAV are large (a 6-minute WAV is about 60 MB)
         - name: ROCKY_MAX_UPLOAD_MB
           value: "200"
@@ -55,9 +55,11 @@ spec:
         requests:
           cpu: "0"
           memory: "0"
+          ephemeral-storage: "0"
         limits:
           cpu: "2"
           memory: 2Gi
+          ephemeral-storage: 10Gi
       volumeMounts:
         - name: data
           mountPath: /data
