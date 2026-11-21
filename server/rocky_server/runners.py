@@ -307,7 +307,9 @@ class KubernetesRunner:
             while time.monotonic() < deadline:
                 if self._was_cancelled(name.rsplit("-", 1)[-1]):
                     raise RunnerError(f"job {name} was cancelled")
-                status = self.core.read_namespaced_pod_status(name, self.namespace).status
+                # GET pods (not pods/status): the workspace service account may read Pods but not the status
+                # subresource (checked 2026-11-20); the Pod object carries the same status.
+                status = self.core.read_namespaced_pod(name, self.namespace).status
                 if status.phase == "Succeeded":
                     self._save_log(name, log)
                     note(None)
@@ -331,7 +333,7 @@ class KubernetesRunner:
         # wait until it is gone so the same name can be reused
         for _ in range(60):
             try:
-                self.core.read_namespaced_pod_status(name, self.namespace)
+                self.core.read_namespaced_pod(name, self.namespace)
             except self.client.exceptions.ApiException as exc:
                 if exc.status == 404:
                     return

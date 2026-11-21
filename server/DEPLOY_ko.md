@@ -147,6 +147,8 @@ k5 logs -f rocky-api        # 1~2분 뒤 "Uvicorn running on http://0.0.0.0:8000
 
 ## D. 폰 연결 (시연할 때마다, 각 노트북에서)
 
+> 2026-11-18부터는 USB 없이 공개 주소(`http://team3.swpp-2026-b.snu.ac.kr`)로 접속한다. 설정과 켜는 순서는 [deploy/README.md](deploy/README.md). 아래는 USB(`adb reverse`)로 시연할 때만 쓴다.
+
 터미널 1 (켜 둔다, 노트북1은 `k5`, 노트북2는 `k22`):
 ```bash
 k5 port-forward pod/rocky-api 8080:8000      # 노트북 8080 (8000은 kubelogin 로그인과 부딪혀서 피함)

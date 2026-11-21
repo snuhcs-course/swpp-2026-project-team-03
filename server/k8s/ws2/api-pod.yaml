@@ -36,10 +36,10 @@ spec:
           cd /data/server && exec uvicorn rocky_server.app:app_from_env --factory
           --host 0.0.0.0 --port 8000
       env:
-        # The team accounts cannot grant this pod permission to create Pods (no Role/RoleBinding),
-        # so a laptop agent (server/agent/rocky_agent.py) starts the GPU and PDF Pods for it.
+        # The workspace's default service account can create, watch and delete Pods (checked
+        # 2026-11-20), so this pod starts the GPU and PDF Pods itself; no laptop agent is needed.
         - name: ROCKY_RUNNER
-          value: agent
+          value: kubernetes
         # GPU and PDF Pods go to the node that holds this workspace's volume
         - name: ROCKY_NODE
           value: ford
@@ -52,8 +52,12 @@ spec:
         # whole songs as WAV are large (a 6-minute WAV is about 60 MB)
         - name: ROCKY_MAX_UPLOAD_MB
           value: "200"
-        # No API key: the API is reachable only through kubectl port-forward.
-        # If it is ever exposed publicly, set ROCKY_API_KEY from a Secret.
+        # exposed publicly through a tunnel: every request except /health needs X-Rocky-Key
+        - name: ROCKY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rocky-api-key
+              key: ROCKY_API_KEY
       ports:
         - containerPort: 8000
       resources:
