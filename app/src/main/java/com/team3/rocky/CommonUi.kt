@@ -266,7 +266,31 @@ object ProfileStore {
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= maxSide && bounds.outHeight / (sample * 2) >= maxSide) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        val bmp = ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return null
+        // 폰 카메라 사진은 픽셀을 돌리지 않고 EXIF 방향 값만 적어 둔다. 그대로 저장하면 90도 돌아가 보인다.
+        val orientation = runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.media.ExifInterface(it).getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)
+            }
+        }.getOrNull() ?: android.media.ExifInterface.ORIENTATION_NORMAL
+        return upright(bmp, orientation)
+    }
+
+    /** EXIF 방향 값대로 사진을 바로 세운다. 방향 값이 없거나 보통이면 그대로 둔다. */
+    internal fun upright(bmp: Bitmap, orientation: Int): Bitmap {
+        val m = android.graphics.Matrix()
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> m.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> m.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> m.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> m.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> m.postScale(1f, -1f)
+            android.media.ExifInterface.ORIENTATION_TRANSPOSE -> { m.postRotate(90f); m.postScale(-1f, 1f) }
+            android.media.ExifInterface.ORIENTATION_TRANSVERSE -> { m.postRotate(270f); m.postScale(-1f, 1f) }
+            else -> return bmp
+        }
+        return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
     }
 }
 

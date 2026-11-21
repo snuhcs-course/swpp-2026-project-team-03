@@ -350,14 +350,21 @@ fun AccountScreen(
     var parts by remember(user) { mutableStateOf(user.instruments.toSet()) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    val photo = remember(photoVersion, user.id) { ProfileStore.load(ctx, user.id) }
+    val saved = remember(photoVersion, user.id) { ProfileStore.load(ctx, user.id) }
+    // 사진도 닉네임처럼 아래 '수정' 버튼을 눌러야 저장된다. 그 전에는 미리 보기만 한다.
+    var newPhoto by remember(user) { mutableStateOf<android.net.Uri?>(null) }
+    var newPreview by remember(user) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var removePhoto by remember(user) { mutableStateOf(false) }
+    val photo = when { newPreview != null -> newPreview; removePhoto -> null; else -> saved }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            if (ProfileStore.save(ctx, user.id, uri)) onUpdated(user)
+            val preview = ProfileStore.preview(ctx, uri)
+            if (preview != null) { newPhoto = uri; newPreview = preview; removePhoto = false }
             else Toast.makeText(ctx, tr("사진을 불러오지 못했어요", "Couldn't load the photo"), Toast.LENGTH_SHORT).show()
         }
     }
-    val dirty = nickname.trim() != user.nickname || parts != user.instruments.toSet()
+    val profileDirty = nickname.trim() != user.nickname || parts != user.instruments.toSet()
+    val dirty = profileDirty || newPhoto != null || removePhoto
     val nicknameErr = error ?: SignUpValidator.nicknameError(nickname, typing = true)
 
     fun save() {
@@ -365,8 +372,22 @@ fun AccountScreen(
         focus.clearFocus()
         busy = true
         scope.launch {
-            auth.updateProfile(user, nickname, parts)
-                .onSuccess { onUpdated(it); Toast.makeText(ctx, tr("내 정보를 저장했어요", "Profile saved"), Toast.LENGTH_SHORT).show() }
+            val photoOk = when {
+                newPhoto != null -> ProfileStore.save(ctx, user.id, newPhoto!!)
+                removePhoto -> { ProfileStore.remove(ctx, user.id); true }
+                else -> true
+            }
+            if (!photoOk) {
+                Toast.makeText(ctx, tr("사진을 불러오지 못했어요", "Couldn't load the photo"), Toast.LENGTH_SHORT).show()
+                busy = false
+                return@launch
+            }
+            val result = if (profileDirty) auth.updateProfile(user, nickname, parts) else Result.success(user)
+            result
+                .onSuccess {
+                    newPhoto = null; newPreview = null; removePhoto = false
+                    onUpdated(it); Toast.makeText(ctx, tr("내 정보를 수정했어요", "Profile updated"), Toast.LENGTH_SHORT).show()
+                }
                 .onFailure { error = it.message }
             busy = false
         }
@@ -376,7 +397,7 @@ fun AccountScreen(
         Button(shape = ButtonShape,
             onClick = { save() }, enabled = dirty && nicknameErr == null && !busy,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("account_save"),
-        ) { Text(if (dirty) tr("변경사항 저장", "Save changes") else tr("바뀐 내용이 없어요", "No changes")) }
+        ) { Text(if (dirty) tr("수정", "Update") else tr("바뀐 내용이 없어요", "No changes")) }
     }) {
         Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -391,7 +412,7 @@ fun AccountScreen(
                         TextButton(onClick = {
                             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         }) { Text(tr("사진 바꾸기", "Change photo"), fontSize = 13.sp) }
-                        if (photo != null) TextButton(onClick = { ProfileStore.remove(ctx, user.id); onUpdated(user) }) {
+                        if (photo != null) TextButton(onClick = { newPhoto = null; newPreview = null; removePhoto = true }) {
                             Text(tr("사진 삭제", "Remove photo"), fontSize = 13.sp, color = cs.onSurfaceVariant)
                         }
                     }
@@ -408,7 +429,6 @@ fun AccountScreen(
             )
             Spacer(Modifier.height(12.dp))
             Text(tr("연주하는 악기 (여러 개 가능)", "Instruments you play (pick any)"), fontWeight = FontWeight.Bold)
-            Text(tr("새 악보를 만들 때 미리 선택돼요.", "Preselected when you make a new score."), fontSize = 13.sp, color = cs.onSurface)
             Spacer(Modifier.height(10.dp))
             PartChips(parts) { p -> parts = if (p in parts) parts - p else parts + p; error = null }
 
