@@ -293,9 +293,9 @@ fun RockyApp() {
                     user = u, bands = bands, tab = tab, photoVersion = photoVersion,
                     onTab = { tab = it },
                     onAccount = { go(Screen.Account) },
-                    // 회원 정보에 적은 악기를 새 악보의 기본 구성으로 쓴다.
-                    onPersonal = { newScore(Demo.soloPreset(Demo.lineupOf(u.instruments)), personalMode = true) },
-                    onBand = { newScore(Demo.lineupOf(u.instruments), personalMode = false) },
+                    // 악기 선택 화면은 아무것도 고르지 않은 상태로 시작한다 (2차 UAT 준비 피드백).
+                    onPersonal = { newScore(emptySet(), personalMode = true) },
+                    onBand = { newScore(emptySet(), personalMode = false) },
                     onOpenJob = { job -> go(Screen.Result(job.toWork(), jobId = job.id)) },
                     onOpenWork = { go(Screen.Result(it)) },
                     onShareWork = { go(Screen.ShareToBand(it)) },

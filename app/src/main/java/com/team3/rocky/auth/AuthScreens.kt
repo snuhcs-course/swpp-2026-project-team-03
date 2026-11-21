@@ -353,8 +353,11 @@ fun AccountScreen(
     val photo = remember(photoVersion, user.id) { ProfileStore.load(ctx, user.id) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            if (ProfileStore.save(ctx, user.id, uri)) onUpdated(user)
-            else Toast.makeText(ctx, tr("사진을 불러오지 못했어요", "Couldn't load the photo"), Toast.LENGTH_SHORT).show()
+            // 사진은 고르자마자 저장된다 (아래 저장 버튼과 상관없음). 바로 알려 준다.
+            if (ProfileStore.save(ctx, user.id, uri)) {
+                onUpdated(user)
+                Toast.makeText(ctx, tr("프로필 사진을 바꿨어요", "Profile photo updated"), Toast.LENGTH_SHORT).show()
+            } else Toast.makeText(ctx, tr("사진을 불러오지 못했어요", "Couldn't load the photo"), Toast.LENGTH_SHORT).show()
         }
     }
     val dirty = nickname.trim() != user.nickname || parts != user.instruments.toSet()
