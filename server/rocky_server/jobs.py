@@ -65,6 +65,7 @@ class JobStore:
         self.on_save: Callable[[Job], None] | None = None
         self.on_purge: Callable[[str], None] | None = None
         self._recorded_state: dict[str, tuple] = {}
+        self.pending_purges: set[str] = set()  # deletes to finish after a storage or database error
 
     def path(self, job_id: str) -> Path:
         return self.root / f"{job_id}.json"
@@ -117,18 +118,44 @@ class JobStore:
         return self.root / f"{job_id}.deleted"
 
     def is_deleted(self, job_id: str) -> bool:
-        return self.tombstone(job_id).exists()
+        return job_id in self.pending_purges or self.tombstone(job_id).exists()
 
-    def purge(self, job_id: str) -> None:
-        """Remove the record, log, upload, run folder (results and key changes) and the mark."""
-        if self.on_purge is not None:
-            self.on_purge(job_id)
+    def purge(self, job_id: str) -> bool:
+        """Remove the record, log, upload, run folder (results and key changes) and the mark.
+
+        False means something is left: the song stays hidden and Worker tries again."""
+        # Song files go first, and a failure here must not skip the database rows.
         shutil.rmtree(self.run_dir(job_id), ignore_errors=True)
-        for f in self.inputs.glob(f"{job_id}.*"):
-            f.unlink(missing_ok=True)
-        for f in (self.log(job_id), self.path(job_id), self.tombstone(job_id)):
-            f.unlink(missing_ok=True)
+        complete = not self.run_dir(job_id).exists()
+        try:
+            for f in [*self.inputs.glob(f"{job_id}.*"), self.log(job_id)]:
+                f.unlink(missing_ok=True)
+        except OSError:
+            logging.exception("Could not delete files for job %s", job_id)
+            complete = False
+        if self.on_purge is not None:
+            try:
+                self.on_purge(job_id)
+            except Exception:
+                logging.exception("Could not delete experiment rows for job %s", job_id)
+                complete = False
+        if complete:
+            try:
+                for f in (self.path(job_id), self.tombstone(job_id)):
+                    f.unlink(missing_ok=True)
+            except OSError:
+                logging.exception("Could not delete the record of job %s", job_id)
+                complete = False
+        if not complete:
+            self.pending_purges.add(job_id)
+            try:  # survives a restart when the disk allows it; the set above covers this process
+                self.tombstone(job_id).touch()
+            except OSError:
+                logging.exception("Could not mark job %s as deleted", job_id)
+            return False
+        self.pending_purges.discard(job_id)
         self._recorded_state.pop(job_id, None)
+        return True
 
     def update(self, job: Job, **changes) -> Job:
         with self.lock:
@@ -170,6 +197,8 @@ class Worker:
         self.store, self.runner = store, runner
         self.parallel = max(1, parallel)
         self.cond = threading.Condition()
+        self.stranded: set[str] = set()  # jobs whose run() ended before saving a final state
+        self.stranded_lock = threading.Lock()
         self.threads = [threading.Thread(target=self._loop, name=f"rocky-worker-{i}", daemon=True)
                         for i in range(self.parallel)]
 
@@ -198,7 +227,8 @@ class Worker:
             self.cond.notify_all()
 
     def queue_position(self, job_id: str) -> int | None:
-        queued = [j.id for j in self.store.all() if j.state == "queued"]
+        queued = [j.id for j in self.store.all()
+                  if j.state == "queued" and not self.store.is_deleted(j.id)]
         return queued.index(job_id) + 1 if job_id in queued else None
 
     def claim(self) -> Job | None:
@@ -217,12 +247,49 @@ class Worker:
 
     def _loop(self) -> None:
         while True:
-            job = self.claim()
+            try:
+                self._settle_unfinished()
+                job = self.claim()
+            except Exception:  # e.g. a full volume: keep the worker and try again later
+                logging.exception("Worker could not read or claim the queue")
+                job = None
             if job is None:
                 with self.cond:
                     self.cond.wait(timeout=30)
                 continue
-            self.run(job)
+            try:
+                self.run(job)
+            except Exception:  # one song's cleanup error must not stop the queue
+                logging.exception("Worker could not finish job %s", job.id)
+                with self.stranded_lock:
+                    self.stranded.add(job.id)
+
+    def _settle_unfinished(self) -> None:
+        """Retry the final state of interrupted jobs and any unfinished deletes."""
+        with self.stranded_lock:
+            job_ids, self.stranded = self.stranded, set()
+        for job_id in job_ids:
+            try:
+                self._settle(job_id)
+            except Exception:
+                logging.exception("Could not save the final state of job %s", job_id)
+                with self.stranded_lock:
+                    self.stranded.add(job_id)
+        for job_id in list(self.store.pending_purges):
+            self.store.purge(job_id)
+
+    def _settle(self, job_id: str) -> None:
+        job = self.store.get(job_id)
+        if job is None:
+            return
+        if job.state == "cancelling":
+            self._finish_cancel(job)
+        elif job.state in ("running", "publishing"):
+            error = RunnerError("the server could not save this job's state")
+            self.store.update(job, state="failed", finished_at=time.time(), note=None, error=str(error),
+                              **describe_failure(self.store.run_dir(job_id), error))
+        if self.store.is_deleted(job_id):
+            self.store.purge(job_id)
 
     def cancel(self, job_id: str) -> str:
         """Persist cancellation before signalling the runner or waking the queue."""
@@ -297,8 +364,7 @@ class Worker:
                     return "pending"
             except NotImplementedError:
                 return "pending"  # this runner cannot stop it: purged when it ends
-        self.store.purge(job_id)
-        return "deleted"
+        return "deleted" if self.store.purge(job_id) else "pending"
 
     def _clear_cancelled_files(self, job: Job) -> None:
         shutil.rmtree(self.store.run_dir(job.id), ignore_errors=True)

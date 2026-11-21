@@ -5,7 +5,8 @@
 폰2 ─USB─ 노트북2(채연, 계정 gpu22) ─port-forward─ 워크스페이스 2의 rocky-api ─ GPU(ford)
 ```
 - 11/4 시연은 두 노트북 모두 gpu05 하나로 했다 (그날 순서는 `DEMO_jaewook_ko.md`). **gpu22는 11/4 저녁 B·C 단계 완료** — 수빈 볼륨 `rocky-data`에 복사(여유 약 7.4G), `rocky-api` 가동. 파이프라인을 바꾸면 두 볼륨 모두 반영
-- **팀 계정은 Pod는 만들 수 있지만 권한(Role/RoleBinding)은 못 준다 (11/3 확인).** 그래서 서버 Pod가 GPU Pod를 직접 못 만들고,
+- **현재 매니페스트는 `ROCKY_RUNNER=kubernetes`라서 API Pod가 GPU·PDF Pod를 직접 만든다. 아래의 노트북 agent 절차는 `ROCKY_RUNNER=agent`로 바꿨을 때만 필요하다.** 동시 처리 설정은 [deploy/parallel2-gpu05.md](deploy/parallel2-gpu05.md)를 본다.
+- (agent 방식의 배경) **팀 계정은 Pod는 만들 수 있지만 권한(Role/RoleBinding)은 못 준다 (11/3 확인).** 그래서 서버 Pod가 GPU Pod를 직접 못 만들고,
   **각 노트북에서 도는 agent(`server/agent/rocky_agent.py`)가 노트북 로그인 권한으로 GPU·PDF Pod를 대신 띄운다.**
   시연 중에는 노트북마다 터미널 2개(port-forward, agent)를 켜 둔다
 - 워크스페이스마다 GPU가 1개라서, 폰마다 다른 워크스페이스에 붙이면 두 곡이 동시에 만들어진다
@@ -154,7 +155,7 @@ k5 logs -f rocky-api        # 1~2분 뒤 "Uvicorn running on http://0.0.0.0:8000
 ```bash
 k5 port-forward pod/rocky-api 8080:8000      # 노트북 8080 (8000은 kubelogin 로그인과 부딪혀서 피함)
 ```
-터미널 2 (켜 둔다 — GPU·PDF Pod를 띄우는 agent):
+터미널 2 (`ROCKY_RUNNER=agent`일 때만 켜 둔다 — GPU·PDF Pod를 띄우는 agent):
 ```bash
 cd ~/rocky-app-server
 python3 server/agent/rocky_agent.py --api http://localhost:8080        # ~/.kube/config 계정으로

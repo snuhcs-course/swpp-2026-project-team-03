@@ -1,7 +1,8 @@
 # gpu05 two-song deployment
 
 The gpu05/ferrari API uses `ROCKY_RUNNER=kubernetes` and `ROCKY_PARALLEL=2`.
-Each active song gets one GPU Pod limited to 4 CPU, 16Gi, and one GPU; the GPU
+Each active song gets one GPU Pod limited to 4 CPU, 16Gi (`ROCKY_MIDI_CPU`,
+`ROCKY_MIDI_MEMORY`, also the code default), and one GPU. The GPU
 Pod is followed by a CPU publication Pod. A third song remains queued until a
 worker finishes. The API creates and watches Pods directly, without a laptop
 agent. All work Pods are pinned to ferrari because `muscriptor-data` is there.
@@ -53,11 +54,10 @@ returned HTTP 200 and its environment reported `kubernetes` and `2`. The
 deployed runner resource spec reported 4 CPU / 16Gi / one GPU and zero
 ephemeral-storage request.
 
-## Separate gpu22/ford follow-up
+## gpu22/ford
 
-The public gpu22 API remains at `ROCKY_PARALLEL=1`. Before changing it, check
-the gpu22 namespace's CPU/memory/GPU quota, ford's available GPUs, and its
-current work Pods. Then deploy compatible server code, change only its
-`server/k8s/ws2/api-pod.yaml` settings while retaining its API-key Secret, and
-repeat the two-upload API → GPU → PDF check there. Merging this PR does not
-update a running Pod or the code on either PVC.
+On 2026-11-22 the public gpu22 API was recreated with `ROCKY_PARALLEL=2`,
+`ROCKY_MIDI_CPU=4`, and `ROCKY_MIDI_MEMORY=16Gi`, with no active jobs. Its quota is
+16 CPU / 64Gi / 4 GPUs. `/health` returned HTTP 200 in the Pod and through the
+`rocky-api` Service. The two-upload API → GPU → PDF check has not been run on gpu22.
+Use `server/k8s/ws2/api-pod.yaml` to recreate this Pod, because it keeps the API-key Secret.

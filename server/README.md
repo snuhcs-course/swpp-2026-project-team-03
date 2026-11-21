@@ -21,9 +21,9 @@ see `EMULATOR_TEST_ko.md`.
 The API pod has no GPU, so the 30-minute idle-GPU rule does not apply to it.
 A GPU is used only while a song's GPU Pod runs. `ROCKY_PARALLEL` controls how
 many songs can be in flight; the others wait in upload order. The gpu05/ferrari
-manifest uses `ROCKY_PARALLEL=2` and 4 CPU / 16Gi per GPU Pod. The separate
-gpu22/ford manifest remains at `ROCKY_PARALLEL=1` until its quota, GPU capacity,
-and two-upload flow are verified there. See `deploy/parallel2-gpu05.md`.
+and gpu22/ford manifests use `ROCKY_PARALLEL=2` and set `ROCKY_MIDI_CPU=4`,
+`ROCKY_MIDI_MEMORY=16Gi` per GPU Pod, which is also the code default. Larger
+values must still let two GPU Pods fit the 16 CPU quota. See `deploy/parallel2-gpu05.md`.
 
 ## API
 

@@ -60,6 +60,9 @@ def model_assignment(run: Path, *, completed_only: bool = False) -> dict:
                     "predicted_guitars": count, "experiment_eligible": True}
         return record
 
+    # Rollback classifiers run only when the original lineup is unknown.
+    if classifier in ("extra_trees", "rule") and config.get("original") != "unknown":
+        return empty
     if classifier == "extra_trees":
         record = {**empty, "assigned_model": "extra_trees"}
         if not isinstance(result, dict):
@@ -74,7 +77,9 @@ def model_assignment(run: Path, *, completed_only: bool = False) -> dict:
                     "predicted_guitars": count}
         return record
     if classifier == "rule":
-        return {**empty, "assigned_model": "rule", "applied_model": "rule"}
+        # The rule was applied only if the run reached the guitar stereo check.
+        applied = "rule" if isinstance(manifest.get("guitar_stereo"), dict) else None
+        return {**empty, "assigned_model": "rule", "applied_model": applied}
     return empty
 
 

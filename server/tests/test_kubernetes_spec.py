@@ -36,6 +36,13 @@ def test_midi_pod_matches_example_yaml():
     assert spec.volumes[0].persistent_volume_claim.claim_name == "muscriptor-data"
 
 
+def test_gpu_pod_size_comes_from_the_workspace_env(monkeypatch):
+    monkeypatch.setenv("ROCKY_MIDI_CPU", "6")
+    monkeypatch.setenv("ROCKY_MIDI_MEMORY", "24Gi")
+    limits = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass").spec.containers[0].resources.limits
+    assert (limits["cpu"], limits["memory"], limits["nvidia.com/gpu"]) == ("6", "24Gi", "1")
+
+
 def test_solo_practice_passes_personal_to_unified():
     band = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass", "unknown")
     solo = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass", "unknown", personal=True)

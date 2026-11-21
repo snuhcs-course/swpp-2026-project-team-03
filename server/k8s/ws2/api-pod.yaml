@@ -1,10 +1,8 @@
 # Second workspace (gpu22). The ROCKY API: a CPU-only pod that stays up (no GPU, so the 30-minute idle-GPU
-# rule does not apply). For each uploaded song it asks the laptop agent to start a
-# GPU Pod (unified.py) and then a CPU Pod (publish_scores.py). Code is read from /data/server.
+# rule does not apply). It runs up to two songs, each with one GPU Pod (unified.py) and then
+# one CPU Pod (publish_scores.py). Code is read from /data/server.
 #
-#   kubectl apply -f server/k8s/api-pod.yaml
-#   kubectl port-forward pod/rocky-api 8000:8000   # from the laptop the phone is plugged into
-#   python3 server/agent/rocky_agent.py            # on the same laptop, in another terminal
+#   After checking no jobs are active: kubectl replace --force -f server/k8s/ws2/api-pod.yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -46,9 +44,14 @@ spec:
         # the GPU and PDF Pods mount the same volume
         - name: ROCKY_PVC
           value: rocky-data
-        # one GPU per workspace: one song at a time, the rest wait in order
+        # At most two active songs; extra jobs stay queued.
         - name: ROCKY_PARALLEL
-          value: "1"
+          value: "2"
+        # Two GPU Pods must fit the workspace's 16 CPU quota with the API, files and tunnel Pods.
+        - name: ROCKY_MIDI_CPU
+          value: "4"
+        - name: ROCKY_MIDI_MEMORY
+          value: 16Gi
         # whole songs as WAV are large (a 6-minute WAV is about 60 MB)
         - name: ROCKY_MAX_UPLOAD_MB
           value: "200"
@@ -65,9 +68,11 @@ spec:
         requests:
           cpu: "0"
           memory: "0"
+          ephemeral-storage: "0"
         limits:
           cpu: "2"
           memory: 2Gi
+          ephemeral-storage: 10Gi
       volumeMounts:
         - name: data
           mountPath: /data
