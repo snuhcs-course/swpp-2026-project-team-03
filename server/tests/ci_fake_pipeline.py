@@ -9,6 +9,7 @@ MuScriptor-style progress so the app's progress screen moves.
 """
 
 import json
+import os
 import struct
 import sys
 import time
@@ -104,7 +105,14 @@ def run_pdf(run: Path) -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "midi":
-        run_midi(Path(sys.argv[3]))
-    else:
-        run_pdf(Path(sys.argv[2]))
+    exit_code = 1
+    try:
+        if sys.argv[1] == "midi":
+            run_midi(Path(sys.argv[3]))
+        else:
+            run_pdf(Path(sys.argv[2]))
+        exit_code = 0
+    finally:
+        marker = os.environ.get("FAKE_POD_EXIT_FILE")
+        if marker:
+            Path(marker).write_text(str(exit_code))

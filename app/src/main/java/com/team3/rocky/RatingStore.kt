@@ -81,8 +81,12 @@ object RatingStore {
         if (!ServerSettings.isConfigured(ctx)) return
         // 서버의 곡 id는 폰에 받아 둔 결과(result.json)에 있다. 결과가 없으면 보낼 곳이 없다.
         val jobId = ScoreStore.load(ctx, r.workId)?.result?.id
+        if (jobId == null) {
+            markSent(ctx, r) // no server job exists to attach this local rating to
+            return
+        }
         try {
-            if (jobId != null) RockyApi.from(ctx).rate(jobId, r.stars, r.title, r.instruments, AuthRepository.token(ctx))
+            RockyApi.from(ctx).rate(jobId, r.stars, r.title, r.instruments, AuthRepository.token(ctx))
             markSent(ctx, r)
         } catch (e: IOException) {
             // 인터넷이 안 되거나 서버가 거절함: 다음에 다시 보낸다.

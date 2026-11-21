@@ -24,6 +24,26 @@ def pod_file(name):
     return state / f"{name}.json"
 
 
+def process_alive(pid):
+    if os.name == "nt":
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        try:
+            return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
 if args[:3] == ["create", "-f", "-"]:
     refusals = state / "quota_refusals"
     left = int(refusals.read_text()) if refusals.exists() else int(os.environ.get("FAKE_KUBE_QUOTA_REFUSALS", "0"))
@@ -41,7 +61,10 @@ if args[:3] == ["create", "-f", "-"]:
     else:
         cmd = [sys.executable, str(HERE / "ci_fake_pipeline.py"), "pdf", env["ROCKY_OUTPUT_DIR"]]
     log = open(state / f"{name}.log", "w")
-    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+    child_env = os.environ.copy()
+    child_env["FAKE_POD_EXIT_FILE"] = str(state / f"{name}.exit")
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=child_env)
+    log.close()
     pod["_pid"] = proc.pid
     pod_file(name).write_text(json.dumps(pod))
     print(f"pod/{name} created")
@@ -51,21 +74,17 @@ elif args[:2] == ["get", "pod"]:
         sys.stderr.write(f'Error from server (NotFound): pods "{args[2]}" not found\n')
         sys.exit(1)
     pod = json.loads(f.read_text())
-    try:
-        pid, status = os.waitpid(pod["_pid"], os.WNOHANG)
-        if pid:
-            pod["_exit"] = os.waitstatus_to_exitcode(status)
-            f.write_text(json.dumps(pod))
-    except ChildProcessError:
-        pass
-    if "_exit" in pod:
-        phase = "Succeeded" if pod["_exit"] == 0 else "Failed"
+    # A different fake_kubectl process handles every request, so it cannot waitpid() on
+    # the child started by `create`. The fake pipeline leaves a portable exit marker.
+    exit_file = state / f"{args[2]}.exit"
+    if exit_file.exists():
+        phase = "Succeeded" if exit_file.read_text() == "0" else "Failed"
     else:
-        try:
-            os.kill(pod["_pid"], 0)
+        if process_alive(pod["_pid"]):
             phase = "Running"
-        except ProcessLookupError:
-            phase = "Succeeded"
+        else:
+            # The process may have written the marker between the first check and now.
+            phase = ("Succeeded" if exit_file.read_text() == "0" else "Failed") if exit_file.exists() else "Failed"
     pod["status"] = {"phase": phase, "conditions": []}
     print(json.dumps(pod))
 elif args[:1] == ["logs"]:
@@ -73,6 +92,7 @@ elif args[:1] == ["logs"]:
     print(f.read_text() if f.exists() else "")
 elif args[:2] == ["delete", "pod"]:
     pod_file(args[2]).unlink(missing_ok=True)
+    (state / f"{args[2]}.exit").unlink(missing_ok=True)
     print(f'pod "{args[2]}" deleted')
 else:
     sys.stderr.write(f"fake kubectl: unsupported {args}\n")

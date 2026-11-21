@@ -1,5 +1,7 @@
 """Star ratings the app sends from under the last score page (PUT /jobs/{id}/rating, GET /ratings)."""
 
+import json
+
 from test_accounts import auth, client, sign_up  # noqa: F401  (client is a fixture)
 
 
@@ -101,6 +103,79 @@ def test_comment_is_added_after_the_stars(client):  # noqa: F811
     assert (item["stars"], item["comment"]) == (5, "드럼 필인이 좋아요")
 
 
+def test_rating_links_job_and_server_assigned_model_until_song_is_deleted(client):  # noqa: F811
+    job = finished_job(client)
+    run = client.app_state.store.run_dir(job)
+    run.mkdir(parents=True)
+    arm = "fusion_rbf_svm"
+    model_hash = "a" * 64
+    (run / "manifest.json").write_text(json.dumps({
+        "status": "complete",
+        "config": {"guitar_count_classifier": "alpha_three_arm", "guitar_count_arm": arm,
+                   "guitar_count_arm_probability": 1 / 3},
+        "guitar_count": {"method": "alpha_three_arm", "assigned_arm": arm,
+                         "experiment_eligible": True, "assignment_probability": 1 / 3,
+                         "model_sha256": model_hash, "count": 2},
+    }), encoding="utf-8")
+    response = client.put(f"/jobs/{job}/rating", json={
+        "stars": 4, "assigned_model": "fusion_extra_trees", "model_sha256": "b" * 64})
+    assert response.status_code == 200
+    response = client.put(f"/jobs/{job}/rating", json={"stars": 4, "comment": "좋아요"})
+    assert response.json()["comment"] == "좋아요"
+    item = client.get("/ratings").json()["ratings"][0]
+    assert (item["job_id"], item["stars"], item["assigned_model"], item["applied_model"]) == (
+        job, 4, arm, arm)
+    assert item["comment"] == "좋아요"
+    assert item["model_sha256"] == model_hash
+    assert item["assignment_probability"] == 1 / 3
+    assert item["predicted_guitars"] == 2
+    client.app_state.store.purge(job)
+    assert client.get("/ratings").json()["count"] == 0
+
+
+def test_fallback_rating_is_not_attributed_to_the_assigned_arm(client):  # noqa: F811
+    job = finished_job(client)
+    run = client.app_state.store.run_dir(job)
+    run.mkdir(parents=True)
+    (run / "manifest.json").write_text(json.dumps({
+        "status": "complete",
+        "config": {"guitar_count_classifier": "alpha_three_arm",
+                   "guitar_count_arm": "fusion_extra_trees"},
+        "guitar_count": {"method": "rule_fallback", "assigned_arm": "fusion_extra_trees",
+                         "experiment_eligible": False},
+    }), encoding="utf-8")
+    assert client.put(f"/jobs/{job}/rating", json={"stars": 3}).status_code == 200
+    item = client.get("/ratings").json()["ratings"][0]
+    assert item["assigned_model"] == "fusion_extra_trees"
+    assert item["applied_model"] == "rule_fallback"
+    assert item["model_sha256"] is None
+    assert item["assignment_probability"] is None
+
+
+def test_rerating_keeps_the_first_verified_assignment(client):  # noqa: F811
+    job = finished_job(client)
+    run = client.app_state.store.run_dir(job)
+    run.mkdir(parents=True)
+    manifest = {
+        "status": "complete",
+        "config": {"guitar_count_classifier": "alpha_three_arm", "guitar_count_arm": "fusion_rbf_svm",
+                   "guitar_count_arm_probability": 1 / 3},
+        "guitar_count": {"method": "alpha_three_arm", "assigned_arm": "fusion_rbf_svm",
+                         "experiment_eligible": True, "assignment_probability": 1 / 3,
+                         "model_sha256": "a" * 64, "count": 2},
+    }
+    path = run / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert client.put(f"/jobs/{job}/rating", json={"stars": 2}).status_code == 200
+    manifest["config"]["guitar_count_arm"] = "fusion_extra_trees"
+    manifest["guitar_count"]["assigned_arm"] = "fusion_extra_trees"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert client.put(f"/jobs/{job}/rating", json={"stars": 5}).status_code == 200
+    item = client.get("/ratings").json()["ratings"][0]
+    assert (item["stars"], item["assigned_model"], item["applied_model"]) == (
+        5, "fusion_rbf_svm", "fusion_rbf_svm")
+
+
 def test_old_database_gets_the_new_columns(tmp_path):
     import sqlite3
     from rocky_server.accounts import Accounts
@@ -113,4 +188,8 @@ def test_old_database_gets_the_new_columns(tmp_path):
     old.commit(); old.close()
     acc = Accounts(db)
     assert acc.ratings()["ratings"][0]["comment"] == ""
+    assert acc.ratings()["ratings"][0]["assigned_model"] is None
+    acc.rate("new-job", 4, None, model={"assigned_model": "fusion_rbf_svm",
+                                       "applied_model": "fusion_rbf_svm"})
+    assert Accounts(db).ratings()["count"] == 2
     assert "photo_at" in {r["name"] for r in acc.db.execute("PRAGMA table_info(users)")}
