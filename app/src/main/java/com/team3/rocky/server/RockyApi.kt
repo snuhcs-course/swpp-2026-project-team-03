@@ -59,8 +59,29 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
             requestMethod = method
             connectTimeout = 10_000
             readTimeout = readTimeoutMs
+            // GET은 공개 입구의 302를 따라가면 통과된다. 본문이 있는 요청은 FrontGate로 직접 다시 보낸다.
+            instanceFollowRedirects = method == "GET"
             if (apiKey.isNotBlank()) setRequestProperty("X-Rocky-Key", apiKey)
         }
+
+    /**
+     * 요청을 보내고 응답 코드까지 받은 연결을 돌려준다. 공개 입구가 돌려보내면(302·307 등)
+     * 연결을 통과시킨 뒤 같은 요청을 다시 보낸다 ([FrontGate]). [write]는 보낼 때마다 다시 불린다.
+     */
+    private fun send(
+        path: String, method: String = "GET", readTimeoutMs: Int = 30_000,
+        write: (HttpURLConnection) -> Unit = {},
+    ): HttpURLConnection {
+        var attempt = 1
+        while (true) {
+            val c = open(path, method, readTimeoutMs)
+            write(c)
+            if (!FrontGate.isBounce(c.responseCode) || attempt >= FrontGate.ATTEMPTS) return c
+            FrontGate.drain(c)
+            FrontGate.warm(base, apiKey)
+            attempt++
+        }
+    }
 
     private fun HttpURLConnection.body(): String {
         val code = responseCode
@@ -83,6 +104,8 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
         original: List<String>, lineup: List<String>, mode: String,
     ): String {
         val boundary = "rocky-" + UUID.randomUUID()
+        // 음원은 한 번만 읽을 수 있어서 돌려보내기를 받은 뒤 다시 보낼 수 없다. 먼저 연결을 통과시켜 둔다.
+        FrontGate.warm(base, apiKey)
         val c = open("/jobs", "POST", readTimeoutMs = 120_000)
         c.doOutput = true
         c.setChunkedStreamingMode(64 * 1024)
@@ -105,22 +128,27 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
             input.copyTo(out, 64 * 1024)
             text("\r\n--$boundary--\r\n")
         }
+        if (FrontGate.isBounce(c.responseCode)) {
+            FrontGate.drain(c)
+            // 연결 문제로 다룬다: 앱의 '다시 시도'가 파일을 처음부터 다시 올린다.
+            throw IOException("public entrance redirected the upload (HTTP ${c.responseCode}); try again")
+        }
         return ApiJson.jobId(c.body())
     }
 
     override fun status(jobId: String): JobStatus = ApiJson.status(open("/jobs/$jobId").body())
 
-    override fun cancel(jobId: String): String = ApiJson.jobState(open("/jobs/$jobId/cancel", "POST").body())
+    override fun cancel(jobId: String): String = ApiJson.jobState(send("/jobs/$jobId/cancel", "POST").body())
 
     override fun result(jobId: String): JobResult = ApiJson.result(open("/jobs/$jobId/result").body())
 
     override fun retry(jobId: String) {
-        open("/jobs/$jobId/retry", "POST").body()
+        send("/jobs/$jobId/retry", "POST").body()
     }
 
     override fun transpose(jobId: String, semitones: Int): JobResult {
         val path = "/jobs/$jobId/transpositions/$semitones"
-        val initial = open(path, "POST").body()
+        val initial = send(path, "POST").body()
         if (!JSONObject(initial).has("state")) return ApiJson.result(initial) // cached result
         val deadline = System.nanoTime() + 600_000_000_000L
         while (System.nanoTime() < deadline) {
@@ -156,19 +184,20 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
      * 서버에서 곡이 이미 지워졌으면(404) 보낼 곳이 없으므로 그냥 끝낸다.
      */
     fun rate(jobId: String, stars: Int, title: String, instruments: List<String>, token: String? = null, comment: String? = null) {
-        val c = open("/jobs/$jobId/rating", "PUT")
-        c.doOutput = true
-        c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        if (!token.isNullOrBlank()) c.setRequestProperty("Authorization", "Bearer $token")
         val body = org.json.JSONObject().put("stars", stars).put("title", title)
             .put("instruments", org.json.JSONArray(instruments))
             .apply { if (comment != null) put("comment", comment) }.toString()
-        c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        val c = send("/jobs/$jobId/rating", "PUT") { conn ->
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        }
         if (c.responseCode == 404) c.disconnect() else c.body()
     }
 
     override fun delete(jobId: String) {
-        val c = open("/jobs/$jobId", "DELETE")
+        val c = send("/jobs/$jobId", "DELETE")
         if (c.responseCode == 404) c.disconnect() else c.body()  // 404 = 이미 지워짐
     }
 
