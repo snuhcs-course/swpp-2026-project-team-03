@@ -227,7 +227,8 @@ class KubernetesRunner:
             working_dir=working_dir,
             env=[c.V1EnvVar(name=k, value=v) for k, v in env.items()],
             # the workspace has no guaranteed CPU or memory, so requests must be 0
-            resources=c.V1ResourceRequirements(requests={"cpu": "0", "memory": "0"}, limits=limits),
+            resources=c.V1ResourceRequirements(
+                requests={"cpu": "0", "memory": "0", "ephemeral-storage": "0"}, limits=limits),
             volume_mounts=[c.V1VolumeMount(name="data", mount_path="/data")])
         spec = c.V1PodSpec(
             restart_policy="Never", termination_grace_period_seconds=1,
@@ -260,7 +261,7 @@ class KubernetesRunner:
                "ROCKY_PERSONAL": "1" if personal else "",
                "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"}
         return self._pod(f"rocky-midi-{job_id}", self.pipeline_image, script, env,
-                         {"cpu": "8", "memory": "32Gi", "nvidia.com/gpu": "1"})
+                         {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": "1"})
 
     def pdf_pod(self, job_id: str, run: Path):
         script = "\n".join([
