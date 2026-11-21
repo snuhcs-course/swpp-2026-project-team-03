@@ -626,7 +626,7 @@ fun HomeTab(
             fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp,
         )
         Spacer(Modifier.height(24.dp))
-        // 새 악보는 두 가지: 혼자 연습할 내 악기만 / 밴드 전원의 파트.
+        // 새 악보는 두 가지: 혼자 연습할 내 악기만 / 밴드 전원의 파트. 둘 다 주황 버튼 (2차 UAT 전 챈 결정).
         ModeButton(
             title = tr("개인 연습용", "Solo practice"),
             sub = tr("내가 연주할 악기의 악보만 받아요", "Scores just for the instruments you play"),
@@ -636,7 +636,7 @@ fun HomeTab(
         ModeButton(
             title = tr("밴드 합주용", "Band rehearsal"),
             sub = tr("우리 밴드 파트별 악보를 받아요", "A score for every part in your band"),
-            primary = false, icon = { c -> BandIcon(c) }, onClick = onBand,
+            primary = true, icon = { c -> BandIcon(c) }, onClick = onBand,
         )
 
         // 처음 쓰는 사람을 위한 순서 안내. 평소에는 접어 두고 눌러서 편다.
@@ -669,7 +669,7 @@ fun HomeTab(
     }
 }
 
-/** 홈의 큰 새 악보 버튼 (개인 연습용 / 밴드 합주용). [primary]면 주황 바탕. */
+/** 홈의 큰 새 악보 버튼 (개인 연습용 / 밴드 합주용, 지금은 둘 다 [primary]). [primary]면 주황 바탕. */
 @Composable
 private fun ModeButton(title: String, sub: String, primary: Boolean, icon: @Composable (Color) -> Unit, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
