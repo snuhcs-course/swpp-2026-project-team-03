@@ -17,20 +17,37 @@ class MemberApiException(val code: Int, message: String, val field: String?) : j
 class MemberApi(baseUrl: String, private val apiKey: String, private val token: String?) {
     private val base = baseUrl.trim().trimEnd('/')
 
-    fun call(method: String, path: String, body: JSONObject? = null): String {
-        val c = (URL(base + path).openConnection() as HttpURLConnection).apply {
+    private fun open(method: String, path: String): HttpURLConnection =
+        (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 10_000
             readTimeout = 20_000
+            // GET은 공개 입구의 302를 따라가면 통과된다. 본문이 있는 요청은 FrontGate로 직접 다시 보낸다.
+            instanceFollowRedirects = method == "GET"
             if (apiKey.isNotBlank()) setRequestProperty("X-Rocky-Key", apiKey)
             if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
         }
-        try {
+
+    /** 요청을 보내고 응답 코드까지 받은 연결. 공개 입구가 돌려보내면 연결을 통과시킨 뒤 다시 보낸다 ([FrontGate]). */
+    private fun send(method: String, path: String, body: ByteArray?, type: String): HttpURLConnection {
+        var attempt = 1
+        while (true) {
+            val c = open(method, path)
             if (body != null) {
                 c.doOutput = true
-                c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                c.setRequestProperty("Content-Type", type)
+                c.outputStream.use { it.write(body) }
             }
+            if (!FrontGate.isBounce(c.responseCode) || attempt >= FrontGate.ATTEMPTS) return c
+            FrontGate.drain(c)
+            FrontGate.warm(base, apiKey)
+            attempt++
+        }
+    }
+
+    fun call(method: String, path: String, body: JSONObject? = null): String {
+        val c = send(method, path, body?.toString()?.toByteArray(Charsets.UTF_8), "application/json; charset=utf-8")
+        try {
             val code = c.responseCode
             if (code !in 200..299) {
                 val text = c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
@@ -47,19 +64,8 @@ class MemberApi(baseUrl: String, private val apiKey: String, private val token: 
 
     /** 사진처럼 JSON이 아닌 내용을 올리거나(PUT) 받는다(GET). 없으면(404) null. */
     fun bytes(method: String, path: String, body: ByteArray? = null, type: String = "image/jpeg"): ByteArray? {
-        val c = (URL(base + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 10_000
-            readTimeout = 20_000
-            if (apiKey.isNotBlank()) setRequestProperty("X-Rocky-Key", apiKey)
-            if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
-        }
+        val c = send(method, path, body, type)
         try {
-            if (body != null) {
-                c.doOutput = true
-                c.setRequestProperty("Content-Type", type)
-                c.outputStream.use { it.write(body) }
-            }
             val code = c.responseCode
             if (code == 404) return null
             if (code !in 200..299) throw MemberApiException(code, "HTTP $code", null)
