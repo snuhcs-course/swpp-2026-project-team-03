@@ -121,12 +121,20 @@ class JobStore:
 
     def purge(self, job_id: str) -> None:
         """Remove the record, log, upload, run folder (results and key changes) and the mark."""
-        if self.on_purge is not None:
-            self.on_purge(job_id)
+        # Song files go first, so a database error can never leave them on the volume.
         shutil.rmtree(self.run_dir(job_id), ignore_errors=True)
         for f in self.inputs.glob(f"{job_id}.*"):
             f.unlink(missing_ok=True)
-        for f in (self.log(job_id), self.path(job_id), self.tombstone(job_id)):
+        self.log(job_id).unlink(missing_ok=True)
+        if self.on_purge is not None:
+            try:
+                self.on_purge(job_id)
+            except Exception:
+                # Keep the record and its mark: the API hides it and the next start purges it again.
+                logging.exception("Could not delete experiment rows for job %s", job_id)
+                self.tombstone(job_id).touch()
+                return
+        for f in (self.path(job_id), self.tombstone(job_id)):
             f.unlink(missing_ok=True)
         self._recorded_state.pop(job_id, None)
 
@@ -222,7 +230,10 @@ class Worker:
                 with self.cond:
                     self.cond.wait(timeout=30)
                 continue
-            self.run(job)
+            try:
+                self.run(job)
+            except Exception:  # one song's cleanup error must not stop the queue
+                logging.exception("Worker could not finish job %s", job.id)
 
     def cancel(self, job_id: str) -> str:
         """Persist cancellation before signalling the runner or waking the queue."""

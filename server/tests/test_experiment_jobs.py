@@ -1,10 +1,13 @@
 """Alpha denominators include unrated and failed jobs, but honor song deletion."""
 
 import json
+
+import pytest
 from fastapi.testclient import TestClient
 
 from rocky_server.app import create_app
 from rocky_server.jobs import JobStore, Worker
+from rocky_server.rating_model import rating_model
 from test_accounts import client  # noqa: F401 - pytest fixture
 from fake_pipeline import FakeRunner
 
@@ -122,8 +125,66 @@ def test_restart_excludes_downtime_and_queue_wait(tmp_path):
 
 
 def test_classifier_typo_fails_at_api_startup(tmp_path, monkeypatch):
-    import pytest
     monkeypatch.setenv("ROCKY_GUITAR_COUNT_CLASSIFIER", "extratrees")
     store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
     with pytest.raises(ValueError, match="ROCKY_GUITAR_COUNT_CLASSIFIER"):
         create_app(store, FakeRunner(), start_worker=False)
+
+
+def test_failed_experiment_delete_removes_files_and_keeps_the_worker_alive(tmp_path):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    job = store.create("gone", "", ["guitar"])
+    audio = store.inputs / f"{job.id}.wav"
+    audio.write_bytes(b"audio")
+    store.run_dir(job.id).mkdir()
+    store.update(job, filename=audio.name)
+
+    def full_disk(_job_id):
+        raise OSError("database or disk is full")
+
+    store.on_purge = full_disk
+    store.purge(job.id)
+    assert not audio.exists() and not store.run_dir(job.id).exists()
+    assert store.is_deleted(job.id) and store.get(job.id) is not None  # retried at next start
+
+    store.on_purge = None
+    worker = Worker(store, FakeRunner())
+    worker.threads = []
+    worker.start()
+    assert store.get(job.id) is None and not store.is_deleted(job.id)
+
+
+def test_worker_loop_survives_an_error_from_one_job(tmp_path):
+    store = JobStore(tmp_path / "app", tmp_path / "runs", tmp_path / "input")
+    first, second = store.create("a", "", ["guitar"]), store.create("b", "", ["guitar"])
+    store.update(first, state="queued")
+    store.update(second, state="queued")
+    worker = Worker(store, FakeRunner())
+    seen = []
+
+    class Stop(BaseException):
+        pass
+
+    def run(job):
+        seen.append(job.id)
+        store.update(job, state="failed")
+        if len(seen) == 1:
+            raise OSError("cleanup failed")
+        raise Stop
+
+    worker.run = run
+    with pytest.raises(Stop):
+        worker._loop()
+    assert seen == [first.id, second.id]
+
+
+@pytest.mark.parametrize("classifier", ["extra_trees", "rule"])
+def test_rollback_model_is_not_recorded_when_it_did_not_run(tmp_path, classifier):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "manifest.json").write_text(json.dumps({"status": "complete", "config": {
+        "guitar_count_classifier": classifier, "original": ["drums", "guitar"], "requested_guitars": 2}}))
+    assert rating_model(run)["assigned_model"] is None
+    (run / "manifest.json").write_text(json.dumps({"status": "complete", "config": {
+        "guitar_count_classifier": classifier, "original": "unknown", "requested_guitars": 2}}))
+    assert rating_model(run)["assigned_model"] == classifier

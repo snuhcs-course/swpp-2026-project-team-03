@@ -43,6 +43,11 @@ spec:
         # One active song; extra jobs stay queued.
         - name: ROCKY_PARALLEL
           value: "1"
+        # gpu05 GPU Pod size; other workspaces keep the 8 CPU / 32Gi default.
+        - name: ROCKY_MIDI_CPU
+          value: "4"
+        - name: ROCKY_MIDI_MEMORY
+          value: 16Gi
         # whole songs as WAV are large (a 6-minute WAV is about 60 MB)
         - name: ROCKY_MAX_UPLOAD_MB
           value: "200"

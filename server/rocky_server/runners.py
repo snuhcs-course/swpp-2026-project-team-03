@@ -261,7 +261,8 @@ class KubernetesRunner:
                "ROCKY_PERSONAL": "1" if personal else "",
                "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"}
         return self._pod(f"rocky-midi-{job_id}", self.pipeline_image, script, env,
-                         {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": "1"})
+                         {"cpu": os.environ.get("ROCKY_MIDI_CPU", "8"),
+                          "memory": os.environ.get("ROCKY_MIDI_MEMORY", "32Gi"), "nvidia.com/gpu": "1"})
 
     def pdf_pod(self, job_id: str, run: Path):
         script = "\n".join([

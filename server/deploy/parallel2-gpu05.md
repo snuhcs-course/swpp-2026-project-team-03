@@ -1,7 +1,9 @@
 # gpu05 two-song deployment
 
 The gpu05/ferrari API uses `ROCKY_RUNNER=kubernetes` and `ROCKY_PARALLEL=2`.
-Each active song gets one GPU Pod limited to 4 CPU, 16Gi, and one GPU; the GPU
+Each active song gets one GPU Pod limited to 4 CPU, 16Gi (`ROCKY_MIDI_CPU`,
+`ROCKY_MIDI_MEMORY` in the gpu05 manifests; the code default is 8 CPU / 32Gi), and
+one GPU. Recreate the API Pod from the manifest when deploying this code. The GPU
 Pod is followed by a CPU publication Pod. A third song remains queued until a
 worker finishes. The API creates and watches Pods directly, without a laptop
 agent. All work Pods are pinned to ferrari because `muscriptor-data` is there.
