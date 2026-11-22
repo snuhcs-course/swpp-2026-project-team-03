@@ -1,0 +1,10 @@
+case,start_sec,X,Y
+01_L01_bass,0.0,A,C
+02_L12_bass,75.0,A,C
+03_L04_guitar,175.0,A,C
+04_L04_bass,60.0,C,A
+05_P04_bass,185.0,C,A
+06_P05_piano,185.0,A,C
+07_P08_guitar,90.0,C,A
+08_L16_guitar,290.0,C,A
+09_P06_bass,230.0,A,C

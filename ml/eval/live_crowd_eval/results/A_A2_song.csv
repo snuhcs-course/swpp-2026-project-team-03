@@ -1,0 +1,6 @@
+id,group,song,crowd_ratio_db,crowd_sec_frac,notes_A,notes_B,notes_change_pct,all_onset_pitch_F1,beat_F,downbeat_F,bpm_A,bpm_B,meter_A,meter_B,two_guitars_A,two_guitars_B,missing_A,missing_B,band_ratio_A,band_ratio_B,vocals_share_A,vocals_share_B,other_share_A,other_share_B
+L01,live,Red Hot Chili Peppers - Can't Stop,-12.16,0.174,5154,5154,0.0,1.0,1.0,1.0,93.7,93.7,4,4,False,False,piano,piano,0.6413,0.6413,0.3055,0.3055,0.0532,0.0532
+L12,live,Journey - Don't Stop Believin',-19.08,0.06,4826,4826,0.0,1.0,1.0,1.0,125.0,125.0,4,4,False,False,,,0.5411,0.5411,0.4393,0.4393,0.0196,0.0196
+L17,live,새소년 - 긴 꿈,-41.3,0.0,6223,6223,0.0,1.0,1.0,1.0,125.0,125.0,4,4,False,False,,,0.7012,0.7012,0.2768,0.2768,0.022,0.022
+S04,studio,Journey - Don't Stop Believin',-43.39,0.0,3814,3814,0.0,1.0,1.0,1.0,120.0,120.0,4,4,False,False,,,0.4995,0.4995,0.4783,0.4783,0.0222,0.0222
+S07,studio,Ben Folds Five - Brick,-47.09,0.0,3106,3106,0.0,1.0,1.0,1.0,96.8,96.8,4,4,,,guitar,guitar,0.65,0.65,0.2424,0.2424,0.1076,0.1076

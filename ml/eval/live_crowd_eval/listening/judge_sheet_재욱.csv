@@ -1,0 +1,10 @@
+번호,파일 이름 앞부분,곡,악기,원본 구간(초),더 가까운 쪽 (X / Y / 비슷),이유·메모
+1,01_L01_bass,Red Hot Chili Peppers - Can't Stop (라이브),베이스,0~30,비슷,둘 다 가짜 음이 많은듯? Stem wav에는 무음으로 들리는데 둘 다 hallucination 있는 것 같음
+2,02_L12_bass,Journey - Don't Stop Believin' (라이브),베이스,75~105,비슷,구분 불가
+3,03_L04_guitar,The White Stripes - Seven Nation Army (라이브),기타,175~205,애매,"X가 잡음 제거는 잘 하는데, Y가 guitar 파트 자체는 더 잘 채보함"
+4,04_L04_bass,The White Stripes - Seven Nation Army (라이브),베이스,60~90,비슷,"구분 불가. 물론 정답은 무음이지만, 둘 다 마지막에 소리가 있는데, Y가 채보 자체는 더 잘한듯."
+5,05_P04_bass,버스커버스커 - 여수 밤바다 (버스킹 직캠),베이스,185~215,모르겠음,"원곡에 이 부분에서 베이스가 실제로 연주하는게 맞으면 X가 더 좋고, 실제로 무음이면 Y가 더 좋은듯. Y는 아예 무음. X는 음이 잡히긴 함"
+6,06_P05_piano,실리카겔 - Desert Eagle (페스티벌 라이브),피아노,185~215,X,X는 무음임. Y는 잡음 많음
+7,07_P08_guitar,무한궤도 - 그대에게 (1988 방송),기타,90~120,X,Y가 후반부 음을 채보 못함
+8,08_L16_guitar,The Killers - Mr. Brightside (라이브),기타,290~320,Y,Y가 더 듣기 좋음 - 아마 실제 기타 연주랑 비슷해서지 않을까…
+9,09_P06_bass,Green Day - 21 Guns (라이브),베이스,230~260,X,X는 무음임. Y는 잡음 많음

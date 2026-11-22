@@ -1,0 +1,10 @@
+번호,파일 이름 앞부분,곡,악기,원본 구간(초),더 가까운 쪽 (X / Y / 비슷),이유·메모
+01,01_L01_bass,Red Hot Chili Peppers - Can't Stop (라이브),베이스,0~30,비슷,
+02,02_L12_bass,Journey - Don't Stop Believin' (라이브),베이스,75~105,비슷,
+03,03_L04_guitar,The White Stripes - Seven Nation Army (라이브),기타,175~205,Y,
+04,04_L04_bass,The White Stripes - Seven Nation Army (라이브),베이스,60~90,Y,XY 둘 다 안치는 곳에서 소리 들림
+05,05_P04_bass,버스커버스커 - 여수 밤바다 (버스킹 직캠),베이스,185~215,X,Y는 아예 소리 못 잡음
+06,06_P05_piano,실리카겔 - Desert Eagle (페스티벌 라이브),피아노,185~215,Y,X는 아예 소리 못 잡음
+07,07_P08_guitar,무한궤도 - 그대에게 (1988 방송),기타,90~120,X,Y는 뒷부분 소리 못잡음
+08,08_L16_guitar,The Killers - Mr. Brightside (라이브),기타,290~320,Y,
+09,09_P06_bass,Green Day - 21 Guns (라이브),베이스,230~260,X,Y는 없는 부분에 소리 만들어냄

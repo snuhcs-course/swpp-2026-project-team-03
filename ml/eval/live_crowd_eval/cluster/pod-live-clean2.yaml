@@ -1,0 +1,37 @@
+# cleaned2(원본 - crowd)로 38곡 다시 돌리는 Pod(arm C). 만들자마자 run_clean2.sh 실행.
+# 끝나면 지우기: k22 delete pod rocky-live-clean2
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-live-clean2
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ford
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  dnsConfig:
+    options:
+      - name: ndots
+        value: "1"
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: rocky-data
+  containers:
+    - name: app
+      image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+      command: ["/bin/bash", "-c", "bash /data/live_eval/run_clean2.sh 2>&1 | tee -a /data/live_eval/clean2.log"]
+      env:
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: compute,utility
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "8"
+          memory: 32Gi
+          nvidia.com/gpu: 1
+      volumeMounts:
+        - name: data
+          mountPath: /data
