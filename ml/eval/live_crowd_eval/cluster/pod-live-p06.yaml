@@ -1,0 +1,37 @@
+# P06 원인 확인용 분리 Pod (cpu 4·16Gi). 만들자마자 run_p06.sh 실행.
+# 끝나면 지우기: k22 delete pod rocky-live-p06
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-live-p06
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ford
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  dnsConfig:
+    options:
+      - name: ndots
+        value: "1"
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: rocky-data
+  containers:
+    - name: app
+      image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+      command: ["/bin/bash", "-c", "bash /data/live_eval/run_p06.sh 2>&1 | tee -a /data/live_eval/p06.log"]
+      env:
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: compute,utility
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: 1
+      volumeMounts:
+        - name: data
+          mountPath: /data

@@ -1,0 +1,11 @@
+번호,곡,구간(분:초),지워진 음,원본에서 들리는 것 (함성만 / 악기도 연주됨 / 잘 모르겠음),판정 (가짜 음 / 진짜 음 / 섞임),메모
+1,L01_Red Hot Chili Peppers - Can't Stop,0:00~0:04,drums 5개 (drum 44),"함성 확실히 들림, 악기도 연주됨",진짜 음,곡 시작 전 드러머가 하히햇으로 박자를 센다
+2,L01_Red Hot Chili Peppers - Can't Stop,0:22~0:23,"guitar 1개, bass 6개, drums 10개 (E1, E3, drum 38, drum 42)","함성 확실히 들림, 악기도 연주됨",진짜 음,
+3,L10_Coldplay - Fix You,4:51~4:55,"bass 6개 (A#1, D#1)","잘 모르겠음, 피아노랑 함성은 들리는데 베이스는 모르겠음",모르겠음,
+4,L10_Coldplay - Fix You,4:57~4:58,bass 2개 (D#1),베이스 안 들림,가짜 음? 확신 없음,
+5,L10_Coldplay - Fix You,5:02~5:03,bass 2개 (D#1),베이스 안 들림,가짜 음,
+6,L13_Toto - Africa,5:55~6:03,"drums 16개 (drum 39, drum 44)",함성만,가짜 음,
+7,L16_The Killers - Mr. Brightside,0:02~0:03,"guitar 5개 (C#5, D#4, D#5, F4)",악기도 연주됨,진짜 음,1초부터 리프 이어짐
+8,L16_The Killers - Mr. Brightside,5:25~5:26,"guitar 9개, bass 3개 (A#1, A#2, F2, G#1, G#2…)",악기도 연주되는데 기타는 아닌 것 같고 베이스인지 신스인지 모를 전자음이 들림,가짜 음? 확신 없음,
+9,P03_DAY6 - 예뻤어,0:59~1:00,"piano 2개 (D#1, D#2)",건반 연주됨,진짜 음? 확신 없음,
+10,P03_DAY6 - 예뻤어,1:05~1:06,"guitar 9개 (A2, B3, C4, F3, G#2…)",기타 연주됨,진짜 음,

@@ -1,0 +1,37 @@
+# gpu22(ford)에서 라이브 전처리 실험을 돌리는 Pod. 만들자마자 run_all.sh가 바로 실행됨(30분 GPU 유휴 종료 대비).
+# 끝나면 꼭 지우기: k22 delete pod rocky-live-eval
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rocky-live-eval
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ford
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  dnsConfig:
+    options:
+      - name: ndots
+        value: "1"
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: rocky-data
+  containers:
+    - name: app
+      image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+      command: ["/bin/bash", "-c", "bash /data/live_eval/run_all.sh 2>&1 | tee -a /data/live_eval/run.log"]
+      env:
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: compute,utility
+      resources:
+        requests:
+          cpu: "0"
+          memory: "0"
+        limits:
+          cpu: "8"
+          memory: 32Gi
+          nvidia.com/gpu: 1
+      volumeMounts:
+        - name: data
+          mountPath: /data
