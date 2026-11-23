@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  ROCKY 서버는 SGS 안에 있고 밖으로 공개 주소가 없어서, 시연 때는 노트북을 거쳐 붙는다.
-  - USB + adb reverse: http://localhost:8000
-  - 같은 Wi-Fi/핫스팟에서 노트북 IP로: http://<노트북 IP>:8000
-  제출한 APK는 바꿀 수 없으므로 어느 방법이든 쓸 수 있게 http를 허용한다.
-  공개 서버(HTTPS)가 생기면 cleartextTrafficPermitted를 false로 바꾼다.
+  공개 서버는 HTTPS(https://team3.swpp-2026-b.snu.ac.kr, 11/23부터)라서 평문 http는 막는다.
+  수업 앞단은 http 요청을 https로 301 돌려보내므로 http 주소로 빌드한 앱은 서버에 붙지 않는다.
+  개발할 때만 쓰는 로컬 주소는 http를 허용한다:
+  - USB + adb reverse: http://localhost:8000 (127.0.0.1)
+  - 에뮬레이터에서 노트북 서버: http://10.0.2.2:8000
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
 </network-security-config>
