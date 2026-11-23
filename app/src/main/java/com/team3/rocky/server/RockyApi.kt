@@ -229,13 +229,28 @@ object ServerSettings {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
-    fun url(ctx: Context): String = prefs(ctx).getString("url", null) ?: BuildConfig.ROCKY_SERVER_URL
+    fun url(ctx: Context): String = prefs(ctx).getString("url", null)?.let(::normalize) ?: BuildConfig.ROCKY_SERVER_URL
 
-    fun key(ctx: Context): String = prefs(ctx).getString("key", null) ?: BuildConfig.ROCKY_API_KEY
+    /** 이 컴퓨터 안(에뮬레이터·adb reverse)에서만 쓰는 주소. 이런 곳만 http를 허용한다 (network_security_config). */
+    private val LOCAL_HOSTS = setOf("localhost", "127.0.0.1", "10.0.2.2")
+
+    /**
+     * 공개 주소는 https만 열려 있다 (PR #49, 앱은 http를 막음). 예전에 '서버 설정'에 저장한
+     * `http://team3…` 같은 주소는 https로 바꿔 쓴다. 그대로 두면 '연결 확인'이 늘 '연결할 수 없어요'가 된다 (2차 UAT).
+     */
+    fun normalize(url: String): String {
+        val u = url.trim().trimEnd('/')
+        if (!u.startsWith("http://", ignoreCase = true)) return u
+        val host = u.substring(7).substringBefore('/').substringBefore(':').lowercase()
+        return if (host in LOCAL_HOSTS) u else "https://" + u.substring(7)
+    }
+
+    /** 저장한 키가 비어 있으면 빌드에 넣은 키를 쓴다 (예전에 키 없이 저장한 설정 때문에 막히지 않게). */
+    fun key(ctx: Context): String = prefs(ctx).getString("key", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.ROCKY_API_KEY
 
     fun isConfigured(ctx: Context) = url(ctx).isNotBlank()
 
     fun save(ctx: Context, url: String, key: String) {
-        prefs(ctx).edit().putString("url", url.trim()).putString("key", key.trim()).apply()
+        prefs(ctx).edit().putString("url", normalize(url)).putString("key", key.trim()).apply()
     }
 }
