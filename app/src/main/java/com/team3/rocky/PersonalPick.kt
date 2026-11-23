@@ -61,7 +61,7 @@ fun PersonalPickScreen(
             Text(tr("어떤 악기를 연습하나요?", "Which instruments are you practicing?"),
                 fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
             Spacer(Modifier.height(6.dp))
-            Text(tr("연습할 악기 하나를 골라 주세요. 그 악기의 악보만 만들어요.", "Pick the one instrument you practice. We make just its score."),
+            Text(tr("연습할 악기 하나를 골라 주세요.\n그 악기의 악보만 만들어요.", "Pick the one instrument you practice.\nWe make just its score."),
                 fontSize = 14.sp, color = cs.onSurfaceVariant, lineHeight = 20.sp)
             Spacer(Modifier.height(16.dp))
             Demo.INSTRUMENTS.chunked(2).forEach { row ->

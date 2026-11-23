@@ -102,7 +102,10 @@ class ServerEndToEndTest {
             job = ScoreJobs.start(ctx, "연결 안 됨", listOf("drums"), emptyList(), song())
         }
         waitFor(job, 30)
+        // 연결이 안 되면 다시 연결을 기다리지 않고 바로 취소하고, 홈에서 다시 만들라고 안내한다 (2차 UAT).
         assertTrue(job.failed)
-        assertTrue(job.error!!.contains("인터넷에 연결할 수 없어요"))
+        assertTrue(job.offline)
+        assertTrue(!job.retryable)
+        assertTrue(job.error!!.contains("인터넷 연결이 끊겨서"))
     }
 }

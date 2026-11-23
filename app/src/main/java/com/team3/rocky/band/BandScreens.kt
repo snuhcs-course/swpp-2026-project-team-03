@@ -102,7 +102,7 @@ fun BandListScreen(
             list.isEmpty() -> {
                 Spacer(Modifier.height(64.dp))
                 Text(
-                    tr("참여한 밴드가 없어요. 밴드를 만들고 초대 코드를 보내 보세요.", "No bands yet. Create one and send the invite code."),
+                    tr("참여한 밴드가 없어요.\n밴드를 만들고 초대 코드를 보내 보세요.", "No bands yet.\nCreate one and send the invite code."),
                     color = cs.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -202,7 +202,7 @@ fun BandJoinScreen(user: User, repo: BandRepository, onBack: () -> Unit, onDone:
             }
             Spacer(Modifier.height(20.dp))
             Text(tr("이 밴드에서 연주하는 악기", "What you play in this band"), fontWeight = FontWeight.SemiBold)
-            Text(tr("여러 개 고를 수 있어요. 공유된 악보를 열면 이 악기가 먼저 골라져 있어요.", "Pick any. Shared scores open on your instrument."),
+            Text(tr("여러 개 고를 수 있어요.\n공유된 악보를 열면 이 악기가 먼저 골라져 있어요.", "Pick any.\nShared scores open on your instrument."),
                 fontSize = 13.sp, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -314,7 +314,7 @@ fun BandDetailScreen(
             Spacer(Modifier.height(28.dp))
             SectionTitle(tr("멤버", "Members"), d.members.size, max = BandRules.MEMBERS_MAX)
             if (d.members.size >= BandRules.MEMBERS_MAX) {
-                Text(tr("인원이 가득 찼어요. 새 멤버는 참여할 수 없어요.", "The band is full. No one else can join."),
+                Text(tr("인원이 가득 찼어요.\n새 멤버는 참여할 수 없어요.", "The band is full.\nNo one else can join."),
                     fontSize = 13.sp, color = cs.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
             }
@@ -445,7 +445,7 @@ fun BandDetailScreen(
             text = {
                 Text(
                     if (d.members.size <= 1) tr("마지막 멤버라서 밴드와 악보가 모두 지워져요.", "You're the last member. The band and its scores will be deleted.")
-                    else tr("공유한 악보는 남아요. 초대 코드로 다시 들어올 수 있어요.", "Your shared scores stay. Rejoin with the code.")
+                    else tr("공유한 악보는 남아요.\n초대 코드로 다시 들어올 수 있어요.", "Your shared scores stay.\nRejoin with the code.")
                 )
             },
         )

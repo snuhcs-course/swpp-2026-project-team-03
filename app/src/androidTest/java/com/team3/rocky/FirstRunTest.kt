@@ -2,6 +2,7 @@
 package com.team3.rocky
 
 import android.content.Context
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
@@ -37,12 +38,12 @@ class FirstRunTest {
         rule.onNodeWithText("동의하고 시작하기").assertIsEnabled().performClick()
         assertTrue(FirstRun.termsAgreed(ctx))
 
-        // 안내 슬라이드: 다음으로 넘기고, 다시 보지 않기를 골라 닫는다.
+        // 안내 슬라이드: 다음으로 넘기고 닫는다. '다시 보지 않기'는 없고, 처음 한 번만 저절로 뜬다 (2차 UAT).
         rule.waitUntil(5_000) { rule.onAllNodes(hasText("연습 방식과 악기를 골라요")).fetchSemanticsNodes().isNotEmpty() }
         assertFalse(FirstRun.guideOff(ctx))
         rule.onNodeWithText("다음").performClick()
         rule.waitUntil(5_000) { rule.onAllNodes(hasText("곡을 올려요")).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("다시 보지 않기").performClick()
+        rule.onNodeWithText("다시 보지 않기").assertDoesNotExist()
         rule.onNodeWithText("건너뛰기").performClick()
         assertTrue(FirstRun.guideOff(ctx))
         // 로그인 화면으로 들어간다.

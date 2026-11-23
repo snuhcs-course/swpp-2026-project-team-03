@@ -363,8 +363,12 @@ fun AccountScreen(
             else Toast.makeText(ctx, tr("사진을 불러오지 못했어요", "Couldn't load the photo"), Toast.LENGTH_SHORT).show()
         }
     }
+    // 화면 모드와 언어도 닉네임·사진처럼 바꾸면 '수정' 버튼이 켜지고, 눌러야 적용된다 (2차 UAT).
+    var dark by remember { mutableStateOf(AppSettings.dark) }
+    var lang by remember { mutableStateOf(AppSettings.lang) }
+    val settingsDirty = dark != AppSettings.dark || lang != AppSettings.lang
     val profileDirty = nickname.trim() != user.nickname || parts != user.instruments.toSet()
-    val dirty = profileDirty || newPhoto != null || removePhoto
+    val dirty = profileDirty || newPhoto != null || removePhoto || settingsDirty
     val nicknameErr = error ?: SignUpValidator.nicknameError(nickname, typing = true)
 
     fun save() {
@@ -386,6 +390,8 @@ fun AccountScreen(
             result
                 .onSuccess {
                     newPhoto = null; newPreview = null; removePhoto = false
+                    if (dark != AppSettings.dark) AppSettings.setDark(ctx, dark)
+                    if (lang != AppSettings.lang) AppSettings.setLang(ctx, lang)
                     onUpdated(it); Toast.makeText(ctx, tr("내 정보를 수정했어요", "Profile updated"), Toast.LENGTH_SHORT).show()
                 }
                 .onFailure { error = it.message }
@@ -436,22 +442,26 @@ fun AccountScreen(
             SectionLabel(tr("화면", "Display"))
             Row(
                 Modifier.fillMaxWidth().card(RoundedCornerShape(14.dp), cs)
-                    .clickable { AppSettings.setDark(ctx, !AppSettings.dark) }
+                    .clickable { dark = !dark }
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(tr("다크 모드", "Dark mode"), fontWeight = FontWeight.Bold)
-                    Text(if (AppSettings.dark) tr("어두운 화면을 쓰고 있어요", "Using the dark look") else tr("밝은 화면을 쓰고 있어요", "Using the light look"),
+                    Text(if (dark) tr("어두운 화면", "Dark look") else tr("밝은 화면", "Light look"),
                         fontSize = 12.sp, color = cs.onSurfaceVariant)
                 }
-                Switch(checked = AppSettings.dark, onCheckedChange = { AppSettings.setDark(ctx, it) },
+                Switch(checked = dark, onCheckedChange = { dark = it },
                     modifier = Modifier.testTag("dark_mode"))
             }
 
             Spacer(Modifier.height(24.dp))
             SectionLabel(tr("언어", "Language"))
-            LanguageSwitch(Modifier.fillMaxWidth(), fill = true)
+            LanguageSwitch(Modifier.fillMaxWidth(), fill = true, selected = lang, onSelect = { lang = it })
+            if (settingsDirty) {
+                Spacer(Modifier.height(6.dp))
+                Text(tr("아래 '수정'을 누르면 적용돼요", "Tap 'Update' below to apply"), fontSize = 12.sp, color = cs.primary)
+            }
 
             Spacer(Modifier.height(24.dp))
             SectionLabel(tr("계정", "Account"))
@@ -482,8 +492,8 @@ fun AccountScreen(
                 Column {
                     if (running > 0) {
                         Text(
-                            tr("지금 만들고 있는 악보 ${running}개가 멈추고 사라져요. 다 만든 뒤에 로그아웃하는 걸 추천해요.",
-                                "$running score(s) in progress will stop and be lost. We suggest logging out after they finish."),
+                            tr("지금 만들고 있는 악보 ${running}개가 멈추고 사라져요.\n다 만든 뒤에 로그아웃하는 걸 추천해요.",
+                                "$running score(s) in progress will stop and be lost.\nWe suggest logging out after they finish."),
                             color = cs.error, fontWeight = FontWeight.Bold, lineHeight = 21.sp,
                         )
                         Spacer(Modifier.height(8.dp))
@@ -496,18 +506,27 @@ fun AccountScreen(
 }
 
 // ---------- 언어 고르기 (한국어 / English) ----------
+/**
+ * 한국어 / English. 로그인 화면에서는 누르는 즉시 바뀌고,
+ * 내 정보에서는 [selected]·[onSelect]로 고른 값만 들고 있다가 '수정'을 눌러야 적용된다.
+ */
 @Composable
-fun LanguageSwitch(modifier: Modifier = Modifier, fill: Boolean = false) {
+fun LanguageSwitch(
+    modifier: Modifier = Modifier,
+    fill: Boolean = false,
+    selected: Lang = AppSettings.lang,
+    onSelect: ((Lang) -> Unit)? = null,
+) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     Row(modifier.card(RoundedCornerShape(12.dp), cs).padding(3.dp)) {
         Lang.entries.forEach { l ->
-            val on = AppSettings.lang == l
+            val on = selected == l
             Box(
                 (if (fill) Modifier.weight(1f) else Modifier)
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (on) cs.primary else cs.surface)
-                    .clickable { AppSettings.setLang(ctx, l) }
+                    .clickable { if (onSelect != null) onSelect(l) else AppSettings.setLang(ctx, l) }
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .testTag("lang_${l.code}"),
                 contentAlignment = Alignment.Center,

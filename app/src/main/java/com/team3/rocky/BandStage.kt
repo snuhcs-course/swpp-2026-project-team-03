@@ -75,7 +75,7 @@ private val SPOTS = listOf(
 )
 private val STAGE_HEIGHT = 300.dp
 
-/** ✓ 표시가 원 밖으로 조금 나와도 잘리지 않게 원 둘레에 남겨 두는 여백. */
+/** 고른 악기의 바깥 테두리가 잘리지 않게 원 둘레에 남겨 두는 여백. */
 private val BADGE_ROOM = 6.dp
 
 /** 아래 요약에 쓰는 순서 (기타가 맨 끝에 오지 않게) */
@@ -250,7 +250,7 @@ private fun InstrumentSpot(spot: StageSpot, state: SpotState, onClick: () -> Uni
             },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // 원 둘레에 BADGE_ROOM만큼 여백을 둬서 오른쪽 위 ✓가 잘리지 않게 한다.
+        // 원 둘레의 BADGE_ROOM 여백은 고른 악기의 주황 테두리(4dp)가 잘리지 않게 둔다.
         Box(Modifier.size(spot.size + BADGE_ROOM * 2)) {
             Box(
                 Modifier.padding(BADGE_ROOM).fillMaxSize().clip(CircleShape).background(fill)
@@ -273,13 +273,7 @@ private fun InstrumentSpot(spot: StageSpot, state: SpotState, onClick: () -> Uni
                     )
                 }
             }
-            if (on) {
-                Box(
-                    Modifier.align(Alignment.TopEnd).size(22.dp)
-                        .clip(CircleShape).background(LabelOn),
-                    contentAlignment = Alignment.Center,
-                ) { Text("✓", fontSize = 13.sp, fontWeight = FontWeight.Black, color = OnOrange) }
-            }
+            // ✓ 표시는 뺐다 (2차 UAT: 작은 폰에서 잘림). 고른 악기는 주황 원·굵은 글자로 알 수 있다.
         }
         Spacer(Modifier.height(2.dp))
         Text(

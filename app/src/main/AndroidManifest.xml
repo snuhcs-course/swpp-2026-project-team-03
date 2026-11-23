@@ -4,6 +4,8 @@
 
     <!-- ROCKY 서버에 음원을 올리고 악보를 받기 위해 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 인터넷이 끊기면 만드는 중인 곡을 바로 취소하려고 연결 상태를 본다 (2차 UAT). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 앱을 보고 있지 않을 때 악보가 다 되거나 실패하면 알림으로 알려 주기 위해 (안드로이드 13 이상) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

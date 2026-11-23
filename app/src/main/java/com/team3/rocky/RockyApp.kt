@@ -52,6 +52,8 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +71,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -129,7 +130,7 @@ sealed class Screen {
     object Login : Screen()                                       // 0. 로그인
     object SignUp : Screen()                                      // 0-1. 회원가입
     object Account : Screen()                                     // 0-2. 내 정보
-    object Main : Screen()                                        // 1. 하단 탭 (홈 / 만드는 중 / 보관함 / 내 밴드)
+    object Main : Screen()                                        // 1. 하단 탭 (홈 / 진행 상태 / 보관함 / 내 밴드)
     object Lineup : Screen()                                      // 2. 우리 밴드 구성 (1/2단계)
     object Upload : Screen()                                      // 3. 곡 올리기 (2/2단계) → 악보 만들기 시작
     // 5. 결과. 밴드에서 열면 myPart(이 밴드에서 내 파트) 악보를 먼저 보여준다.
@@ -141,7 +142,7 @@ sealed class Screen {
 }
 
 enum class Tab(private val ko: String, private val en: String) {
-    NEW("홈", "Home"), PROGRESS("만드는 중", "In progress"), STORAGE("보관함", "Library"), BANDS("내 밴드", "Bands");
+    NEW("홈", "Home"), PROGRESS("진행 상태", "Progress"), STORAGE("보관함", "Library"), BANDS("내 밴드", "Bands");
 
     val label get() = tr(ko, en)
 }
@@ -149,7 +150,7 @@ enum class Tab(private val ko: String, private val en: String) {
 @Composable
 fun RockyApp() {
     val ctx = LocalContext.current
-    // 처음 켤 때: 이용 약관에 동의해야 앱을 쓸 수 있다. 그다음 사용 안내 슬라이드 ('다시 보지 않기' 전까지 켤 때마다 한 번).
+    // 처음 켤 때: 이용 약관에 동의해야 앱을 쓸 수 있다. 그다음 사용 안내 슬라이드 (처음 한 번만, 다시 보려면 홈 '이렇게 만들어요').
     var termsOk by remember { mutableStateOf(FirstRun.termsAgreed(ctx)) }
     if (!termsOk) {
         TermsScreen(onAgree = { FirstRun.agreeTerms(ctx); termsOk = true })
@@ -230,8 +231,11 @@ fun RockyApp() {
             icon = { WarnIcon(MaterialTheme.colorScheme.error, 28.dp) },
             title = {
                 Text(
-                    if (stoppedJob.rejected) tr("이 곡으로는 악보를 만들 수 없어요", "Can't make scores from this song")
-                    else tr("악보를 만들지 못했어요", "Couldn't make the scores"),
+                    when {
+                        stoppedJob.offline -> tr("인터넷 연결이 끊겼어요", "You're offline")
+                        stoppedJob.rejected -> tr("이 곡으로는 악보를 만들 수 없어요", "Can't make scores from this song")
+                        else -> tr("악보를 만들지 못했어요", "Couldn't make the scores")
+                    },
                     textAlign = TextAlign.Center,
                 )
             },
@@ -240,18 +244,21 @@ fun RockyApp() {
                     Text("'${stoppedJob.title}'", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(6.dp))
                     Text(stoppedJob.error ?: tr("문제가 생겼어요.", "Something went wrong."), lineHeight = 20.sp)
-                    if (!stoppedJob.retryable) {
+                    if (!stoppedJob.retryable && !stoppedJob.offline) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            tr("목록에서 뺐어요. 새로 만들기에서 처음부터 다시 할 수 있어요.",
-                                "Removed from the list. You can start over with a new score."),
+                            tr("목록에서 뺐어요.\n새로 만들기에서 처음부터 다시 할 수 있어요.",
+                                "Removed from the list.\nYou can start over with a new score."),
                             fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp,
                         )
                     }
                 }
             },
             confirmButton = {
-                if (stoppedJob.retryable) {
+                if (stoppedJob.offline) {
+                    // 인터넷이 끊겨 취소된 곡: 홈에서 다시 시작한다. '진행 상태'에 이유를 적은 카드가 남는다.
+                    TextButton(onClick = { ScoreJobs.stopped = null; openTab(Tab.NEW) }) { Text(tr("홈으로", "Go home")) }
+                } else if (stoppedJob.retryable) {
                     TextButton(enabled = wait == 0, onClick = { val j = stoppedJob; ScoreJobs.stopped = null; ScoreJobs.retry(ctx, j) }) {
                         Text(if (wait > 0) tr("${wait}초 뒤 다시 시도", "Retry in ${wait}s") else tr("다시 시도", "Retry"))
                     }
@@ -264,7 +271,7 @@ fun RockyApp() {
                 }
             },
             dismissButton = {
-                // 다시 시도할 수 있는 곡은 닫아도 '만드는 중' 탭의 그 곡 카드에 이유와 '다시 시도'가 남아 있다.
+                // 다시 시도할 수 있는 곡과 인터넷이 끊겨 취소된 곡은 닫아도 '진행 상태' 탭의 그 곡 카드에 이유가 남아 있다.
                 TextButton(onClick = { ScoreJobs.stopped = null }) {
                     Text(tr("닫기", "Close"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -585,7 +592,7 @@ private fun TabIcon(tab: Tab, selected: Boolean) {
 // ---------- 1-1. 홈 ----------
 /**
  * 홈: 인사, 큰 제목, 큰 '새 악보 만들기' 버튼, 접어 둔 '이렇게 만들어요'.
- * (정확도 팁과 만드는 중인 곡은 홈에서 뺐다. 만드는 중인 곡은 '만드는 중' 탭과 아래 탭의 숫자로 본다.)
+ * (정확도 팁과 만드는 중인 곡은 홈에서 뺐다. 만드는 중인 곡은 '진행 상태' 탭과 아래 탭의 숫자로 본다.)
  */
 @Composable
 fun HomeTab(
@@ -845,19 +852,22 @@ fun WorkRow(
         Column(Modifier.weight(1f)) {
             Text(w.title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
-            Text(modeLabel(w.personal) + " · " + Demo.labels(w.instruments), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1)
+            // 개인 연습용 악보가 원곡에 없어서 AI로 만든 것이면 ✨ (2차 UAT). 채보한 것은 표시 없음.
+            val ai = if (w.personal && w.aiGenerated.isNotEmpty()) "✨ " else ""
+            Text(modeLabel(w.personal) + " · " + ai + Demo.labels(w.instruments), fontSize = 13.sp, color = cs.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(w.date, fontSize = 12.sp, color = cs.onSurfaceVariant)
         }
         trailing()
     }
 }
 
-// ---------- 1-2. 만드는 중 ----------
+// ---------- 1-2. 진행 상태 ----------
 @Composable
 fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val jobs = ScoreJobs.jobs
-    Page(tr("만드는 중", "In progress"), onBack = null, modifier = modifier) {
+    Page(tr("진행 상태", "Progress"), onBack = null, modifier = modifier) {
         if (jobs.isEmpty()) {
             Spacer(Modifier.height(80.dp))
             Text(
@@ -870,11 +880,11 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
                 Text(tr("홈에서 새 악보 만들기", "Make a new score from Home"))
             }
         } else {
-            InfoNote(tr("ROCKY는 백그라운드에서 돌아가요. 다른 앱을 써도 계속 만들고, 다 되거나 실패하면 알려 드려요.",
-                "ROCKY works in the background. Use other apps; we'll tell you when it's done or fails."))
+            InfoNote(tr("다른 화면이나 앱을 봐도 계속 만들어요.\n다 되거나 문제가 생기면 알려 드려요.",
+                "ROCKY keeps working while you use other screens or apps.\nWe'll tell you when it's done or if something goes wrong."))
             Spacer(Modifier.height(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }) }
+                items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }, onNew = onNew) }
                 item { Spacer(Modifier.height(12.dp)) }
             }
         }
@@ -882,23 +892,13 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
 }
 
 @Composable
-private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
+private fun JobCard(job: ScoreJob, onOpen: () -> Unit, onNew: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val p = job.progress
-    // 서버 값은 2초마다·단계마다 뛰므로, 0.1초마다 조금씩 일정하게 올린다 (progress/SmoothProgress).
-    var shown by remember(job.id) { mutableFloatStateOf(job.bar.shown) }
-    LaunchedEffect(job.id) {
-        var last = System.nanoTime()
-        while (true) {
-            val now = System.nanoTime()
-            // 대기 중이면 0%에서 멈춰 둔다.
-            if (!job.failed) shown = if (job.queued) 0f else job.bar.step(job.progress, (now - last) / 1_000_000_000f)
-            last = now
-            if (job.done) break
-            delay(100)
-        }
-    }
+    // 진행률은 화면과 상관없이 ScoreJobs가 계속 올린다 (다른 탭에 있다 와도 그동안 오른 값이 보인다).
+    // 인터넷이 끊기거나 실패하면 그 자리에서 멈춘다.
+    val shown = job.shown
     var confirm by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth()
@@ -936,14 +936,26 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             Spacer(Modifier.height(8.dp))
         }
         if (err != null) {
-            // 이 카드에 남는 실패는 이 곡 그대로 다시 시도할 수 있는 것뿐이다 (나머지는 목록에서 빠지고 팝업으로 알린다).
+            // 이 카드에 남는 실패: 이 곡 그대로 다시 시도할 수 있는 것, 그리고 인터넷이 끊겨 취소된 곡.
+            // (나머지는 목록에서 빠지고 팝업으로 알린다.)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 WarnIcon(cs.error, 18.dp)
                 Spacer(Modifier.width(6.dp))
-                Text(tr("악보를 만들지 못했어요", "Couldn't make the scores"), fontWeight = FontWeight.Bold, color = cs.error, fontSize = 14.sp)
+                Text(
+                    if (job.offline) tr("인터넷이 끊겨서 취소됐어요", "Cancelled: you went offline")
+                    else tr("악보를 만들지 못했어요", "Couldn't make the scores"),
+                    fontWeight = FontWeight.Bold, color = cs.error, fontSize = 14.sp,
+                )
             }
             Spacer(Modifier.height(2.dp))
             Text(err, fontSize = 13.sp, color = cs.onSurface, lineHeight = 18.sp)
+            if (job.offline) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    shape = ButtonShape, onClick = onNew,
+                    modifier = Modifier.fillMaxWidth().height(44.dp), contentPadding = TightButtonPadding,
+                ) { Text(tr("홈에서 다시 만들기", "Start again from Home"), fontSize = 14.sp, maxLines = 1) }
+            }
             if (job.retryable) {
                 val wait = retryCountdown(job)
                 Spacer(Modifier.height(8.dp))
@@ -993,7 +1005,7 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit) {
             text = {
                 Text(
                     when {
-                        job.failed -> tr("목록에서 지워져요. 다시 만들려면 홈에서 새 악보를 만들어 주세요.", "It's removed here and on the server. To try again, start a new score.")
+                        job.failed -> tr("목록에서 지워져요.\n다시 만들려면 홈에서 새 악보를 만들어 주세요.", "It's removed here and on the server.\nTo try again, start a new score.")
                         !job.done -> tr("지금까지 만든 내용은 사라져요.", "Progress so far will be lost.")
                         job.saved -> tr("보관함의 악보는 남아요.", "Saved scores stay in your library.")
                         else -> tr(
@@ -1028,6 +1040,9 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
     val cs = MaterialTheme.colorScheme
     var works by remember { mutableStateOf(WorkStore.load(ctx)) }
     var renaming by remember { mutableStateOf<Work?>(null) }
+    // 보관함 사용 안내: 처음 열 때 한 번, 오른쪽 위 '사용법'으로 다시 본다 (2차 UAT).
+    var guide by remember { mutableStateOf(!LibraryGuide.seen(ctx)) }
+    if (guide) LibraryGuideDialog(onDone = { guide = false })
     val bands = remember { Backend.bands(ctx) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
@@ -1040,7 +1055,8 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
     // 고르기 모드: 오른쪽 위 '선택'을 누르거나 곡을 꾹 누르면 켜진다. 고른 곡은 아래에서 삭제하거나 밴드에 공유한다.
     var selecting by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf(emptySet<Long>()) }
-    var deletingMany by remember { mutableStateOf(false) }
+    // 지울 곡들 (고르기 모드의 여러 곡, 또는 ⋮ 메뉴의 한 곡). null이면 확인 창을 닫은 상태.
+    var deleting by remember { mutableStateOf<List<Work>?>(null) }
     fun stopSelecting() { selecting = false; picked = emptySet() }
     BackHandler(enabled = selecting) { stopSelecting() }
     val chosen = works.filter { it.id in picked }
@@ -1050,6 +1066,9 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
         if (selecting) tr("${picked.size}곡 선택", "${picked.size} selected") else tr("보관함", "Library"),
         onBack = null, modifier = modifier,
         actions = {
+            if (!selecting) TextButton(onClick = { guide = true }, modifier = Modifier.testTag("library_guide")) {
+                Text(tr("사용법", "Help"), color = cs.onSurfaceVariant)
+            }
             if (works.isNotEmpty()) TextButton(onClick = { if (selecting) stopSelecting() else selecting = true }, modifier = Modifier.testTag("library_select")) {
                 Text(if (selecting) tr("취소", "Cancel") else tr("선택", "Select"), fontWeight = FontWeight.SemiBold)
             }
@@ -1057,7 +1076,7 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
         bottom = if (!selecting) null else ({
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
-                    shape = ButtonShape, onClick = { deletingMany = true }, enabled = picked.isNotEmpty(),
+                    shape = ButtonShape, onClick = { deleting = chosen }, enabled = picked.isNotEmpty(),
                     modifier = Modifier.weight(1f).height(52.dp).testTag("library_delete"), contentPadding = TightButtonPadding,
                 ) { Text(tr("보관함에서 삭제", "Delete"), color = if (picked.isNotEmpty()) cs.error else cs.onSurfaceVariant, maxLines = 1) }
                 Button(
@@ -1070,9 +1089,9 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
         if (works.isEmpty()) {
             Spacer(Modifier.height(80.dp))
             Text(
-                tr("저장한 악보가 없어요.",
-                    "No saved scores."),
-                color = cs.onSurfaceVariant, textAlign = TextAlign.Center,
+                tr("저장한 악보가 없어요.\n악보가 다 만들어지면 여기에 저장돼요.",
+                    "No saved scores yet.\nFinished scores are saved here."),
+                color = cs.onSurfaceVariant, textAlign = TextAlign.Center, lineHeight = 22.sp,
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
@@ -1091,10 +1110,34 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
                         onLongClick = { if (!selecting) { selecting = true; picked = setOf(w.id) } else toggle() },
                         selected = if (selecting) on else null,
                     ) {
-                        // 줄 옆 ⋮에는 이름 바꾸기만 있다 (삭제·공유는 '선택'에서).
-                        if (!selecting) TextButton(onClick = { renaming = w }) {
-                            Text("⋮", fontSize = 20.sp, color = cs.onSurfaceVariant,
-                                modifier = Modifier.semantics { contentDescription = tr("이름 바꾸기", "Rename") })
+                        // 줄 옆 ⋮: 이름 바꾸기 / 삭제 / 밴드에 공유 (2차 UAT). 여러 곡은 '선택'에서.
+                        if (!selecting) Box {
+                            var menu by remember { mutableStateOf(false) }
+                            TextButton(onClick = { menu = true }, modifier = Modifier.testTag("work_menu_${w.id}")) {
+                                Text("⋮", fontSize = 20.sp, color = cs.onSurfaceVariant,
+                                    modifier = Modifier.semantics { contentDescription = tr("메뉴", "Menu") })
+                            }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(tr("이름 바꾸기", "Rename")) },
+                                    onClick = { menu = false; renaming = w },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(tr("삭제", "Delete"), color = cs.error) },
+                                    onClick = { menu = false; deleting = listOf(w) },
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(tr("밴드에 공유", "Share with band"))
+                                            if (w.personal) Text(tr("개인 연습용은 공유할 수 없어요", "Solo practice can't be shared"),
+                                                fontSize = 12.sp, color = cs.onSurfaceVariant)
+                                        }
+                                    },
+                                    enabled = !w.personal,
+                                    onClick = { menu = false; onShare(listOf(w)) },
+                                )
+                            }
                         }
                     }
                 }
@@ -1103,27 +1146,30 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
         }
     }
 
-    if (deletingMany) {
+    deleting?.let { targets ->
         AlertDialog(
-            onDismissRequest = { deletingMany = false },
-            title = { Text(tr("${chosen.size}곡을 보관함에서 삭제할까요?", "Delete ${chosen.size} score(s)?")) },
+            onDismissRequest = { deleting = null },
+            title = {
+                Text(if (targets.size == 1) tr("'${targets[0].title}'을(를) 삭제할까요?", "Delete '${targets[0].title}'?")
+                    else tr("${targets.size}곡을 보관함에서 삭제할까요?", "Delete ${targets.size} scores?"))
+            },
             text = {
-                Text(tr("이 폰과 서버의 악보 파일이 함께 지워지고, 되돌릴 수 없어요. 밴드에 공유한 악보는 밴드에 그대로 남아요.",
-                    "Files on this phone and the server are deleted for good. Scores shared with a band stay in the band."))
+                Text(tr("이 폰과 서버의 악보 파일이 함께 지워지고, 되돌릴 수 없어요.\n밴드에 공유한 악보는 밴드에 그대로 남아요.",
+                    "Files on this phone and the server are deleted for good.\nScores shared with a band stay in the band."))
             },
             confirmButton = {
                 TextButton(onClick = {
-                    chosen.forEach { w ->
+                    targets.forEach { w ->
                         WorkStore.remove(ctx, w.id)
-                        // 만드는 중 목록에 남아 있으면 같이 빼고, 폰과 서버의 결과 파일을 지운다 (공유한 악보는 남긴다).
+                        // 진행 상태 목록에 남아 있으면 같이 빼고, 폰과 서버의 결과 파일을 지운다 (공유한 악보는 남긴다).
                         ScoreJobs.find(w.id)?.let { ScoreJobs.remove(it) }
                         ServerCleanup.deleteWork(ctx, w.id)
                     }
-                    works = WorkStore.load(ctx); deletingMany = false; stopSelecting()
+                    works = WorkStore.load(ctx); deleting = null; stopSelecting()
                     Toast.makeText(ctx, tr("삭제했어요", "Deleted"), Toast.LENGTH_SHORT).show()
                 }) { Text(tr("삭제", "Delete"), color = cs.error) }
             },
-            dismissButton = { TextButton(onClick = { deletingMany = false }) { Text(tr("취소", "Cancel")) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(tr("취소", "Cancel")) } },
         )
     }
 
@@ -1200,8 +1246,8 @@ fun UploadScreen(onBack: () -> Unit, onStart: (title: String, audio: AudioFile) 
             },
             text = {
                 Text(
-                    if (r is AudioCheck.Result.TooShort) tr("${r.seconds}초짜리 파일이에요. 30초가 넘는 곡을 골라 주세요.", "This file is ${r.seconds} seconds long. Please pick a song longer than 30 seconds.")
-                    else tr("음원 파일이 아니거나 깨진 파일이에요. 파일을 다시 확인하고 다른 파일을 골라 주세요.", "It isn't a real audio file or the file is damaged. Please check the file and pick another one."),
+                    if (r is AudioCheck.Result.TooShort) tr("${r.seconds}초짜리 파일이에요.\n30초가 넘는 곡을 골라 주세요.", "This file is ${r.seconds} seconds long.\nPlease pick a song longer than 30 seconds.")
+                    else tr("음원 파일이 아니거나 깨진 파일이에요.\n파일을 다시 확인하고 다른 파일을 골라 주세요.", "It isn't a real audio file or the file is damaged.\nPlease check the file and pick another one."),
                 )
             },
             confirmButton = {

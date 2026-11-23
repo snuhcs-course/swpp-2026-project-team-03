@@ -13,6 +13,13 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -531,6 +538,14 @@ fun ResultScreen(
                 }
             }
         }
+        // 개인 연습용 악기가 원곡에 없어서 AI로 만든 악보면 알려 준다 (2차 UAT). 원곡에서 옮긴 악보는 표시 없음.
+        if (work.personal && Demo.GUITAR2 !in work.instruments && work.instruments.any { it in ai }) {
+            Text(
+                tr("✨ 원곡에 없는 악기라 AI가 만든 악보예요", "✨ Not in the song, so this score was made with AI"),
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = cs.primary,
+                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().testTag("solo_ai"),
+            )
+        }
         // 원곡에 기타가 없다고 들었는데 기타 2대를 골랐으면 기타는 1대만 새로 만든다 (재생성 기능을 뺀 대신).
         if (local?.oneGuitarOnly == true) {
             InfoNote(
@@ -694,6 +709,8 @@ private fun ScoreSheet(
             )
         }
         // 몇 쪽인지. 마지막 악보 쪽에서는 다음 장이 별점이라고 알려 준다.
+        // 긴 악보를 쉽게 넘기도록 (2차 UAT): 누르면 쪽 번호를 입력해 바로 가고,
+        // 꾹 누른 채 옆으로 밀면 쪽이 빠르게 넘어간다 (손가락을 떼면 그 쪽에 머문다).
         if (!pages.isNullOrEmpty()) {
             val n = pages.size
             val cur = pager.currentPage
@@ -702,10 +719,56 @@ private fun ScoreSheet(
                 cur == n - 1 && rating -> tr("$n / $n · 넘기면 별점 ›", "$n / $n · swipe to rate ›")
                 else -> "${cur + 1} / $n"
             }
+            val scope = rememberCoroutineScope()
+            var askPage by remember { mutableStateOf(false) }
+            var scrubbing by remember { mutableStateOf<Int?>(null) }
+            val stepPx = with(density) { 22.dp.toPx() }
             Text(
-                label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
-                    .clip(CircleShape).background(chrome).padding(horizontal = 12.dp, vertical = 6.dp),
+                label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
+                    .clip(CircleShape).background(chrome)
+                    .semantics { contentDescription = tr("쪽 이동: 누르면 쪽 번호 입력, 꾹 누르고 옆으로 밀면 빠르게 넘기기", "Go to page: tap to type a page, hold and slide to flip") }
+                    .pointerInput(n) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            val long = awaitLongPressOrCancellation(down.id)
+                            if (long == null) {
+                                // 꾹 누르기 전에 뗐으면 누른 것: 쪽 번호 입력
+                                if (currentEvent.changes.none { it.pressed } && currentEvent.changes.none { it.isConsumed }) askPage = true
+                                return@awaitEachGesture
+                            }
+                            val start = pager.currentPage.coerceAtMost(n - 1)
+                            var dx = 0f
+                            scrubbing = start
+                            drag(long.id) { change ->
+                                dx += change.positionChange().x
+                                change.consume()
+                                val target = (start + (dx / stepPx).toInt()).coerceIn(0, n - 1)
+                                if (target != scrubbing) {
+                                    scrubbing = target
+                                    scope.launch { pager.scrollToPage(target) }
+                                }
+                            }
+                            scrubbing = null
+                        }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            )
+            // 꾹 눌러 넘기는 동안 가운데에 크게 몇 쪽인지 보여 준다.
+            scrubbing?.let { pg ->
+                Column(
+                    Modifier.align(Alignment.Center).clip(RoundedCornerShape(18.dp)).background(chrome)
+                        .padding(horizontal = 28.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("${pg + 1} / $n", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(tr("옆으로 밀어서 넘기기", "Slide to flip"), fontSize = 12.sp, color = Color(0xFFD4D4D8))
+                }
+            }
+            if (askPage) PageJumpDialog(
+                count = n, current = cur.coerceAtMost(n - 1) + 1,
+                onDismiss = { askPage = false },
+                onGo = { page -> askPage = false; scope.launch { pager.scrollToPage(page - 1) } },
             )
         }
         // 칩 표시(⚠️·✨)의 뜻. 악보 위에 3초 떠 있다가 사라진다 (눌러도 닫힘).
@@ -733,6 +796,32 @@ private fun ScoreSheet(
             ) { FullScreenGlyph(exit = fullScreen, color = Color.White) }
         }
     }
+}
+
+/** 쪽 번호를 입력해서 그 쪽으로 가는 창. */
+@Composable
+private fun PageJumpDialog(count: Int, current: Int, onDismiss: () -> Unit, onGo: (Int) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val page = text.toIntOrNull()
+    val ok = page != null && page in 1..count
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(tr("몇 쪽으로 갈까요?", "Go to page")) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { v -> text = v.filter { it.isDigit() }.take(4) },
+                label = { Text(tr("1~$count 쪽 (지금 $current 쪽)", "1–$count (now $current)")) },
+                singleLine = true,
+                isError = text.isNotEmpty() && !ok,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { if (ok) onGo(page!!) }),
+                modifier = Modifier.testTag("page_jump"),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onGo(page!!) }, enabled = ok) { Text(tr("이동", "Go")) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("취소", "Cancel")) } },
+    )
 }
 
 /** 악보 마지막 장 다음의 별점 칸. 흰 종이 위에 놓이므로 밝은 색으로 그린다. */

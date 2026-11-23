@@ -45,7 +45,7 @@ class FailureTest {
     @Test fun refusedInputIsNeverRetried() {
         val f = ScoreJobs.classify(JobFailedException("밴드 곡을 올려 주세요.", reason = "too_short"))
         assertFalse(f.retry)
-        assertEquals("곡이 너무 짧아서 악보를 만들 수 없어요. 30초 넘는 곡을 올려 주세요.", f.message)
+        assertEquals("곡이 너무 짧아서 악보를 만들 수 없어요.\n30초 넘는 곡을 올려 주세요.", f.message)
     }
 
     @Test fun oldServerFailureStartsOver() {
