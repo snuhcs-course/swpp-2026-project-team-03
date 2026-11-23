@@ -80,24 +80,43 @@ guitar count; Pod events show no OOM, eviction or restart. In each run the GPU
 Pods started within the same minute; run C finished all four songs 584 s after
 the first upload started.
 
+Run C was repeated twice more the same evening with the same four songs
+(without the key change). All 12 song runs completed with 21/21 files and no
+wait; all four songs finished 584, 585 and 583 s after the first upload. Per
+song, start to complete: Peanut 277 / 277 / 281 s, 고백 512 / 508 / 507 s,
+Coldplay 503 / 508 / 502 s, Nirvana 573 / 573 / 575 s.
+
 During run C a key change (`POST /jobs/{id}/transpositions/2` on a run B
 result) started while three GPU Pods and one PDF Pod were running and completed
 in about 43 s. Namespace `limits.cpu` then peaked at 15500m of 16 and
 `limits.memory` at 49280Mi of 64Gi (always-on Pods plus the 1 CPU test API).
 
-Not yet checked: the same run on gpu05, CPU throttling counters, repeated runs,
-and the peak disk use while four songs separate at once.
+CPU throttling, same dev song, GPU stage only (`--no-publish`), three probe
+Pods at the same time, cgroup `cpu.stat` at the end:
+
+| GPU Pod | Threads | Time | `nr_throttled` | `throttled_usec` | Average cores | Peak memory |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4 CPU / 16Gi (production before this change) | unset | 240 s | 82 | 124.6 s | 1.86 | 3.30 GB |
+| 2 CPU / 8Gi (this document) | 2 | 236 s | 147 | 0.7 s | 1.76 | 3.26 GB |
+| 2 CPU / 8Gi | unset | 295 s | 1164 | 673.4 s | 1.82 | 3.31 GB |
+
+Without a thread cap a 2 CPU limit is throttled heavily and the GPU stage is
+25% slower, so `ROCKY_MIDI_THREADS=2` must stay together with `ROCKY_MIDI_CPU=2`.
+`throttled_usec` is summed over threads and can exceed wall time.
+
+Not yet checked: the same runs on gpu05.
 
 ## Disk on gpu22
 
 BS-RoFormer separation writes float32 stereo WAVs (about 353 KB per second of
 audio per file), and up to about fifteen of them exist for one song while it
-separates. From the code, four songs separating at once can need about 5 GB on
-the volume (an estimate; not measured). `/data` on gpu22 had 3.0 GB free on
-2026-11-23; 11 GB of finished experiment data was removed before run C, leaving
-14 GB free, and at least 11 GB stayed free from 4.5 minutes into run C. Keep at
-least 6 GB free on `/data` before running four songs at once; when it is full,
-the app's own uploads and runs on the same volume fail too.
+separates, and the stems stay until the song finishes. In the two repeated
+four-song runs, sampled every 5 s from before the first upload, `/data` use rose
+by at most 3.0 GB and 3.1 GB above the starting value. `/data` on gpu22 had only
+3.0 GB free on 2026-11-23 before 11 GB of finished experiment data was removed.
+Keep at least 6 GB free on `/data` before running four songs at once (longer
+songs need more); when it is full, the app's own uploads and runs on the same
+volume fail too.
 
 ## Deployment and rollback
 
@@ -110,4 +129,5 @@ API-key Secret.
 
 To go back to two songs, set `ROCKY_PARALLEL=2`, `ROCKY_MIDI_CPU=4`,
 `ROCKY_MIDI_MEMORY=16Gi` and remove the three new settings (or use the manifests
-from before this change), then recreate the Pod the same way.
+from before this change), then recreate the Pod the same way. Do not keep
+`ROCKY_MIDI_CPU=2` without `ROCKY_MIDI_THREADS=2`.
