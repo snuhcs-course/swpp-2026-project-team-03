@@ -228,6 +228,10 @@ class Worker:
                                   **UPLOAD_INTERRUPTED)
         for t in self.threads:
             t.start()
+        # Every worker thread can be busy running a long song, so a separate thread
+        # checks for abandoned songs (queued or running) on its own schedule.
+        if self.abandon_sec > 0:
+            threading.Thread(target=self._watch_abandoned, name="rocky-abandon-watch", daemon=True).start()
         self.notify()
 
     def notify(self) -> None:
@@ -260,6 +264,15 @@ class Worker:
             with self.seen_lock:
                 self.last_seen.pop(job_id, None)
         return dropped
+
+    def _watch_abandoned(self, every_sec: float = 15.0) -> None:
+        while True:
+            time.sleep(every_sec)
+            try:
+                if self.drop_abandoned():
+                    self.notify()  # a free GPU slot: let a waiting thread claim the next song
+            except Exception:
+                logging.exception("Could not check for abandoned jobs")
 
     def queue_position(self, job_id: str) -> int | None:
         queued = [j.id for j in self.store.all()

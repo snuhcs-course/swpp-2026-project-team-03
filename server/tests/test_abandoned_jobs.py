@@ -69,3 +69,15 @@ def test_zero_turns_it_off(tmp_path):
     worker.seen(job.id, now=0)
     assert worker.drop_abandoned(now=10_000) == []
     assert store.get(job.id).state == "queued"
+
+
+def test_watch_thread_cancels_even_while_workers_are_busy(tmp_path):
+    import threading
+    store, worker, client = make(tmp_path)
+    worker.abandon_sec = 0.1
+    job_id = upload(client)
+    threading.Thread(target=worker._watch_abandoned, kwargs={"every_sec": 0.05}, daemon=True).start()
+    deadline = time.time() + 3
+    while time.time() < deadline and store.get(job_id).state != "cancelled":
+        time.sleep(0.05)
+    assert store.get(job_id).state == "cancelled"
