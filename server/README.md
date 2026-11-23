@@ -25,6 +25,12 @@ and gpu22/ford manifests use `ROCKY_PARALLEL=2` and set `ROCKY_MIDI_CPU=4`,
 `ROCKY_MIDI_MEMORY=16Gi` per GPU Pod, which is also the code default. Larger
 values must still let two GPU Pods fit the 16 CPU quota. See `deploy/parallel2-gpu05.md`.
 
+`ROCKY_PDF_CPU` and `ROCKY_PDF_MEMORY` (default 4 and 8Gi) size the PDF and
+key-change Pods. `ROCKY_MIDI_THREADS`, when set, becomes `OMP_NUM_THREADS` and
+`OPENBLAS_NUM_THREADS` in each GPU Pod; it is unset by default. These defaults
+keep the current Pod sizes. With every song in its GPU or PDF stage at once, the
+limits of all work Pods plus the always-on Pods must fit the namespace quota.
+
 ## API
 
 | Method | Path | Result |

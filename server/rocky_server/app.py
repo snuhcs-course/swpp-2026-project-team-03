@@ -28,6 +28,8 @@ Settings (environment variables):
   ROCKY_MAX_UPLOAD_MB  upload size limit (default 60)
   ROCKY_PARALLEL    songs processed at once = GPUs usable at once (default 1)
   ROCKY_MIDI_CPU, ROCKY_MIDI_MEMORY  limits of each GPU Pod (default 4 and 16Gi)
+  ROCKY_MIDI_THREADS  if set, OMP_NUM_THREADS/OPENBLAS_NUM_THREADS of each GPU Pod (default unset)
+  ROCKY_PDF_CPU, ROCKY_PDF_MEMORY  limits of each PDF and key-change Pod (default 4 and 8Gi)
 """
 
 from __future__ import annotations

@@ -43,6 +43,28 @@ def test_gpu_pod_size_comes_from_the_workspace_env(monkeypatch):
     assert (limits["cpu"], limits["memory"], limits["nvidia.com/gpu"]) == ("6", "24Gi", "1")
 
 
+def test_gpu_pod_threads_are_unset_by_default_and_follow_the_env(monkeypatch):
+    env = lambda pod: {e.name: e.value for e in pod.spec.containers[0].env}
+    default = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass")
+    assert "OMP_NUM_THREADS" not in env(default) and "OPENBLAS_NUM_THREADS" not in env(default)
+    monkeypatch.setenv("ROCKY_MIDI_THREADS", "2")
+    capped = env(runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass"))
+    assert (capped["OMP_NUM_THREADS"], capped["OPENBLAS_NUM_THREADS"]) == ("2", "2")
+
+
+def test_pdf_and_key_change_pod_size_comes_from_the_workspace_env(monkeypatch):
+    def limits(r):
+        pdf = r.pdf_pod("abc123abc123", Path("/r")).spec.containers[0].resources.limits
+        key = r.transpose_pod("abc123abc123-01p", Path("/s"), Path("/t"), 2).spec.containers[0].resources.limits
+        return pdf, key
+    for got in limits(runner()):
+        assert (got["cpu"], got["memory"]) == ("4", "8Gi") and "nvidia.com/gpu" not in got
+    monkeypatch.setenv("ROCKY_PDF_CPU", "2")
+    monkeypatch.setenv("ROCKY_PDF_MEMORY", "6Gi")
+    for got in limits(runner()):
+        assert (got["cpu"], got["memory"]) == ("2", "6Gi")
+
+
 def test_solo_practice_passes_personal_to_unified():
     band = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass", "unknown")
     solo = runner().midi_pod("abc123abc123", Path("/a.wav"), Path("/r"), "bass", "unknown", personal=True)
