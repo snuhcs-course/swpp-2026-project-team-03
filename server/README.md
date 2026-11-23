@@ -30,6 +30,10 @@ key-change Pods. `ROCKY_MIDI_THREADS`, when set, becomes `OMP_NUM_THREADS` and
 `OPENBLAS_NUM_THREADS` in each GPU Pod; it is unset by default. These defaults
 keep the current Pod sizes. With every song in its GPU or PDF stage at once, the
 limits of all work Pods plus the always-on Pods must fit the namespace quota.
+The app asks about a waiting song (`GET /jobs/{id}`) every 2 seconds and cancels the song on the
+phone as soon as the internet drops. A queued or running song that nobody has asked about for
+`ROCKY_ABANDON_SEC` seconds (default 180, `0` turns it off) is cancelled on the server too, so it
+leaves the queue and frees its GPU. Only songs uploaded or polled since the API started are watched.
 
 ## API
 

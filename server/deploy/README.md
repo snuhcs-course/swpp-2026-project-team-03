@@ -7,7 +7,7 @@
 
 ```
 폰 (어디서든)
- │  http://team3.swpp-2026-b.snu.ac.kr   ← APK에 이 주소와 API 키가 들어 있음
+ │  https://team3.swpp-2026-b.snu.ac.kr   ← APK에 이 주소와 API 키가 들어 있음
  ▼
 수업 공개 HAProxy → 팀 서버 swpp-b nginx :80          (nginx-rocky.conf)
  │  127.0.0.1:18081 로 넘김
@@ -63,7 +63,7 @@ ssh swpp-b 'sudo mv /tmp/rocky /etc/nginx/sites-available/rocky &&
 ### 3-3. APK
 
 ```bash
-./gradlew assembleDebug -Procky.serverUrl=http://team3.swpp-2026-b.snu.ac.kr -Procky.apiKey=$(cat api-key)
+./gradlew assembleDebug -Procky.serverUrl=https://team3.swpp-2026-b.snu.ac.kr -Procky.apiKey=$(cat api-key)
 ```
 
 - 앱 '서버 설정' 화면에 저장한 값이 빌드 값보다 우선한다. 예전에 `localhost`가 저장된 폰은 설정을 지우거나 앱 데이터를 지운다.
@@ -121,8 +121,8 @@ server/deploy/tunnel.sh
 | 확인 | 명령 | 정상 |
 |---|---|---|
 | 클러스터 연결 | `curl -s localhost:8081/health` | `{"ok":true}` |
-| 공개 주소 | `curl -s http://team3.swpp-2026-b.snu.ac.kr/health` | `{"ok":true}` |
-| 키 검사 | `curl -s -o /dev/null -w '%{http_code}' http://team3.swpp-2026-b.snu.ac.kr/bands` | `401` |
+| 공개 주소 | `curl -s https://team3.swpp-2026-b.snu.ac.kr/health` | `{"ok":true}` |
+| 키 검사 | `curl -s -o /dev/null -w '%{http_code}' https://team3.swpp-2026-b.snu.ac.kr/bands` | `401` |
 | 앱 요청 | `ssh swpp-b 'sudo tail /var/log/nginx/access.log'` | 폰 요청이 `Dalvik/…`로 찍힘 |
 
 ## 7. 문제가 생기면

@@ -164,12 +164,15 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         if store.is_deleted(job.id):  # deleted while the file was still arriving
             store.purge(job.id)
             raise HTTPException(410, "job was deleted during upload")
+        worker.seen(job.id)
         worker.notify()
         return {"id": job.id, "state": job.state}
 
     @app.get("/jobs/{job_id}", dependencies=[Depends(check_key)])
     def job_status(job_id: str) -> dict:
         job = find(job_id)
+        if job.state in ("queued", "running", "publishing"):
+            worker.seen(job.id)  # the app is still waiting for this song
         body = {"id": job.id, "title": job.title, "requested": job.requested, "state": job.state,
                 "queue_position": worker.queue_position(job.id), "error": job.error, "note": job.note,
                 "reason": job.reason, "error_code": job.error_code, "message": job.user_message,

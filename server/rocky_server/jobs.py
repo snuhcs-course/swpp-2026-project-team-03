@@ -8,6 +8,7 @@ queued again and unified.py --resume continues from the last finished stage.
 from __future__ import annotations
 
 import json
+import os
 import logging
 import shutil
 import threading
@@ -193,9 +194,16 @@ class Worker:
     PDF_RETRY_WAIT_SEC = 20.0
     PDF_STAGE_DEADLINE_SEC = 15 * 60.0
 
-    def __init__(self, store: JobStore, runner, parallel: int = 1) -> None:
+    def __init__(self, store: JobStore, runner, parallel: int = 1, abandon_sec: float | None = None) -> None:
         self.store, self.runner = store, runner
         self.parallel = max(1, parallel)
+        # The app polls GET /jobs/{id} every 2 s while it waits for a song. When the phone loses the
+        # internet the app cancels the song on its side (2nd UAT); a song nobody has asked about for
+        # `abandon_sec` is cancelled here too, so it leaves the queue and stops holding a GPU.
+        # Only songs the app has asked about since this server started are watched. 0 turns it off.
+        self.abandon_sec = float(os.environ.get("ROCKY_ABANDON_SEC", "180")) if abandon_sec is None else abandon_sec
+        self.last_seen: dict[str, float] = {}
+        self.seen_lock = threading.Lock()
         self.cond = threading.Condition()
         self.stranded: set[str] = set()  # jobs whose run() ended before saving a final state
         self.stranded_lock = threading.Lock()
@@ -220,11 +228,51 @@ class Worker:
                                   **UPLOAD_INTERRUPTED)
         for t in self.threads:
             t.start()
+        # Every worker thread can be busy running a long song, so a separate thread
+        # checks for abandoned songs (queued or running) on its own schedule.
+        if self.abandon_sec > 0:
+            threading.Thread(target=self._watch_abandoned, name="rocky-abandon-watch", daemon=True).start()
         self.notify()
 
     def notify(self) -> None:
         with self.cond:
             self.cond.notify_all()
+
+    def seen(self, job_id: str, now: float | None = None) -> None:
+        """The app asked about this song (upload or status poll)."""
+        with self.seen_lock:
+            self.last_seen[job_id] = time.time() if now is None else now
+
+    def drop_abandoned(self, now: float | None = None) -> list[str]:
+        """Cancel queued or running songs the app stopped asking about. Returns their ids."""
+        if self.abandon_sec <= 0:
+            return []
+        now = time.time() if now is None else now
+        with self.seen_lock:
+            stale = [j for j, t in self.last_seen.items() if now - t > self.abandon_sec]
+        dropped = []
+        for job_id in stale:
+            job = self.store.get(job_id)
+            if job is not None and job.state in ("queued", "running", "publishing"):
+                try:
+                    self.cancel(job_id)
+                    dropped.append(job_id)
+                    logging.info("Cancelled job %s: the app stopped asking about it", job_id)
+                except Exception:  # a runner that cannot stop it: try again next round
+                    logging.exception("Could not cancel abandoned job %s", job_id)
+                    continue
+            with self.seen_lock:
+                self.last_seen.pop(job_id, None)
+        return dropped
+
+    def _watch_abandoned(self, every_sec: float = 15.0) -> None:
+        while True:
+            time.sleep(every_sec)
+            try:
+                if self.drop_abandoned():
+                    self.notify()  # a free GPU slot: let a waiting thread claim the next song
+            except Exception:
+                logging.exception("Could not check for abandoned jobs")
 
     def queue_position(self, job_id: str) -> int | None:
         queued = [j.id for j in self.store.all()
@@ -249,6 +297,7 @@ class Worker:
         while True:
             try:
                 self._settle_unfinished()
+                self.drop_abandoned()
                 job = self.claim()
             except Exception:  # e.g. a full volume: keep the worker and try again later
                 logging.exception("Worker could not read or claim the queue")

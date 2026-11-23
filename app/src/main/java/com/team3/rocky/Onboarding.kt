@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -76,7 +77,7 @@ object FirstRun {
     private const val KEY_TERMS = "terms_version"
     private const val KEY_GUIDE_OFF = "guide_never"
 
-    /** 이번에 앱을 켠 뒤 안내를 이미 봤는지 (다시 보지 않기를 안 골랐으면 다음에 켤 때 또 보인다). */
+    /** 이번에 앱을 켠 뒤 안내를 이미 봤는지. 처음 안내는 처음 한 번만 저절로 뜬다 (2차 UAT: '다시 보지 않기' 없음). */
     var guideShownThisRun = false
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -145,7 +146,7 @@ fun TermsScreen(onAgree: () -> Unit) {
                 Text(tr("시작하기 전에 확인해 주세요", "Before you get started"),
                     fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text(tr("ROCKY 이용 약관이에요. 동의해야 앱을 쓸 수 있어요.", "These are ROCKY's terms of use. You need to agree to use the app."),
+                Text(tr("ROCKY 이용 약관이에요.\n동의해야 앱을 쓸 수 있어요.", "These are ROCKY's terms of use.\nYou need to agree to use the app."),
                     fontSize = 14.sp, color = cs.onSurfaceVariant, lineHeight = 20.sp)
                 Spacer(Modifier.height(20.dp))
                 termsItems().forEach { item ->
@@ -194,11 +195,11 @@ private fun guideSlides() = listOf(
     ) { fg, soft -> artBand(fg, soft) },
     GuideSlide(
         tr("곡을 올려요", "Upload the song"),
-        tr("MP3·WAV·FLAC·OGG 파일을 고르면 끝이에요. 원곡에 어떤 악기가 있는지는 ROCKY가 들어 보고 알아서 판단해요.", "Pick an MP3, WAV, FLAC or OGG file and you're done. ROCKY listens and works out the song's instruments."),
+        tr("MP3·WAV·FLAC·OGG 파일을 고르면 끝이에요.\n원곡에 어떤 악기가 있는지는 ROCKY가 들어 보고 알아서 판단해요.", "Pick an MP3, WAV, FLAC or OGG file and you're done.\nROCKY listens and works out the song's instruments."),
     ) { fg, soft -> artUpload(fg, soft) },
     GuideSlide(
         tr("ROCKY가 당신을 위한 악보를 만들어요", "ROCKY makes scores just for you"),
-        tr("다른 앱을 써도 ROCKY가 계속 만들어요. 다 되거나 문제가 생기면 알림으로 알려 드려요.", "Use other apps while ROCKY works. We'll notify you when it's done or if something goes wrong."),
+        tr("다른 앱을 써도 ROCKY가 계속 만들어요.\n다 되거나 문제가 생기면 알림으로 알려 드려요.", "Use other apps while ROCKY works.\nWe'll notify you when it's done or if something goes wrong."),
     ) { fg, soft -> artBackground(fg, soft) },
     GuideSlide(
         tr("악보를 받아요", "Get your scores"),
@@ -207,17 +208,49 @@ private fun guideSlides() = listOf(
 )
 
 /**
- * 사용 안내 슬라이드 (처음 켤 때, 그리고 홈의 '처음 안내 다시 보기').
- * 오른쪽 위 '건너뛰기', 아래 '다시 보지 않기'. 다시 보지 않기를 고르지 않으면 다음에 켤 때 또 보인다.
+ * 사용 안내 슬라이드. 처음 켤 때 한 번만 저절로 뜨고, 그다음은 홈 '이렇게 만들어요'의 '처음 안내 다시 보기'로 본다.
+ * '다시 보지 않기'는 없다 (2차 UAT): 한 번 닫으면 다음부터 저절로 뜨지 않는다.
  */
 @Composable
 fun OnboardingDialog(onDone: () -> Unit) {
     val ctx = LocalContext.current
     val slides = remember { guideSlides() }
-    GuideDialog(slides, neverStart = FirstRun.guideOff(ctx), showNever = true, onClose = { never ->
-        if (never) FirstRun.setGuideOff(ctx); onDone()
-    })
+    GuideDialog(slides, neverStart = false, showNever = false, onClose = { FirstRun.setGuideOff(ctx); onDone() })
 }
+
+/** 보관함을 처음 열 때 한 번 보여주는 사용 안내. 보관함 오른쪽 위 '사용법'으로 다시 본다. */
+object LibraryGuide {
+    private const val PREF = "rocky_first_run"
+    private const val KEY = "library_guide_seen"
+    fun seen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
+    fun markSeen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, true).apply()
+}
+
+/** 보관함 사용 안내: 자동 저장·열기, ⋮ 메뉴, 여러 곡 고르기. */
+@Composable
+fun LibraryGuideDialog(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val slides = remember { librarySlides() }
+    GuideDialog(slides, neverStart = false, showNever = false, onClose = { LibraryGuide.markSeen(ctx); onDone() })
+}
+
+private fun librarySlides() = listOf(
+    GuideSlide(
+        tr("완성된 악보가 모여요", "Finished scores land here"),
+        tr("악보가 다 만들어지면 여기에 저장돼요.\n곡을 누르면 악보를 열어요.",
+            "Scores are saved here when they're ready.\nTap a song to open it."),
+    ) { fg, soft -> artLibrary(fg, soft) },
+    GuideSlide(
+        tr("⋮ 메뉴로 한 곡씩 정리해요", "Tidy up one song with ⋮"),
+        tr("곡 오른쪽 ⋮를 누르면 이름 바꾸기, 삭제, 밴드에 공유가 있어요.\n개인 연습용 악보는 공유되지 않아요.",
+            "Tap ⋮ next to a song to rename, delete or share it with a band.\nSolo practice scores can't be shared."),
+    ) { fg, soft -> artMenu(fg, soft) },
+    GuideSlide(
+        tr("여러 곡을 한 번에", "Many songs at once"),
+        tr("오른쪽 위 '선택'을 누르거나 곡을 꾹 누르면 여러 곡을 골라요.\n고른 곡을 한 번에 삭제하거나 밴드에 공유해요.",
+            "Tap 'Select' or press and hold a song to pick several.\nDelete them or share them with a band at once."),
+    ) { fg, soft -> artSelect(fg, soft) },
+)
 
 /** 결과 화면을 처음 열 때 한 번 보여주는 사용 안내. 결과 화면 ⋮ 메뉴의 '사용법 보기'로 다시 본다. */
 object ResultGuide {
@@ -238,34 +271,34 @@ fun ResultGuideDialog(personal: Boolean, onDone: () -> Unit) {
 private fun resultGuideSlides(personal: Boolean) = listOf(
     if (personal) GuideSlide(
         tr("연습할 악기의 악보예요", "Your instrument's score"),
-        tr("곡 이름 앞에 연습할 악기가 붙어 있어요. 기타 2대로 만들었으면 위에서 기타 1·기타 2를 골라 봐요.",
-            "The song name starts with your instrument. If you made two guitars, pick Guitar 1 or 2 at the top."),
+        tr("곡 이름 뒤에 연습할 악기가 붙어 있어요.\n원곡에 없어서 AI가 만든 악보면 ✨가 보여요.\n기타 2대로 만들었으면 위에서 기타 1·기타 2를 골라 봐요.",
+            "The song name ends with your instrument. ✨ means it isn't in the song and was made with AI. If you made two guitars, pick Guitar 1 or 2 at the top."),
     ) { fg, soft -> artParts(fg, soft) } else GuideSlide(
         tr("악기를 골라 듣고 봐요", "Pick a part to see and hear"),
-        tr("위에서 악기를 누르면 그 악기의 악보와 소리만 나와요. '전체'는 밴드 전체예요. 회색은 이 곡에 없는 악기, ✨는 AI가 만든 파트예요.",
-            "Tap an instrument for its score and sound; 'All' is the whole band. Grey ones aren't in this song, ✨ marks AI-made parts."),
+        tr("위에서 악기를 누르면 그 악기의 악보와 소리만 나와요.\n'전체'는 밴드 전체예요.\n회색은 이 곡에 없는 악기, ✨는 AI가 만든 파트예요.",
+            "Tap an instrument for its score and sound; 'All' is the whole band.\nGrey ones aren't in this song, ✨ marks AI-made parts."),
     ) { fg, soft -> artParts(fg, soft) },
     GuideSlide(
         tr("악보는 옆으로 넘겨요", "Swipe through the score"),
-        tr("한 쪽씩 좌우로 넘기고, 두 손가락으로 벌리면 크게 볼 수 있어요. 아래 재생 버튼으로 듣고, 막대를 끌어 원하는 곳으로 옮겨요.",
-            "Swipe left and right page by page, and pinch to zoom. Play at the bottom and drag the bar to jump."),
+        tr("한 쪽씩 좌우로 넘기고, 두 손가락으로 벌리면 크게 볼 수 있어요.\n아래 쪽 번호를 누르면 원하는 쪽으로 가고, 꾹 누른 채 옆으로 밀면 빠르게 넘겨요.",
+            "Swipe page by page and pinch to zoom.\nTap the page number to jump to a page, or press and hold it and slide to flip fast."),
     ) { fg, soft -> artPages(fg, soft) },
     GuideSlide(
         tr("연주 중인 마디를 따라가요", "Follow the playing bar"),
-        tr("재생하면 지금 연주하는 마디에 색이 칠해지고 악보가 알아서 넘어가요. 오른쪽 위 ⋮ 메뉴에서 끄고 켤 수 있어요.",
-            "While playing, the current bar is highlighted and pages turn by themselves. Turn it on or off in the ⋮ menu."),
+        tr("재생하면 지금 연주하는 마디에 색이 칠해지고 악보가 알아서 넘어가요.\n오른쪽 위 ⋮ 메뉴에서 끄고 켤 수 있어요.",
+            "While playing, the current bar is highlighted and pages turn by themselves.\nTurn it on or off in the ⋮ menu."),
     ) { fg, soft -> artFollow(fg, soft) },
     GuideSlide(
         tr("키 바꾸기와 전체 화면", "Change key, full screen"),
-        tr("⋮ 메뉴에서 반 키·한 키씩 키를 바꾸면 악보와 소리를 새 키로 다시 만들어요. 악보 오른쪽 위 버튼으로 전체 화면을 켜요.",
-            "Change the key by half or whole steps in the ⋮ menu; scores and audio are remade. The button on the score opens full screen."),
+        tr("⋮ 메뉴에서 반 키·한 키씩 키를 바꾸면 악보와 소리를 새 키로 다시 만들어요.\n악보 오른쪽 위 버튼으로 전체 화면을 켜요.",
+            "Change the key by half or whole steps in the ⋮ menu; scores and audio are remade.\nThe button on the score opens full screen."),
     ) { fg, soft -> artKey(fg, soft) },
     GuideSlide(
         if (personal) tr("악보를 평가해 주세요", "Rate the score") else tr("밴드와 함께 보고 평가해요", "Share and rate"),
-        if (personal) tr("악보는 보관함에 자동으로 저장돼요. 마지막 쪽 다음 장에서 별점과 의견을 남기면 ROCKY가 더 좋아져요.",
-            "Scores are saved to your library automatically. Rate it on the page after the last one to help ROCKY improve.")
-        else tr("악보는 보관함에 자동으로 저장되고, ⋮ 메뉴의 '밴드에 공유'로 멤버와 함께 봐요. 마지막 쪽 다음 장에서 별점을 남겨 주세요.",
-            "Scores are saved to your library automatically. Use 'Share with a band' in the ⋮ menu, and rate it after the last page."),
+        if (personal) tr("악보는 보관함에 자동으로 저장돼요.\n마지막 쪽 다음 장에서 별점과 의견을 남기면 ROCKY가 더 좋아져요.",
+            "Scores are saved to your library automatically.\nRate it on the page after the last one to help ROCKY improve.")
+        else tr("악보는 보관함에 자동으로 저장되고, ⋮ 메뉴의 '밴드에 공유'로 멤버와 함께 봐요.\n마지막 쪽 다음 장에서 별점을 남겨 주세요.",
+            "Scores are saved to your library automatically.\nUse 'Share with a band' in the ⋮ menu, and rate it after the last page."),
     ) { fg, soft -> artRate(fg, soft) },
 )
 
@@ -467,6 +500,51 @@ private fun DrawScope.artScores(fg: Color, soft: Color) {
     }
     spark(80 * u, 72 * u, 9 * u)
     spark(88 * u, 56 * u, 4.5f * u)
+}
+
+/** 보관함 1. 곡 줄 세 개, 맨 위 줄에 음표. */
+private fun DrawScope.artLibrary(fg: Color, soft: Color) {
+    val u = unit()
+    repeat(3) { i ->
+        val y = (14 + i * 26) * u
+        drawRoundRect(if (i == 0) fg.copy(alpha = 0.22f) else soft.copy(alpha = 0.10f), Offset(8 * u, y), Size(84 * u, 20 * u), CornerRadius(5 * u))
+        drawRoundRect(if (i == 0) fg else soft.copy(alpha = 0.35f), Offset(16 * u, y + 6 * u), Size((if (i == 0) 44 else 36) * u, 4 * u), CornerRadius(2 * u))
+        drawRoundRect(soft.copy(alpha = 0.22f), Offset(16 * u, y + 13 * u), Size(26 * u, 3 * u), CornerRadius(1.5f * u))
+    }
+    drawCircle(fg, 4 * u, Offset(80 * u, 29 * u))
+    drawLine(fg, Offset(84 * u, 29 * u), Offset(84 * u, 16 * u), 2.4f * u, StrokeCap.Round)
+}
+
+/** 보관함 2. 곡 줄 옆 ⋮와 펼친 메뉴 세 칸. */
+private fun DrawScope.artMenu(fg: Color, soft: Color) {
+    val u = unit()
+    drawRoundRect(soft.copy(alpha = 0.10f), Offset(6 * u, 12 * u), Size(88 * u, 20 * u), CornerRadius(5 * u))
+    drawRoundRect(soft.copy(alpha = 0.35f), Offset(14 * u, 19 * u), Size(40 * u, 4 * u), CornerRadius(2 * u))
+    repeat(3) { drawCircle(fg, 2.2f * u, Offset(86 * u, (16 + it * 6) * u)) }
+    drawRoundRect(soft.copy(alpha = 0.16f), Offset(40 * u, 38 * u), Size(52 * u, 52 * u), CornerRadius(6 * u))
+    repeat(3) { i ->
+        val y = (46 + i * 15) * u
+        drawRoundRect(if (i == 2) fg else soft.copy(alpha = 0.45f), Offset(48 * u, y), Size((if (i == 1) 22 else 32) * u, 5 * u), CornerRadius(2.5f * u))
+    }
+}
+
+/** 보관함 3. 체크된 곡 두 개와 아래 버튼 두 개. */
+private fun DrawScope.artSelect(fg: Color, soft: Color) {
+    val u = unit()
+    val stroke = Stroke(2.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    repeat(3) { i ->
+        val y = (8 + i * 22) * u
+        val on = i != 1
+        drawRoundRect(if (on) fg.copy(alpha = 0.18f) else soft.copy(alpha = 0.10f), Offset(6 * u, y), Size(88 * u, 18 * u), CornerRadius(5 * u))
+        drawRoundRect(if (on) fg else soft.copy(alpha = 0.4f), Offset(11 * u, y + 4 * u), Size(10 * u, 10 * u), CornerRadius(2.5f * u), style = if (on) Fill else stroke)
+        if (on) {
+            val tick = Path().apply { moveTo(13 * u, y + 9 * u); lineTo(15.5f * u, y + 11.5f * u); lineTo(19 * u, y + 6.5f * u) }
+            drawPath(tick, Color.White, style = Stroke(1.8f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        drawRoundRect(soft.copy(alpha = 0.35f), Offset(27 * u, y + 7 * u), Size(36 * u, 4 * u), CornerRadius(2 * u))
+    }
+    drawRoundRect(soft.copy(alpha = 0.18f), Offset(6 * u, 78 * u), Size(42 * u, 14 * u), CornerRadius(5 * u))
+    drawRoundRect(fg, Offset(52 * u, 78 * u), Size(42 * u, 14 * u), CornerRadius(5 * u))
 }
 
 @Composable
