@@ -1040,8 +1040,10 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
     val cs = MaterialTheme.colorScheme
     var works by remember { mutableStateOf(WorkStore.load(ctx)) }
     var renaming by remember { mutableStateOf<Work?>(null) }
-    // 보관함 사용 안내: 처음 열 때 한 번, 오른쪽 위 '사용법'으로 다시 본다 (2차 UAT).
-    var guide by remember { mutableStateOf(!LibraryGuide.seen(ctx)) }
+    // 보관함 사용 안내: 설치 뒤 처음 열 때 한 번만 저절로, 오른쪽 위 '사용법'으로 다시 본다 (2차 UAT).
+    var autoGuide by remember { mutableStateOf(LibraryGuide.shouldAutoShow(ctx)) }
+    var guide by remember { mutableStateOf(false) }
+    if (autoGuide) LibraryGuideDialog(auto = true, onDone = { autoGuide = false })
     if (guide) LibraryGuideDialog(onDone = { guide = false })
     val bands = remember { Backend.bands(ctx) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -1342,7 +1344,7 @@ fun ServerDialog(onDismiss: () -> Unit) {
     var result by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(checking) {
         if (checking) {
-            val ok = withContext(Dispatchers.IO) { RockyApi(url, key).health() }
+            val ok = withContext(Dispatchers.IO) { RockyApi(ServerSettings.normalize(url), key).health() }
             result = if (ok) tr("연결됨 ✓", "Connected ✓") else tr("연결할 수 없어요", "Can't connect")
             checking = false
         }

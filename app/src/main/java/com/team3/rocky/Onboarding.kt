@@ -35,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -222,16 +223,32 @@ fun OnboardingDialog(onDone: () -> Unit) {
 object LibraryGuide {
     private const val PREF = "rocky_first_run"
     private const val KEY = "library_guide_seen"
+
+    /** 이번에 앱을 켠 뒤 저절로 이미 띄웠는지 ('다시 보지 않기'를 끈 사람도 한 번 켤 때 한 번만). */
+    var shownThisRun = false
+
     fun seen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
-    fun markSeen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, true).apply()
+    fun markSeen(ctx: Context, seen: Boolean = true) =
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, seen).apply()
+
+    /** 보관함에 들어올 때 저절로 띄울지: 처음 설치한 뒤 한 번만 ('다시 보지 않기'를 끄면 다음에 앱을 켤 때 한 번 더). */
+    fun shouldAutoShow(ctx: Context) = !seen(ctx) && !shownThisRun
 }
 
 /** 보관함 사용 안내: 자동 저장·열기, ⋮ 메뉴, 여러 곡 고르기. */
 @Composable
-fun LibraryGuideDialog(onDone: () -> Unit) {
+fun LibraryGuideDialog(auto: Boolean = false, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val slides = remember { librarySlides() }
-    GuideDialog(slides, neverStart = false, showNever = false, onClose = { LibraryGuide.markSeen(ctx); onDone() })
+    if (auto) {
+        // 뜨는 순간 '봤다'로 기록한다. 닫기 전에 화면이 다시 만들어지거나(언어·다크 모드 변경 등)
+        // 앱이 꺼져도 보관함에 들어갈 때마다 다시 뜨지 않게 (2차 UAT).
+        LaunchedEffect(Unit) { LibraryGuide.shownThisRun = true; LibraryGuide.markSeen(ctx) }
+        // 처음 저절로 뜰 때만 '다시 보지 않기'(기본 체크). 끄고 닫으면 다음에 앱을 켤 때 한 번 더 뜬다.
+        GuideDialog(slides, neverStart = true, showNever = true, onClose = { never -> LibraryGuide.markSeen(ctx, never); onDone() })
+    } else {
+        GuideDialog(slides, neverStart = false, showNever = false, onClose = { onDone() })
+    }
 }
 
 private fun librarySlides() = listOf(
