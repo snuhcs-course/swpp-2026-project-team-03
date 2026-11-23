@@ -323,7 +323,10 @@ fun ResultScreen(
     var fullScreen by remember { mutableStateOf(false) }
     var zoom by remember { mutableFloatStateOf(1f) }
     // 처음 열면 이 화면에서 할 수 있는 것을 안내한다 (홈의 처음 안내와 같은 모양). 메뉴에서 다시 볼 수 있다.
-    var guide by remember { mutableStateOf(!ResultGuide.seen(ctx)) }
+    // 설치 뒤 처음 한 번만 저절로 ('다시 보지 않기', 2차 UAT). ⋮ 메뉴 '사용법 보기'로 언제든 다시 본다.
+    var autoGuide by remember { mutableStateOf(ResultGuide.shouldAutoShow(ctx)) }
+    var guide by remember { mutableStateOf(false) }
+    if (autoGuide) ResultGuideDialog(personal = work.personal, auto = true, onDone = { autoGuide = false })
     if (guide) ResultGuideDialog(personal = work.personal, onDone = { guide = false })
     BackHandler(enabled = fullScreen) { fullScreen = false }
 

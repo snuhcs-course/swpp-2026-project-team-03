@@ -53,7 +53,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -219,10 +218,10 @@ fun OnboardingDialog(onDone: () -> Unit) {
     GuideDialog(slides, neverStart = false, showNever = false, onClose = { FirstRun.setGuideOff(ctx); onDone() })
 }
 
-/** 보관함을 처음 열 때 한 번 보여주는 사용 안내. 보관함 오른쪽 위 '사용법'으로 다시 본다. */
-object LibraryGuide {
+/** 결과 화면을 처음 열 때 한 번 보여주는 사용 안내. 결과 화면 ⋮ 메뉴의 '사용법 보기'로 다시 본다. */
+object ResultGuide {
     private const val PREF = "rocky_first_run"
-    private const val KEY = "library_guide_seen"
+    private const val KEY = "result_guide_seen"
 
     /** 이번에 앱을 켠 뒤 저절로 이미 띄웠는지 ('다시 보지 않기'를 끈 사람도 한 번 켤 때 한 번만). */
     var shownThisRun = false
@@ -231,58 +230,25 @@ object LibraryGuide {
     fun markSeen(ctx: Context, seen: Boolean = true) =
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, seen).apply()
 
-    /** 보관함에 들어올 때 저절로 띄울지: 처음 설치한 뒤 한 번만 ('다시 보지 않기'를 끄면 다음에 앱을 켤 때 한 번 더). */
+    /** 악보 화면을 열 때 저절로 띄울지: 설치 뒤 처음 한 번만 ('다시 보지 않기'를 끄면 다음에 앱을 켤 때 한 번 더). */
     fun shouldAutoShow(ctx: Context) = !seen(ctx) && !shownThisRun
-}
-
-/** 보관함 사용 안내: 자동 저장·열기, ⋮ 메뉴, 여러 곡 고르기. */
-@Composable
-fun LibraryGuideDialog(auto: Boolean = false, onDone: () -> Unit) {
-    val ctx = LocalContext.current
-    val slides = remember { librarySlides() }
-    if (auto) {
-        // 뜨는 순간 '봤다'로 기록한다. 닫기 전에 화면이 다시 만들어지거나(언어·다크 모드 변경 등)
-        // 앱이 꺼져도 보관함에 들어갈 때마다 다시 뜨지 않게 (2차 UAT).
-        LaunchedEffect(Unit) { LibraryGuide.shownThisRun = true; LibraryGuide.markSeen(ctx) }
-        // 처음 저절로 뜰 때만 '다시 보지 않기'(기본 체크). 끄고 닫으면 다음에 앱을 켤 때 한 번 더 뜬다.
-        GuideDialog(slides, neverStart = true, showNever = true, onClose = { never -> LibraryGuide.markSeen(ctx, never); onDone() })
-    } else {
-        GuideDialog(slides, neverStart = false, showNever = false, onClose = { onDone() })
-    }
-}
-
-private fun librarySlides() = listOf(
-    GuideSlide(
-        tr("완성된 악보가 모여요", "Finished scores land here"),
-        tr("악보가 다 만들어지면 여기에 저장돼요.\n곡을 누르면 악보를 열어요.",
-            "Scores are saved here when they're ready.\nTap a song to open it."),
-    ) { fg, soft -> artLibrary(fg, soft) },
-    GuideSlide(
-        tr("⋮ 메뉴로 한 곡씩 정리해요", "Tidy up one song with ⋮"),
-        tr("곡 오른쪽 ⋮를 누르면 이름 바꾸기, 삭제, 밴드에 공유가 있어요.\n개인 연습용 악보는 공유되지 않아요.",
-            "Tap ⋮ next to a song to rename, delete or share it with a band.\nSolo practice scores can't be shared."),
-    ) { fg, soft -> artMenu(fg, soft) },
-    GuideSlide(
-        tr("여러 곡을 한 번에", "Many songs at once"),
-        tr("오른쪽 위 '선택'을 누르거나 곡을 꾹 누르면 여러 곡을 골라요.\n고른 곡을 한 번에 삭제하거나 밴드에 공유해요.",
-            "Tap 'Select' or press and hold a song to pick several.\nDelete them or share them with a band at once."),
-    ) { fg, soft -> artSelect(fg, soft) },
-)
-
-/** 결과 화면을 처음 열 때 한 번 보여주는 사용 안내. 결과 화면 ⋮ 메뉴의 '사용법 보기'로 다시 본다. */
-object ResultGuide {
-    private const val PREF = "rocky_first_run"
-    private const val KEY = "result_guide_seen"
-    fun seen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
-    fun markSeen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, true).apply()
 }
 
 /** 결과 화면 사용 안내: 악기 고르기, 악보 넘기기·확대, 재생, 마디 따라가기, 키 바꾸기·전체 화면, 공유·별점. */
 @Composable
-fun ResultGuideDialog(personal: Boolean, onDone: () -> Unit) {
+fun ResultGuideDialog(personal: Boolean, auto: Boolean = false, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val slides = remember(personal) { resultGuideSlides(personal) }
-    GuideDialog(slides, neverStart = false, showNever = false, onClose = { ResultGuide.markSeen(ctx); onDone() })
+    if (auto) {
+        // 뜨는 순간 '봤다'로 기록한다. 닫기 전에 화면이 다시 만들어지거나(언어·다크 모드 변경 등)
+        // 앱이 꺼져도 곡을 열 때마다 다시 뜨지 않게 (2차 UAT).
+        LaunchedEffect(Unit) { ResultGuide.shownThisRun = true; ResultGuide.markSeen(ctx) }
+        // 저절로 뜰 때만 '다시 보지 않기'(기본 체크). 끄고 닫으면 다음에 앱을 켤 때 한 번 더 뜬다.
+        GuideDialog(slides, neverStart = true, showNever = true, onClose = { never -> ResultGuide.markSeen(ctx, never); onDone() })
+    } else {
+        // ⋮ 메뉴 '사용법 보기'로 다시 볼 때는 체크 칸 없이.
+        GuideDialog(slides, neverStart = false, showNever = false, onClose = { onDone() })
+    }
 }
 
 private fun resultGuideSlides(personal: Boolean) = listOf(
@@ -519,50 +485,8 @@ private fun DrawScope.artScores(fg: Color, soft: Color) {
     spark(88 * u, 56 * u, 4.5f * u)
 }
 
-/** 보관함 1. 곡 줄 세 개, 맨 위 줄에 음표. */
-private fun DrawScope.artLibrary(fg: Color, soft: Color) {
-    val u = unit()
-    repeat(3) { i ->
-        val y = (14 + i * 26) * u
-        drawRoundRect(if (i == 0) fg.copy(alpha = 0.22f) else soft.copy(alpha = 0.10f), Offset(8 * u, y), Size(84 * u, 20 * u), CornerRadius(5 * u))
-        drawRoundRect(if (i == 0) fg else soft.copy(alpha = 0.35f), Offset(16 * u, y + 6 * u), Size((if (i == 0) 44 else 36) * u, 4 * u), CornerRadius(2 * u))
-        drawRoundRect(soft.copy(alpha = 0.22f), Offset(16 * u, y + 13 * u), Size(26 * u, 3 * u), CornerRadius(1.5f * u))
-    }
-    drawCircle(fg, 4 * u, Offset(80 * u, 29 * u))
-    drawLine(fg, Offset(84 * u, 29 * u), Offset(84 * u, 16 * u), 2.4f * u, StrokeCap.Round)
-}
 
-/** 보관함 2. 곡 줄 옆 ⋮와 펼친 메뉴 세 칸. */
-private fun DrawScope.artMenu(fg: Color, soft: Color) {
-    val u = unit()
-    drawRoundRect(soft.copy(alpha = 0.10f), Offset(6 * u, 12 * u), Size(88 * u, 20 * u), CornerRadius(5 * u))
-    drawRoundRect(soft.copy(alpha = 0.35f), Offset(14 * u, 19 * u), Size(40 * u, 4 * u), CornerRadius(2 * u))
-    repeat(3) { drawCircle(fg, 2.2f * u, Offset(86 * u, (16 + it * 6) * u)) }
-    drawRoundRect(soft.copy(alpha = 0.16f), Offset(40 * u, 38 * u), Size(52 * u, 52 * u), CornerRadius(6 * u))
-    repeat(3) { i ->
-        val y = (46 + i * 15) * u
-        drawRoundRect(if (i == 2) fg else soft.copy(alpha = 0.45f), Offset(48 * u, y), Size((if (i == 1) 22 else 32) * u, 5 * u), CornerRadius(2.5f * u))
-    }
-}
 
-/** 보관함 3. 체크된 곡 두 개와 아래 버튼 두 개. */
-private fun DrawScope.artSelect(fg: Color, soft: Color) {
-    val u = unit()
-    val stroke = Stroke(2.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    repeat(3) { i ->
-        val y = (8 + i * 22) * u
-        val on = i != 1
-        drawRoundRect(if (on) fg.copy(alpha = 0.18f) else soft.copy(alpha = 0.10f), Offset(6 * u, y), Size(88 * u, 18 * u), CornerRadius(5 * u))
-        drawRoundRect(if (on) fg else soft.copy(alpha = 0.4f), Offset(11 * u, y + 4 * u), Size(10 * u, 10 * u), CornerRadius(2.5f * u), style = if (on) Fill else stroke)
-        if (on) {
-            val tick = Path().apply { moveTo(13 * u, y + 9 * u); lineTo(15.5f * u, y + 11.5f * u); lineTo(19 * u, y + 6.5f * u) }
-            drawPath(tick, Color.White, style = Stroke(1.8f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        }
-        drawRoundRect(soft.copy(alpha = 0.35f), Offset(27 * u, y + 7 * u), Size(36 * u, 4 * u), CornerRadius(2 * u))
-    }
-    drawRoundRect(soft.copy(alpha = 0.18f), Offset(6 * u, 78 * u), Size(42 * u, 14 * u), CornerRadius(5 * u))
-    drawRoundRect(fg, Offset(52 * u, 78 * u), Size(42 * u, 14 * u), CornerRadius(5 * u))
-}
 
 @Composable
 private fun GuideTitle(text: String, modifier: Modifier = Modifier) {

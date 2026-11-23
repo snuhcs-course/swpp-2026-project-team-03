@@ -1040,11 +1040,6 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
     val cs = MaterialTheme.colorScheme
     var works by remember { mutableStateOf(WorkStore.load(ctx)) }
     var renaming by remember { mutableStateOf<Work?>(null) }
-    // 보관함 사용 안내: 설치 뒤 처음 열 때 한 번만 저절로, 오른쪽 위 '사용법'으로 다시 본다 (2차 UAT).
-    var autoGuide by remember { mutableStateOf(LibraryGuide.shouldAutoShow(ctx)) }
-    var guide by remember { mutableStateOf(false) }
-    if (autoGuide) LibraryGuideDialog(auto = true, onDone = { autoGuide = false })
-    if (guide) LibraryGuideDialog(onDone = { guide = false })
     val bands = remember { Backend.bands(ctx) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
@@ -1068,9 +1063,6 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
         if (selecting) tr("${picked.size}곡 선택", "${picked.size} selected") else tr("보관함", "Library"),
         onBack = null, modifier = modifier,
         actions = {
-            if (!selecting) TextButton(onClick = { guide = true }, modifier = Modifier.testTag("library_guide")) {
-                Text(tr("사용법", "Help"), color = cs.onSurfaceVariant)
-            }
             if (works.isNotEmpty()) TextButton(onClick = { if (selecting) stopSelecting() else selecting = true }, modifier = Modifier.testTag("library_select")) {
                 Text(if (selecting) tr("취소", "Cancel") else tr("선택", "Select"), fontWeight = FontWeight.SemiBold)
             }
