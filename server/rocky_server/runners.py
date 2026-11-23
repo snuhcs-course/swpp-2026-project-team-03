@@ -172,6 +172,11 @@ def pdf_tools_install() -> list[str]:
     ]
 
 
+def pdf_limits() -> dict[str, str]:
+    """CPU/memory limits of the PDF and key-change Pods (no GPU)."""
+    return {"cpu": os.environ.get("ROCKY_PDF_CPU", "4"), "memory": os.environ.get("ROCKY_PDF_MEMORY", "8Gi")}
+
+
 class KubernetesRunner:
     """Create one GPU Pod and then one CPU Pod per song in the workspace namespace.
 
@@ -260,6 +265,9 @@ class KubernetesRunner:
                "ROCKY_ORIGINAL": original, "ROCKY_REQUESTED": requested,
                "ROCKY_PERSONAL": "1" if personal else "",
                "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"}
+        threads = os.environ.get("ROCKY_MIDI_THREADS", "")
+        if threads:  # match CPU math threads to a small CPU limit; unset keeps the library default
+            env.update({"OMP_NUM_THREADS": threads, "OPENBLAS_NUM_THREADS": threads})
         return self._pod(f"rocky-midi-{job_id}", self.pipeline_image, script, env,
                          {"cpu": os.environ.get("ROCKY_MIDI_CPU", "4"),
                           "memory": os.environ.get("ROCKY_MIDI_MEMORY", "16Gi"), "nvidia.com/gpu": "1"})
@@ -275,7 +283,7 @@ class KubernetesRunner:
             "--musescore musescore3 --gp5-converter /data/rocky-unified/ml/gp5_to_pdf/convert.js",
         ])
         return self._pod(f"rocky-pdf-{job_id}", self.pdf_image, script, {"ROCKY_OUTPUT_DIR": str(run)},
-                         {"cpu": "4", "memory": "8Gi"}, working_dir="/data/rocky-unified/ml/gp5_to_pdf")
+                         pdf_limits(), working_dir="/data/rocky-unified/ml/gp5_to_pdf")
 
     def transpose_pod(self, job_id: str, source: Path, target: Path, semitones: int):
         script = "\n".join([
@@ -292,7 +300,7 @@ class KubernetesRunner:
         env = {"ROCKY_SOURCE_DIR": str(source), "ROCKY_OUTPUT_DIR": str(target),
                "ROCKY_SEMITONES": str(semitones)}
         return self._pod(f"rocky-transpose-{job_id}", self.pdf_image, script, env,
-                         {"cpu": "4", "memory": "8Gi"}, working_dir="/data/rocky-unified/ml/gp5_to_pdf")
+                         pdf_limits(), working_dir="/data/rocky-unified/ml/gp5_to_pdf")
 
     # ---- running ----
     def _create(self, pod, note) -> None:
