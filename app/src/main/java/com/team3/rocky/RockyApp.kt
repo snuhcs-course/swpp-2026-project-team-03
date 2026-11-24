@@ -803,6 +803,9 @@ fun retryCountdown(job: ScoreJob): Int {
 /** 개인 연습용 / 밴드 합주용 이름 (카드·보관함 줄에 붙인다). */
 fun modeLabel(personal: Boolean) = if (personal) tr("개인 연습", "Solo") else tr("밴드 합주", "Band")
 
+/** 'A · B · C'가 두 줄이 될 때 '기타 1' 같은 이름 안에서 끊기거나 다음 줄이 '·'로 시작하지 않게, '·' 뒤에서만 줄을 바꾼다. */
+fun wrapAtDots(s: String) = s.replace(' ', ' ').replace("· ", "· ")
+
 @Composable
 fun BigCard(title: String, sub: String, bg: Color, fg: Color, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -854,8 +857,9 @@ fun WorkRow(
             Spacer(Modifier.height(4.dp))
             // 개인 연습용 악보가 원곡에 없어서 AI로 만든 것이면 ✨ (2차 UAT). 채보한 것은 표시 없음.
             val ai = if (w.personal && w.aiGenerated.isNotEmpty()) "✨ " else ""
-            Text(modeLabel(w.personal) + " · " + ai + Demo.labels(w.instruments), fontSize = 13.sp, color = cs.onSurfaceVariant,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // 악기가 많거나 고르기 모드로 폭이 줄어도 다 보이게 두 줄까지.
+            Text(wrapAtDots(modeLabel(w.personal) + " · " + ai + Demo.labels(w.instruments)), fontSize = 13.sp, color = cs.onSurfaceVariant,
+                lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(w.date, fontSize = 12.sp, color = cs.onSurfaceVariant)
         }
         trailing()
@@ -923,7 +927,8 @@ private fun JobCard(job: ScoreJob, onOpen: () -> Unit, onNew: () -> Unit) {
                 color = if (job.queued) cs.onSurfaceVariant else cs.primary,
             )
         }
-        Text(modeLabel(job.personal) + " · " + Demo.labels(job.lineup), fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1)
+        Text(wrapAtDots(modeLabel(job.personal) + " · " + Demo.labels(job.lineup)), fontSize = 12.sp, color = cs.onSurfaceVariant,
+            lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(10.dp))
         Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(cs.surfaceVariant)) {
             Box(Modifier.fillMaxWidth(shown).height(8.dp).background(if (job.failed) cs.error else cs.primary))

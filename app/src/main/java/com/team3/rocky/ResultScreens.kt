@@ -24,6 +24,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -644,18 +645,40 @@ private fun ScoreSheet(
         val side = 12.dp
         val top = if (bleed) 24.dp else 12.dp
         val pageWidth = (maxWidth - side * 2) * zoom
+        // 폴드 안쪽·태블릿처럼 넓은 화면은 두 쪽을 나란히 보여 주고 한 쪽씩 밀린다. 확대하면 한 쪽 보기로 돌아간다.
+        // 버튼으로 '한 쪽'을 고르면 한 쪽 전체를 가운데에 두고 양옆은 여백으로 비운다.
+        var onePage by remember { mutableStateOf(false) }
+        val wide = maxWidth >= TWO_PAGE_MIN_WIDTH && zoom <= 1.01f
+        val twoUp = wide && !onePage
+        // 한 쪽 보기는 위아래를 꽉 채우고 양옆만 여백으로 남긴다.
+        val fitOne = wide && onePage
+        val pageTop = if (fitOne) 0.dp else top
+        val pageBottom = if (fitOne) 0.dp else 56.dp
+        // 쪽 폭이 바뀌어도 보던 쪽에 머문다 (pager는 픽셀 위치를 유지해서 그대로 두면 다른 쪽으로 튄다).
+        val keepPage = remember(twoUp) { pager.currentPage }
+        LaunchedEffect(twoUp) { pager.scrollToPage(keepPage) }
+        val lastLeft = (scoreCount + (if (rating) 1 else 0) - 2).coerceAtLeast(0)
+        fun leftPageFor(page: Int) = if (twoUp) page.coerceAtMost(lastLeft) else page
+        // 넓은 화면에서는 쪽 전체가 스크롤 없이 들어가는 크기로 그린다.
+        fun widthOf(bmp: ImageBitmap): androidx.compose.ui.unit.Dp {
+            if (!wide) return pageWidth
+            val room = maxHeight - pageTop - pageBottom
+            val limit = if (twoUp) maxWidth / 2 - side * 2 else maxWidth - side * 2
+            return minOf(limit, room * (bmp.width.toFloat() / bmp.height))
+        }
         // 지금 마디가 있는 쪽으로 넘기고, 그 쪽 안에서 그 줄이 위에 오게 한다 (그림은 pageWidth에 맞춰 늘어난다).
-        LaunchedEffect(box?.page, box?.top, followBox, pageWidth, pages) {
+        LaunchedEffect(box?.page, box?.top, followBox, pageWidth, pages, twoUp) {
             val b = box ?: return@LaunchedEffect
             val list = pages ?: return@LaunchedEffect
             if (!followBox || b.page !in list.indices) return@LaunchedEffect
-            if (pager.currentPage != b.page) pager.animateScrollToPage(b.page)
-            val (w, topPx) = with(density) { pageWidth.toPx() to top.toPx() }
+            val left = leftPageFor(b.page)
+            if (pager.currentPage != left) pager.animateScrollToPage(left)
+            val (w, topPx) = with(density) { widthOf(list[b.page]).toPx() to pageTop.toPx() }
             val y = topPx + b.top * w / list[b.page].width
             scrolls[b.page].animateScrollTo((y - with(density) { 28.dp.toPx() }).toInt().coerceAtLeast(0), tween(350))
         }
-        LaunchedEffect(followPage) {
-            val target = followPage ?: return@LaunchedEffect
+        LaunchedEffect(followPage, twoUp) {
+            val target = leftPageFor(followPage ?: return@LaunchedEffect)
             if (target != pager.currentPage) pager.animateScrollToPage(target)
         }
         when {
@@ -666,6 +689,7 @@ private fun ScoreSheet(
             )
             else -> HorizontalPager(
                 state = pager, modifier = Modifier.fillMaxSize(),
+                pageSize = if (twoUp) PageSize.Fixed(maxWidth / 2) else PageSize.Fill,
                 // 확대 중에는 손가락으로 그 쪽 안을 움직이고, 쪽은 넘기지 않는다.
                 userScrollEnabled = zoom <= 1.01f,
             ) { i ->
@@ -683,12 +707,13 @@ private fun ScoreSheet(
                 Box(
                     Modifier.fillMaxSize().verticalScroll(scrolls[i])
                         .then(if (zoom > 1.01f) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
-                        .padding(start = side, end = side, top = top, bottom = 56.dp),
+                        .padding(start = side, end = side, top = pageTop, bottom = pageBottom),
+                    contentAlignment = if (wide) Alignment.TopCenter else Alignment.TopStart,
                 ) {
                     Image(
                         bitmap = bmp, contentDescription = tr("악보", "Score"),
                         contentScale = ContentScale.FillWidth,
-                        modifier = Modifier.width(pageWidth).drawWithContent {
+                        modifier = Modifier.width(widthOf(bmp)).drawWithContent {
                             drawContent()
                             // 연주 중인 마디에 색을 칠하고 아래에 선을 긋는다.
                             if (mine != null) {
@@ -704,6 +729,10 @@ private fun ScoreSheet(
                 }
             }
         }
+        // 두 쪽 사이 구분선. 접힘선 자리라 음표가 여기에 놓이지 않는다.
+        if (twoUp && !pages.isNullOrEmpty()) {
+            Box(Modifier.align(Alignment.Center).width(1.dp).height(maxHeight).background(Color(0xFFE4E4E7)))
+        }
         // 위 가운데 손잡이 (종이 느낌)
         if (bleed) {
             Box(
@@ -716,8 +745,10 @@ private fun ScoreSheet(
         // 꾹 누른 채 옆으로 밀면 쪽이 빠르게 넘어간다 (손가락을 떼면 그 쪽에 머문다).
         if (!pages.isNullOrEmpty()) {
             val n = pages.size
-            val cur = pager.currentPage
+            val cur = if (twoUp) pager.currentPage.coerceAtMost(lastLeft) else pager.currentPage
             val label = when {
+                twoUp && cur + 1 < n -> "${cur + 1}–${cur + 2} / $n"
+                twoUp -> "$n / $n"
                 cur >= n -> tr("★ 별점", "★ Rate")
                 cur == n - 1 && rating -> tr("$n / $n · 넘기면 별점 ›", "$n / $n · swipe to rate ›")
                 else -> "${cur + 1} / $n"
@@ -728,7 +759,9 @@ private fun ScoreSheet(
             val stepPx = with(density) { 22.dp.toPx() }
             Text(
                 label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
+                // 한 쪽 보기에서는 악보를 가리지 않게 왼쪽 여백의 '두 쪽' 버튼 위에 둔다.
+                modifier = Modifier.align(if (fitOne) Alignment.BottomStart else Alignment.BottomCenter)
+                    .padding(start = if (fitOne) 10.dp else 0.dp, bottom = if (fitOne) 58.dp else 10.dp)
                     .clip(CircleShape).background(chrome)
                     .semantics { contentDescription = tr("쪽 이동: 누르면 쪽 번호 입력, 꾹 누르고 옆으로 밀면 빠르게 넘기기", "Go to page: tap to type a page, hold and slide to flip") }
                     .pointerInput(n) {
@@ -786,9 +819,23 @@ private fun ScoreSheet(
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             )
         }
+        // 넓은 화면: 두 쪽 / 한 쪽(양옆 여백) 바꾸기
+        if (wide && !pages.isNullOrEmpty()) {
+            Text(
+                if (onePage) tr("두 쪽", "2 pages") else tr("한 쪽", "1 page"),
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = 10.dp)
+                    .clip(CircleShape).background(chrome)
+                    .clickable { onePage = !onePage }
+                    .testTag("score_page_mode")
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            )
+        }
         // 전체 화면 켜기/끄기 (오른쪽 위 작은 버튼, 누르는 영역은 44dp)
         Box(
-            Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp).size(44.dp)
+            // 넓은 화면에서는 악보의 음표를 가리지 않게 아래 빈 곳에 둔다.
+            Modifier.align(if (wide) Alignment.BottomEnd else Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp, bottom = 6.dp).size(44.dp)
                 .clickable(onClick = onToggleFullScreen)
                 .semantics { contentDescription = if (fullScreen) tr("전체 화면 닫기", "Exit full screen") else tr("전체 화면", "Full screen") },
             contentAlignment = Alignment.Center,
@@ -800,6 +847,9 @@ private fun ScoreSheet(
         }
     }
 }
+
+/** 악보 칸이 이 폭 이상이면 두 쪽을 나란히 보여 준다 (폴드 안쪽 화면, 태블릿). */
+private val TWO_PAGE_MIN_WIDTH = 560.dp
 
 /** 쪽 번호를 입력해서 그 쪽으로 가는 창. */
 @Composable
