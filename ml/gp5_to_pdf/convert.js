@@ -121,6 +121,8 @@ async function renderAllTracks({ scale, width }) {
   if (!score.tracks.length) throw new Error('No GP5 tracks found.');
   // alphaTab cuts long track names off beside the staff, so the name is printed as a heading instead.
   score.stylesheet.singleTrackTrackNamePolicy = at.model.TrackNamePolicy.Hidden;
+  // Chord names come without fingerings, so the empty diagrams at the top of the page are hidden.
+  score.stylesheet.globalDisplayChordDiagramsOnTop = false;
   const songTitle = [score.title, score.artist].map((t) => (t || '').trim()).filter(Boolean).join(' - ');
   const pitchName = (pitch, preferFlats) => {
     const names = preferFlats

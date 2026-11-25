@@ -93,16 +93,22 @@ def musescore_score(source: Path, target: Path, musescore: str, *, force: bool =
 
 
 def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force: bool = False,
-              keep_track: int | None = None) -> None:
+              keep_track: int | None = None,
+              chords: dict[int, list[tuple[float, str]]] | None = None,
+              score_bars: int | None = None) -> None:
     """Change only the publication copy of a TAB's title and playback patch.
 
     ``keep_track`` (0-based) keeps one track of a multi-track GP5, so the two
     skyline guitars of one TAB file can be published as separate PDFs.
+    ``chords`` ({measure: [(position, symbol)]}) are drawn above the TAB, only
+    if its bar count matches ``score_bars`` so no chord lands on the wrong bar.
     """
     source_hash = sha256(source)
     stamp = target.with_suffix(target.suffix + ".source_sha256")
-    config = json.dumps({"source_sha256": source_hash, "parts": parts, "keep_track": keep_track},
-                        sort_keys=True)
+    settings = {"source_sha256": source_hash, "parts": parts, "keep_track": keep_track}
+    if chords:
+        settings["chords"] = {str(measure): found for measure, found in chords.items()}
+    config = json.dumps(settings, sort_keys=True)
     if not force and target.is_file() and stamp.is_file() and stamp.read_text().strip() == config:
         return
     try:
@@ -122,6 +128,9 @@ def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force
     for track, (name, program) in zip(song.tracks, parts):
         track.name = name
         track.channel.instrument = program
+        if chords and score_bars is not None and abs(len(track.measures) - score_bars) <= 1:
+            from chord_symbols import add_chords_to_track
+            add_chords_to_track(track, chords)
     guitarpro.write(song, str(target))
     stamp.write_text(config + "\n", encoding="ascii")
 
@@ -563,12 +572,21 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         musescore_score(render_midi, notation, musescore, force=force)
         render(part, notation, "musescore-score",
                [musescore, "-o", str(out / f"{part}.pdf"), str(notation)], tracks)
+    # Chord symbols are an aid: a failure here must not lose the finished score.
+    try:
+        from chord_symbols import estimate_chords
+        chords = estimate_chords(score)
+        score_bars = len(score.get_downbeats())
+    except Exception as exc:
+        print(f"chord symbols skipped: {exc}", flush=True)
+        chords, score_bars = {}, None
+
     def single_guitar_pdf(key: str, gp5: Path, keep_track: int | None) -> None:
         guitar = pretty_midi.PrettyMIDI(str(part_midis[key])).instruments[0]
         label, _ = score_part_name(guitar, int(key[-1]))
         prepared_gp5 = out / f"{key}_render.gp5"
         gp5_score(gp5, prepared_gp5, [(label, int(guitar.program))], force=force,
-                  keep_track=keep_track)
+                  keep_track=keep_track, chords=chords, score_bars=score_bars)
         command = [node, str(gp5_converter), str(prepared_gp5), str(out / f"{key}.pdf"),
                    "--timeout-ms", "180000"]
         if chrome is not None:
@@ -595,7 +613,7 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
             labels = [(score_part_name(inst, index if part == "guitar" and len(instruments) > 1 else 0)[0],
                        int(inst.program)) for index, inst in enumerate(instruments, 1)]
             prepared_gp5 = out / f"{part}_render.gp5"
-            gp5_score(gp5, prepared_gp5, labels, force=force)
+            gp5_score(gp5, prepared_gp5, labels, force=force, chords=chords, score_bars=score_bars)
             command = [node, str(gp5_converter), str(prepared_gp5), str(out / f"{part}.pdf"),
                        "--timeout-ms", "180000"]
             if chrome is not None:

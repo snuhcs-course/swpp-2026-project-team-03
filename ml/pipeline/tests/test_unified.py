@@ -35,7 +35,7 @@ def fake_score_export(cmd):
         target.write_bytes((b"ID3" if target.suffix == ".mp3" else b"%PDF-1.7\n") + b"\0" * 1100)
 
 
-def fake_gp5_score(source, target, parts, *, force=False, keep_track=None):
+def fake_gp5_score(source, target, parts, *, force=False, keep_track=None, chords=None, score_bars=None):
     shutil.copyfile(source, target)
 
 
