@@ -7,10 +7,11 @@ from fake_pipeline import STEMS, write_manifest, write_outputs, write_progress
 
 
 def test_weights_match_the_app():
-    # app/.../progress/JobProgress.kt: SEPARATE .10, TRANSCRIBE .75, BEATS .05, ARRANGE .10
+    # app/.../progress/JobProgress.kt: SEPARATE .08, TRANSCRIBE .50, BEATS .04, ARRANGE .38
     assert overall_fraction("SEPARATE", 0, 1) == 0
-    assert overall_fraction("TRANSCRIBE", 0, 1) == 0.10
-    assert abs(overall_fraction("BEATS", 0, 1) - 0.85) < 1e-9
+    assert overall_fraction("TRANSCRIBE", 0, 1) == 0.08
+    assert abs(overall_fraction("BEATS", 0, 1) - 0.58) < 1e-9
+    assert abs(overall_fraction("ARRANGE", 0, 1) - 0.62) < 1e-9
     assert abs(overall_fraction("ARRANGE", 1, 1) - 1.0) < 1e-9
 
 
@@ -33,7 +34,7 @@ def test_transcription_counts_chunks_of_all_four_stems(tmp_path):
     write_progress(tmp_path, "bass", 15, 30)
     p = run_progress(tmp_path, elapsed_sec=100)
     assert (p["stage"], p["completed"], p["total"]) == ("TRANSCRIBE", 45, 120)
-    assert abs(p["fraction"] - (0.10 + 0.75 * 45 / 120)) < 1e-3
+    assert abs(p["fraction"] - (0.08 + 0.50 * 45 / 120)) < 1e-3
     assert p["eta_sec"] == round(100 * (1 - p["fraction"]) / p["fraction"])
 
 
@@ -159,4 +160,15 @@ def test_rule_gate_stages_are_not_counted_as_arrange_steps():
     completed = ["bs_roformer", "input_check", "muscriptor_batch", "note_gate",
                  "merge_stems", "beat_this", "align", "guitar_tab"]
     assert current_app_stage(completed[:2]) == "TRANSCRIBE"
-    assert arrange_steps({"completed": completed}) == (1, 4)
+    assert arrange_steps({"completed": completed}) == (1, 25)
+
+
+def test_midigpt_and_publication_weigh_most_in_arrange():
+    from rocky_server.progress import arrange_steps
+    base = ["bs_roformer", "muscriptor_batch", "merge_stems", "beat_this", "align"]
+    before = arrange_steps({"completed": base + ["guitar_tab", "bass_tab"]})
+    after = arrange_steps({"completed": base + ["guitar_tab", "bass_tab", "midigpt"]})
+    assembled = arrange_steps({"completed": base + ["guitar_tab", "bass_tab", "midigpt", "assemble"]})
+    # MIDI-GPT moves the bar a lot, and publication still has a real share left after assembly
+    assert after[0] / after[1] - before[0] / before[1] > 0.3
+    assert 0.6 < assembled[0] / assembled[1] < 0.85

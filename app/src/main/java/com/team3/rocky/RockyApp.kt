@@ -884,8 +884,8 @@ fun ProgressTab(modifier: Modifier, onOpen: (ScoreJob) -> Unit, onNew: () -> Uni
                 Text(tr("홈에서 새 악보 만들기", "Make a new score from Home"))
             }
         } else {
-            InfoNote(tr("다른 화면이나 앱을 봐도 계속 만들어요.\n다 되거나 문제가 생기면 알려 드려요.",
-                "ROCKY keeps working while you use other screens or apps.\nWe'll tell you when it's done or if something goes wrong."))
+            InfoNote(tr("다른 화면이나 앱을 봐도 계속 만들어요.\n다 되거나 문제가 생기면 알려 드려요.\n완성된 곡은 24시간 뒤 이 목록에서 빠져요 (보관함에는 남아요).",
+                "ROCKY keeps working while you use other screens or apps.\nWe'll tell you when it's done or if something goes wrong.\nFinished songs leave this list after 24 hours (they stay in your library)."))
             Spacer(Modifier.height(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(jobs, key = { it.id }) { job -> JobCard(job, onOpen = { onOpen(job) }, onNew = onNew) }

@@ -22,16 +22,16 @@ class SmoothProgressTest {
         val bar = SmoothProgress()
         val p = at(Stage.SEPARATE, 0, 0, 10)
         repeat(600) { bar.step(p, 1f) }
-        assertTrue(bar.shown < Stage.SEPARATE.weight)  // 다음 단계 소식 전에는 10%를 넘지 않는다
+        assertTrue(bar.shown < Stage.SEPARATE.weight)  // 다음 단계 소식 전에는 그 단계 끝(8%)을 넘지 않는다
     }
 
     @Test fun catchesUpWithoutJumpingAndNeverGoesBack() {
         val bar = SmoothProgress()
-        bar.step(at(Stage.TRANSCRIBE, 10, 20, 60), 0.1f)   // 실제는 47.5%
+        bar.step(at(Stage.TRANSCRIBE, 10, 20, 60), 0.1f)   // 실제는 33%
         assertTrue(bar.shown < 0.1f)                        // 한 번에 뛰지 않는다
         repeat(100) { bar.step(at(Stage.TRANSCRIBE, 10, 20, 60), 0.1f) }
         val caught = bar.shown
-        assertTrue(caught >= 0.475f)                        // 10초 안에 따라잡는다
+        assertTrue(caught >= 0.33f)                         // 10초 안에 따라잡는다
         bar.step(at(Stage.SEPARATE, 0, 0, 60), 0.1f)        // 서버 값이 뒤로 가도
         assertTrue(bar.shown >= caught)                     // 막대는 뒤로 가지 않는다
     }
@@ -54,5 +54,17 @@ class SmoothProgressTest {
         val before = bar.shown
         bar.started()
         assertEquals(before, bar.shown, 0f)
+    }
+
+    @Test fun slowsDownNearTheEndInsteadOfWaitingAt99() {
+        // 마무리 단계에서 남은 시간이 짧게 와도 95%부터는 점점 느려져서, 1분 동안 99%에 붙어 있지 않는다.
+        val bar = SmoothProgress()
+        val p = at(Stage.ARRANGE, 9, 10, 5)
+        repeat(300) { bar.step(p, 0.1f) }     // 30초
+        assertTrue(bar.shown < 0.99f - 0.005f)
+        assertTrue(bar.shown > 0.95f)
+        val before = bar.shown
+        repeat(300) { bar.step(p, 0.1f) }     // 30초 더: 아직 조금씩 움직인다
+        assertTrue(bar.shown > before)
     }
 }

@@ -73,7 +73,7 @@ import kotlinx.coroutines.launch
 object FirstRun {
     private const val PREF = "rocky_first_run"
     /** 약관 문구를 바꾸면 올린다. 올리면 모두 다시 동의해야 한다. */
-    const val TERMS_VERSION = 1
+    const val TERMS_VERSION = 2  // 2: 이용 목적(서비스 품질 개선)·듣기 24시간 추가 (11/25 베타)
     private const val KEY_TERMS = "terms_version"
     private const val KEY_GUIDE_OFF = "guide_never"
 
@@ -123,8 +123,15 @@ internal fun termsItems() = listOf(
     TermsItem(
         tr("5. 파일은 이렇게 다뤄요", "5. How files are handled"),
         tr(
-            "올린 곡 파일은 악보를 다 만들면 서버에서 지워요. 만든 악보는 보관함과 밴드 공유를 위해 서버에 남고, 보관함에서 지우면 함께 지워져요 (밴드에 공유한 악보는 밴드에 남아요). 악보 파일은 휴대폰 밖으로 내보낼 수 없고 ROCKY 안에서만 볼 수 있어요.",
-            "Uploaded song files are deleted from the server once the scores are made. Scores stay on the server for your library and band sharing, and go when you delete them from the library (scores shared with a band stay with the band). Scores can't be exported; you view them only in ROCKY.",
+            "올린 곡 파일은 악보를 다 만들면 서버에서 지워요. 듣기용 음원(MP3)은 완성 후 24시간 동안만 두고 지워요. 만든 악보는 보관함과 밴드 공유를 위해 서버에 남고, 보관함에서 지우면 함께 지워져요 (밴드에 공유한 악보는 밴드에 남아요). 악보 파일은 휴대폰 밖으로 내보낼 수 없고 ROCKY 안에서만 볼 수 있어요.",
+            "Uploaded song files are deleted from the server once the scores are made. Listening audio (MP3) is kept for 24 hours after a song is made, then deleted. Scores stay on the server for your library and band sharing, and go when you delete them from the library (scores shared with a band stay with the band). Scores can't be exported; you view them only in ROCKY.",
+        ),
+    ),
+    TermsItem(
+        tr("6. 이런 정보를 이런 목적으로 써요", "6. What we collect and why"),
+        tr(
+            "계정 정보(이메일·닉네임·프로필 사진)는 로그인과 밴드 기능에, 올린 곡과 만든 악보는 악보 만들기·보관함·밴드 공유에 써요. 또 서비스 품질 개선(작업 기록·별점 분석)을 위해 곡마다 만든 시간·결과·실패 이유 같은 작업 기록과 별점·의견을 계정과 함께 모아 분석해요.",
+            "Account details (email, nickname, profile photo) are used for sign-in and bands, and your uploads and scores for making scores, your library and band sharing. To improve the service (analysing job records and ratings), we also collect each song's job record, such as processing time, result and failure reason, together with your ratings and comments, linked to your account.",
         ),
     ),
 )

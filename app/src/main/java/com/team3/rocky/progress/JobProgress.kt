@@ -7,9 +7,9 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
- * 악보를 만드는 단계. weight는 전체 시간에서 차지하는 비율로,
- * A100에서 MuScriptor large로 Immigrant Song(2분 27초)을 돌린 기록을 기준으로 잡았다.
- * 채보가 거의 대부분(156초)을 차지한다.
+ * 악보를 만드는 단계. weight는 전체 시간에서 차지하는 비율로, 서버 progress.py WEIGHTS와 같아야 한다.
+ * 11/25 gpu22 실제 곡(밴드 합주용 약 5분) 기록: 분리 ~6%, 채보 ~50%, 박자 ~2%,
+ * 마무리(TAB·MIDI-GPT·합치기·PDF/MP3) ~40%. 예전 값(마무리 10%)이면 마무리 시작에 99%가 되어 1분 넘게 머물렀다.
  */
 enum class Stage(
     private val ko: String,
@@ -19,10 +19,10 @@ enum class Stage(
     val weight: Float,
 ) {
     // 사용자가 보는 이름이라 '음원 분리·채보' 같은 우리 쪽 용어 대신 하는 일을 그대로 적는다.
-    SEPARATE("악기 소리 나누는 중", "Separating instruments", "곡에서 악기별 소리를 따로 꺼내고 있어요", "Pulling each instrument out of the song", 0.10f),
-    TRANSCRIBE("악보로 옮기는 중", "Writing the notes", "악기마다 연주한 음을 악보에 적고 있어요", "Writing down what each instrument plays", 0.75f),
-    BEATS("박자 맞추는 중", "Lining up the beat", "마디와 박자를 맞추고 있어요", "Matching bars and beats", 0.05f),
-    ARRANGE("우리 밴드 악보 완성 중", "Finishing your band's scores", "우리 밴드에 없는 파트까지 채우고 있어요", "Filling in the parts your band needs", 0.10f);
+    SEPARATE("악기 소리 나누는 중", "Separating instruments", "곡에서 악기별 소리를 따로 꺼내고 있어요", "Pulling each instrument out of the song", 0.08f),
+    TRANSCRIBE("악보로 옮기는 중", "Writing the notes", "악기마다 연주한 음을 악보에 적고 있어요", "Writing down what each instrument plays", 0.50f),
+    BEATS("박자 맞추는 중", "Lining up the beat", "마디와 박자를 맞추고 있어요", "Matching bars and beats", 0.04f),
+    ARRANGE("우리 밴드 악보 완성 중", "Finishing your band's scores", "우리 밴드에 없는 파트까지 채우고 있어요", "Filling in the parts your band needs", 0.38f);
 
     val title get() = tr(ko, en)
     val desc get() = tr(koDesc, enDesc)

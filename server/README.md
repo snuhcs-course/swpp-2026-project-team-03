@@ -30,6 +30,11 @@ key-change Pods. `ROCKY_MIDI_THREADS`, when set, becomes `OMP_NUM_THREADS` and
 `OPENBLAS_NUM_THREADS` in each GPU Pod; it is unset by default. These defaults
 keep the current Pod sizes. With every song in its GPU or PDF stage at once, the
 limits of all work Pods plus the always-on Pods must fit the namespace quota.
+Listening MP3s (original key and key changes) are kept for `ROCKY_AUDIO_TTL_SEC` seconds after a
+song finishes (default 86400 = 24 h, `0` keeps them). After that the result no longer lists them,
+`audio_expires_at` in the result tells the app when, and a background thread deletes the files every
+10 minutes. PDF, MIDI and TAB stay, so the library and band sharing keep working without playback.
+
 The app asks about a waiting song (`GET /jobs/{id}`) every 2 seconds and cancels the song on the
 phone as soon as the internet drops. A queued or running song that nobody has asked about for
 `ROCKY_ABANDON_SEC` seconds (default 180, `0` turns it off) is cancelled on the server too, so it

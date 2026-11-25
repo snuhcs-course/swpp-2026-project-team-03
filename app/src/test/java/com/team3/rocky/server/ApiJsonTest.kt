@@ -19,7 +19,7 @@ class ApiJsonTest {
         assertEquals(93, s.etaSec)
         assertNull(s.queuePosition)
         val p = s.toProgress()
-        assertEquals(0.10f + 0.75f * 45 / 120, p.overall, 1e-4f)
+        assertEquals(0.08f + 0.50f * 45 / 120, p.overall, 1e-4f)
         assertFalse(p.done)
     }
 

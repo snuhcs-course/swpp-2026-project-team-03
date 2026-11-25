@@ -24,6 +24,11 @@ class SmoothProgress(
     var shown = 0f
         private set
 
+    private companion object {
+        const val BRAKE_FROM = 0.95f
+        const val BRAKE_SEC = 40f
+    }
+
     /** 처음부터 다시 만들 때 0%로 되돌린다. */
     fun reset() { shown = 0f }
 
@@ -37,6 +42,9 @@ class SmoothProgress(
         val target = p.overall
         val eta = p.etaSec
         var rate = if (eta != null && eta > 0) (1f - shown).coerceAtLeast(0f) / eta else 1f / fallbackSec
+        // 95%부터는 남은 시간과 상관없이 99%까지 남은 만큼에 비례해 점점 느리게 올라간다 (약 40초에 남은 것의 63%).
+        // 남은 시간이 짧게 와도 금방 99%에 붙어서 1분씩 멈춰 있지 않고, 끝날 때까지 조금씩 움직인다 (11/25).
+        if (shown > BRAKE_FROM) rate = min(rate, (0.99f - shown).coerceAtLeast(0f) / BRAKE_SEC)
         if (target > shown) rate = max(rate, max((target - shown) / catchUpSec, minCatchUp))
         // 멈춰 있을 수 있는 가장 앞: 실제 값 또는 지금 단계 끝 바로 앞. 99%는 넘지 않는다.
         val cap = min(max(target, p.stageEnd - 0.01f), 0.99f)

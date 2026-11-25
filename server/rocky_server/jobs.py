@@ -232,6 +232,9 @@ class Worker:
         # checks for abandoned songs (queued or running) on its own schedule.
         if self.abandon_sec > 0:
             threading.Thread(target=self._watch_abandoned, name="rocky-abandon-watch", daemon=True).start()
+        # Listening MP3s are kept for a day only (beta storage); scores and MIDI stay.
+        if audio_ttl_sec() > 0:
+            threading.Thread(target=self._watch_audio, name="rocky-audio-expiry", daemon=True).start()
         self.notify()
 
     def notify(self) -> None:
@@ -273,6 +276,14 @@ class Worker:
                     self.notify()  # a free GPU slot: let a waiting thread claim the next song
             except Exception:
                 logging.exception("Could not check for abandoned jobs")
+
+    def _watch_audio(self, every_sec: float = 600.0) -> None:
+        while True:
+            try:
+                drop_expired_audio(self.store)
+            except Exception:
+                logging.exception("Could not remove expired MP3s")
+            time.sleep(every_sec)
 
     def queue_position(self, job_id: str) -> int | None:
         queued = [j.id for j in self.store.all()
@@ -587,6 +598,54 @@ def describe_failure(run: Path, exc: Exception, timeout_sec: float | None = None
     return dict(error_code="pipeline_error", retryable=True, retry_after_sec=None, retry_from=retry_from,
                 user_message="악보를 만드는 중에 오류가 났어요. 지금 바로 " + redo +
                              " 같은 곡이 두 번 실패하면 팀에게 알려 주세요.")
+
+
+def audio_ttl_sec() -> float:
+    """How long a finished song's listening MP3s stay on the server (ROCKY_AUDIO_TTL_SEC, default 24 h, 0 keeps them)."""
+    try:
+        return max(0.0, float(os.environ.get("ROCKY_AUDIO_TTL_SEC", "86400")))
+    except ValueError:
+        return 86400.0
+
+
+def audio_expires_at(job: Job) -> float | None:
+    """When the song's MP3s stop being served and are deleted (None: kept)."""
+    ttl = audio_ttl_sec()
+    if ttl <= 0 or job.state != "complete" or not job.finished_at:
+        return None
+    return job.finished_at + ttl
+
+
+def audio_expired(job: Job, now: float | None = None) -> bool:
+    expires = audio_expires_at(job)
+    return expires is not None and (time.time() if now is None else now) >= expires
+
+
+def without_audio(result: dict) -> dict:
+    """The result with every MP3 left out (the app then hides its player)."""
+    for entry in [result.get("full_band") or {}, *(result.get("instruments") or {}).values()]:
+        entry.pop("mp3", None)
+    return result
+
+
+def drop_expired_audio(store: "JobStore", now: float | None = None) -> list[str]:
+    """Delete the MP3s (original key and every transposition) of songs finished more than a day ago.
+    PDF, MIDI and TAB stay, so the library and band sharing keep working without playback."""
+    cleared = []
+    for job in store.all():
+        if not audio_expired(job, now):
+            continue
+        run = store.run_dir(job.id)
+        removed = False
+        for mp3 in run.rglob("*.mp3"):
+            try:
+                mp3.unlink()
+                removed = True
+            except OSError:
+                logging.warning("Could not delete %s", mp3)
+        if removed:
+            cleared.append(job.id)
+    return cleared
 
 
 def free_space(run: Path, inputs: Path, filename: str) -> None:

@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
         AppSettings.load(this)
         // 인터넷이 끊기면 만들고 있는 곡을 바로 취소한다 (2차 UAT).
         ScoreJobs.watchNetwork(this)
+        ScoreJobs.keepPruning()
         setContent {
             val dark = AppSettings.dark
             // 상태 표시줄 글자색을 화면 모드에 맞춘다.
