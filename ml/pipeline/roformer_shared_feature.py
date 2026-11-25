@@ -53,10 +53,12 @@ def extract(audio: Path, models_dir: Path, lib_dir: Path) -> np.ndarray:
     import torch
     import torch.nn.functional as F
     import yaml
-    from ml_collections import ConfigDict
 
     verify_model(models_dir)
+    # ml_collections and bs_roformer both live in the BS-RoFormer package directory, not the venv
+    # (separate_bs_roformer.py passes it as PYTHONPATH), so add it before importing either.
     sys.path.insert(0, str(lib_dir))
+    from ml_collections import ConfigDict
     from bs_roformer.inference import SafeLoaderWithTuple
     from bs_roformer.utils import get_model_from_config
 
