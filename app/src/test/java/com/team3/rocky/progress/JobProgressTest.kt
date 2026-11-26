@@ -13,10 +13,10 @@ class JobProgressTest {
 
     @Test fun overallAddsFinishedStagesAndPartOfCurrent() {
         assertEquals(0f, p(Stage.SEPARATE, 0, 4).overall, 1e-6f)
-        assertEquals(0.10f, p(Stage.TRANSCRIBE, 0, 30).overall, 1e-6f)
-        // 30구간 중 12구간: 0.10 + 0.75 × 0.4
-        assertEquals(0.40f, p(Stage.TRANSCRIBE, 12, 30).overall, 1e-6f)
-        assertEquals(0.90f, p(Stage.ARRANGE, 0, 2).overall, 1e-6f)
+        assertEquals(0.08f, p(Stage.TRANSCRIBE, 0, 30).overall, 1e-6f)
+        // 30구간 중 12구간: 0.08 + 0.50 × 0.4
+        assertEquals(0.28f, p(Stage.TRANSCRIBE, 12, 30).overall, 1e-6f)
+        assertEquals(0.62f, p(Stage.ARRANGE, 0, 2).overall, 1e-6f)
         assertEquals(1f, JobProgress(Stage.ARRANGE, 0, 0, 0, done = true).overall, 1e-6f)
     }
 

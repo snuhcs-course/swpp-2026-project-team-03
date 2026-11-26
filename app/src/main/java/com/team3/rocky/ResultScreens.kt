@@ -6,6 +6,15 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.layout.layout
 import android.Manifest
 import android.media.MediaPlayer
+import android.content.Context
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -172,6 +181,14 @@ fun ResultScreen(
     var dragging by remember { mutableStateOf<Float?>(null) }
     var follow by remember { mutableStateOf(true) }
     DisposableEffect(Unit) { onDispose { player.release() } }
+    // 듣기는 완성 후 24시간만 (베타 저장 공간: 서버가 MP3를 지운다). 그 뒤에는 재생 바를 아예 숨긴다.
+    // 화면을 연 채로 시간이 지나도 맞게 1분마다 다시 본다.
+    var clockNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(60_000); clockNow = System.currentTimeMillis() } }
+    val audioOn = local?.audioAvailable(clockNow) == true
+    LaunchedEffect(audioOn) {
+        if (!audioOn && loadedBase != null) { player.reset(); playing = false; loadedBase = null; position = 0; duration = 0 }
+    }
 
     /** 선택한 파트의 음원을 준비한다. 위치는 그대로 이어서 재생할 수 있게 [startAt]으로 옮긴다. */
     fun load(base: String, startAt: Int): Boolean {
@@ -330,6 +347,11 @@ fun ResultScreen(
     if (autoGuide) ResultGuideDialog(personal = work.personal, auto = true, onDone = { autoGuide = false })
     if (guide) ResultGuideDialog(personal = work.personal, onDone = { guide = false })
     BackHandler(enabled = fullScreen) { fullScreen = false }
+    // 처음으로 들을 수 있는 결과를 열면 재생 버튼 위에 '24시간 동안만' 말풍선을 한 번 띄운다 (사용 안내가 닫힌 뒤).
+    var audioTip by remember { mutableStateOf(false) }
+    LaunchedEffect(audioOn, autoGuide) {
+        if (audioOn && !autoGuide && !AudioTip.seen(ctx)) { AudioTip.markSeen(ctx); audioTip = true }
+    }
 
 
     val playerBar: @Composable (Boolean) -> Unit = { flat ->
@@ -344,11 +366,14 @@ fun ResultScreen(
                 .padding(start = 8.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilledIconButton(onClick = { togglePlay() }, enabled = !changingKey, modifier = Modifier.size(48.dp), shape = CircleShape) {
-                Text(
-                    if (playing) "❚❚" else "▶", fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.semantics { contentDescription = if (playing) tr("일시정지", "Pause") else tr("재생", "Play") },
-                )
+            Box {
+                FilledIconButton(onClick = { audioTip = false; togglePlay() }, enabled = !changingKey, modifier = Modifier.size(48.dp), shape = CircleShape) {
+                    Text(
+                        if (playing) "❚❚" else "▶", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.semantics { contentDescription = if (playing) tr("일시정지", "Pause") else tr("재생", "Play") },
+                    )
+                }
+                if (audioTip) AudioTipBubble(onDismiss = { audioTip = false })
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
@@ -413,7 +438,7 @@ fun ResultScreen(
         // 전체 화면: 악보와 재생 바만. 재생 바는 보통 화면과 같은 자리(아래)에 같은 모양으로 둔다.
         Column(Modifier.fillMaxSize().background(cs.background).statusBarsPadding()) {
             sheet(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp, vertical = 8.dp), false)
-            Box(
+            if (audioOn) Box(
                 Modifier.windowInsetsPadding(BottomSystemBars)
                     .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 20.dp),
             ) { playerBar(false) }
@@ -473,7 +498,9 @@ fun ResultScreen(
     }
 
     // 위: 악기 고르기 · 가운데: 악보(좌우로 넘김, 마지막 장 다음은 별점) · 아래: 재생 바 (전체 화면과 같은 자리)
-    Page(work.title, onBack, bottom = { playerBar(false) }, actions = {
+    // 24시간이 지나 MP3가 없어진 곡은 재생 바를 아예 두지 않는다.
+    val bottomBar: (@Composable () -> Unit)? = if (audioOn) { { playerBar(false) } } else null
+    Page(work.title, onBack, bottom = bottomBar, actions = {
         Box {
             TextButton(onClick = { menuOpen = true }) {
                 Text("⋮", fontSize = 22.sp, color = cs.onSurface,
@@ -1098,5 +1125,47 @@ private fun PartChip(
             Spacer(Modifier.width(5.dp))
         }
         Text(text, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.5.sp)
+    }
+}
+
+
+/** 처음 들을 수 있는 결과에서 재생 버튼 위에 한 번만 띄우는 '24시간 동안만 들을 수 있어요' 말풍선. */
+object AudioTip {
+    private const val PREF = "rocky_first_run"
+    private const val KEY = "audio_24h_tip_seen"
+    fun seen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
+    fun markSeen(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean(KEY, true).apply()
+}
+
+/** 재생 버튼 바로 위에 뜨는 말풍선. 누르거나 재생하면 닫힌다. */
+@Composable
+private fun AudioTipBubble(onDismiss: () -> Unit) {
+    val gap = with(LocalDensity.current) { 6.dp.roundToPx() }
+    val above = remember(gap) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize,
+            ) = IntOffset(
+                anchorBounds.left.coerceAtMost((windowSize.width - popupContentSize.width).coerceAtLeast(0)),
+                (anchorBounds.top - popupContentSize.height - gap).coerceAtLeast(0),
+            )
+        }
+    }
+    LaunchedEffect(Unit) { delay(8_000); onDismiss() }
+    Popup(popupPositionProvider = above, onDismissRequest = onDismiss, properties = PopupProperties(focusable = false)) {
+        Column(Modifier.clickable(onClick = onDismiss).testTag("audio_24h_tip")) {
+            Text(
+                tr("재생은 완성 후 24시간 동안만 할 수 있어요.\n악보는 계속 볼 수 있어요.",
+                    "You can play this for 24 hours after it's made.\nThe score stays."),
+                fontSize = 13.sp, color = Color.White, lineHeight = 18.sp,
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF18181B))
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+            )
+            // 버튼을 가리키는 꼬리
+            Canvas(Modifier.padding(start = 18.dp).size(12.dp, 7.dp)) {
+                drawPath(Path().apply { moveTo(0f, 0f); lineTo(size.width, 0f); lineTo(size.width / 2, size.height); close() },
+                    Color(0xFF18181B))
+            }
+        }
     }
 }

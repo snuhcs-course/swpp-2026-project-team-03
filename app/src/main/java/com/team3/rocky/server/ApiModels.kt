@@ -74,6 +74,11 @@ data class JobResult(
      * 우리 밴드가 기타 2대일 때 1 (기타는 1대만 새로 만든다).
      */
     val guitarsDelivered: Int? = null,
+    /**
+     * 듣기용 MP3를 서버가 지우는 시각(밀리초). 완성 후 24시간 (베타 저장 공간). 이 뒤에는 결과에 MP3가 없고
+     * 앱도 재생 바를 숨긴다. 악보와 MIDI는 계속 남는다. 예전 서버는 보내지 않는다(null).
+     */
+    val audioExpiresAt: Long? = null,
 )
 
 object ApiJson {
@@ -111,6 +116,8 @@ object ApiJson {
             faintParts = o.strings("faint_parts"),
             originalGuitars = o.intOrNull("original_guitars"),
             guitarsDelivered = o.intOrNull("guitars_delivered"),
+            audioExpiresAt = if (o.has("audio_expires_at") && !o.isNull("audio_expires_at"))
+                (o.getDouble("audio_expires_at") * 1000).toLong() else null,
         )
     }
 

@@ -111,6 +111,9 @@ class ScoreJob(
     var offline by mutableStateOf(false)
         internal set
     internal var ticker: Job? = null
+    /** 완성된 때(밀리초). '진행 상태' 목록에는 완성 후 24시간만 남는다 (듣기 기간과 같게). */
+    var doneAt: Long? = null
+        internal set
 
     val done get() = progress?.done == true
     val failed get() = error != null
@@ -351,6 +354,26 @@ object ScoreJobs {
         job.phase = null
         job.progress = JobProgress(Stage.ARRANGE, 1, 1, 0, done = true)
         job.shown = 1f
+        job.doneAt = System.currentTimeMillis()
+    }
+
+    /** 완성 후 이만큼 지난 곡은 '진행 상태' 목록에서 저절로 빠진다 (보관함에는 그대로). */
+    const val DONE_CARD_TTL_MS = ScoreStore.AUDIO_TTL_MS
+
+    /** 완성 후 24시간이 지난 카드를 목록에서 뺀다. 빠진 곡 수. */
+    fun pruneFinished(now: Long = System.currentTimeMillis()): Int {
+        val old = jobs.filter { j -> j.done && (j.doneAt ?: now) + DONE_CARD_TTL_MS <= now }
+        old.forEach { remove(it) }
+        return old.size
+    }
+
+    @Volatile private var pruning = false
+
+    /** 앱이 켜져 있는 동안 1분마다 [pruneFinished]를 부른다 (MainActivity가 켤 때). */
+    fun keepPruning() {
+        if (pruning) return
+        pruning = true
+        scope.launch { while (true) { pruneFinished(); delay(60_000) } }
     }
 
     fun find(id: Long) = jobs.firstOrNull { it.id == id }

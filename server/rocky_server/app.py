@@ -30,6 +30,8 @@ Settings (environment variables):
   ROCKY_MIDI_CPU, ROCKY_MIDI_MEMORY  limits of each GPU Pod (default 4 and 16Gi)
   ROCKY_MIDI_THREADS  if set, OMP_NUM_THREADS/OPENBLAS_NUM_THREADS of each GPU Pod (default unset)
   ROCKY_PDF_CPU, ROCKY_PDF_MEMORY  limits of each PDF and key-change Pod (default 4 and 8Gi)
+  ROCKY_AUDIO_TTL_SEC  listening MP3s are served and kept this long after a song finishes
+                    (default 86400 = 24 h, 0 keeps them); PDF and MIDI are kept
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, R
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .accounts import AccountError, Accounts, User
-from .jobs import JobStore, RetryRefused, Worker
+from .jobs import JobStore, RetryRefused, Worker, audio_expired, audio_expires_at, without_audio
 from .lineup import APP_PARTS, LineupError, pipeline_args
 from .progress import allowed_paths, result_files, run_progress
 from .rating_model import model_assignment, rating_model
@@ -238,7 +240,16 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         job = find(job_id)
         if job.state != "complete":
             raise HTTPException(409, f"job is {job.state}")
-        return {"id": job.id, "title": job.title, "mode": job.mode, **result_files(store.run_dir(job.id))}
+        return {"id": job.id, "title": job.title, "mode": job.mode, **song_result(job, store.run_dir(job.id))}
+
+    def song_result(job, run: Path) -> dict:
+        """Result files of the song (or one of its keys). MP3s are listed for a day after the song
+        finished; `audio_expires_at` tells the app when to hide its player."""
+        result = result_files(run)
+        if audio_expired(job):
+            without_audio(result)
+        result["audio_expires_at"] = audio_expires_at(job)
+        return result
 
     @app.get("/jobs/{job_id}/files/{rel:path}", dependencies=[Depends(check_key)])
     def job_file(job_id: str, rel: str):
@@ -247,7 +258,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(409, f"job is {job.state}")
         run = store.run_dir(job.id)
         # Only files listed in the result can be downloaded (no other paths on the volume).
-        if rel not in allowed_paths(result_files(run)):
+        if rel not in allowed_paths(song_result(job, run)):
             raise HTTPException(404, "not a result file")
         media = {"pdf": "application/pdf", "mp3": "audio/mpeg", "json": "application/json"}.get(
             rel.rsplit(".", 1)[-1], "audio/midi")
@@ -264,7 +275,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def transposed_result(job_id: str, semitones: int) -> dict:
         run = transposed_run(job_id, semitones)
         try:
-            result = result_files(run)
+            result = song_result(find(job_id), run)
             paths = allowed_paths(result)
             if any(Path(path).is_absolute() or ".." in Path(path).parts for path in paths):
                 raise ValueError("invalid result path")

@@ -11,7 +11,15 @@ import json
 from pathlib import Path
 
 APP_STAGES = ("SEPARATE", "TRANSCRIBE", "BEATS", "ARRANGE")
-WEIGHTS = {"SEPARATE": 0.10, "TRANSCRIBE": 0.75, "BEATS": 0.05, "ARRANGE": 0.10}
+# Measured on gpu22 (11/25, band songs of about 5 minutes): separation ~6 %, transcription ~50 %,
+# beats ~2 %, and TAB + MIDI-GPT + assembly + PDF/MP3 publication ~40 % of the time. With the old
+# 0.10 for ARRANGE the bar reached 99 % at the start of ARRANGE and waited there for a minute or more.
+WEIGHTS = {"SEPARATE": 0.08, "TRANSCRIBE": 0.50, "BEATS": 0.04, "ARRANGE": 0.38}
+
+# Inside ARRANGE most of the time is MIDI-GPT and the PDF/MP3 publication; every other stage takes
+# a few seconds. Weights are in units of about 3 s on gpu22 (band song: MIDI-GPT ~45-70 s, publication ~20-40 s).
+ARRANGE_STEP_WEIGHTS = {"midigpt": 15}
+PUBLICATION_WEIGHT = 8
 
 TRANSCRIBE_STEMS = ("drums", "bass", "guitar", "piano")
 
@@ -108,14 +116,20 @@ def arrange_steps(manifest: dict) -> tuple[int, int]:
     """Rough progress through ARRANGE: TAB, MIDI-GPT, assembly, then PDF/MP3 publication.
 
     Which of these stages run depends on the song (guitar count, generated parts),
-    so the total is the finished ones plus what is surely still to come.
+    so the total is the finished ones plus what is surely still to come. Stages are
+    weighted by how long they usually take (MIDI-GPT and publication are the long ones).
     """
     completed = manifest.get("completed", [])
-    done = len([n for n in completed if n not in PIPELINE_TO_APP and n != "publish_outputs"])
+    done = sum(ARRANGE_STEP_WEIGHTS.get(n, 1) for n in completed
+               if n not in PIPELINE_TO_APP and n != "publish_outputs")
     published = manifest.get("score_publication") == "complete"
     if published:
-        return done + 1, done + 1
-    remaining = 1 if "assemble" in completed else 3  # (assemble +) publication
+        return done + PUBLICATION_WEIGHT, done + PUBLICATION_WEIGHT
+    remaining = PUBLICATION_WEIGHT
+    if "assemble" not in completed:
+        remaining += 1
+        if "midigpt" not in completed:
+            remaining += ARRANGE_STEP_WEIGHTS["midigpt"]
     return done, done + remaining
 
 
