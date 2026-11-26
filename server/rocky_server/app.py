@@ -11,8 +11,12 @@ GET  /health              liveness check
 Members and bands (SQLite at ROCKY_HOME/rocky.db; see accounts.py). Login returns a token
 that later calls send as "Authorization: Bearer <token>":
 POST /auth/signup, POST /auth/login, POST /auth/logout, GET /auth/taken?email=|nickname=
+  (signup and login take "device"; login is 409 field "session" (a warning) while another phone is
+   logged in, and "force": true logs in anyway and logs the other phone out)
 GET|PATCH /me             my profile (nickname, instruments)
-PATCH /me/works/{work_id}  rename my score in every band I shared it to
+GET  /me/works            my library (보관함), the same on every phone
+PUT  /me/works/{work_id}  save a score to my library;  DELETE /me/works/{work_id}  remove it
+PATCH /me/works/{work_id}  rename my score in my library and every band I shared it to
 GET  /me/works/{work_id}/shared  whether I shared that score to a band
 GET|POST /bands           my bands / make a band;  POST /bands/join  join with an invite code
 GET|PATCH /bands/{id}     band detail / rename (owner);  POST /bands/{id}/leave
@@ -30,6 +34,7 @@ Settings (environment variables):
   ROCKY_MIDI_CPU, ROCKY_MIDI_MEMORY  limits of each GPU Pod (default 4 and 16Gi)
   ROCKY_MIDI_THREADS  if set, OMP_NUM_THREADS/OPENBLAS_NUM_THREADS of each GPU Pod (default unset)
   ROCKY_PDF_CPU, ROCKY_PDF_MEMORY  limits of each PDF and key-change Pod (default 4 and 8Gi)
+  ROCKY_SESSION_IDLE_DAYS  a phone unused this long no longer blocks a login elsewhere (default 14)
   ROCKY_AUDIO_TTL_SEC  listening MP3s are served and kept this long after a song finishes
                     (default 86400 = 24 h, 0 keeps them); PDF and MIDI are kept
 """
@@ -71,7 +76,10 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     runner = runner or make_runner(os.environ.get("ROCKY_RUNNER", "kubernetes"))
     accounts = accounts or Accounts(store.root / "rocky.db")
     store.on_save = lambda job: accounts.record_experiment_job(job, model_assignment(store.run_dir(job.id)))
-    store.on_purge = accounts.delete_experiment_job
+    def purged(job_id: str) -> None:
+        accounts.delete_experiment_job(job_id)
+        accounts.forget_job(job_id)  # no phone can open it any more
+    store.on_purge = purged
     for existing in store.all():
         if store.is_deleted(existing.id):  # Worker.start purges deleted songs and their rows
             continue
@@ -374,12 +382,14 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     @app.post("/auth/signup", status_code=201, dependencies=keyed)
     def sign_up(body: dict = Body(...)) -> dict:
         user, token = accounts.sign_up(str(body.get("email", "")), str(body.get("password", "")),
-                                       str(body.get("nickname", "")), body.get("instruments") or [])
+                                       str(body.get("nickname", "")), body.get("instruments") or [],
+                                       str(body.get("device", ""))[:200])
         return session(user, token)
 
     @app.post("/auth/login", dependencies=keyed)
     def login(body: dict = Body(...)) -> dict:
-        found = accounts.login(str(body.get("email", "")), str(body.get("password", "")))
+        found = accounts.login(str(body.get("email", "")), str(body.get("password", "")),
+                               str(body.get("device", ""))[:200], body.get("force") is True)
         if found is None:  # same answer for an unknown email and a wrong password
             raise HTTPException(401, "wrong email or password")
         return session(*found)
@@ -439,6 +449,21 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
         if accounts.photo_at(user_id) is None or not f.is_file():
             raise HTTPException(404, "no photo")
         return FileResponse(f, media_type="image/jpeg")
+
+    @app.get("/me/works", dependencies=keyed)
+    def my_works(user: User = Depends(current_user)) -> list:
+        return accounts.works(user)
+
+    @app.put("/me/works/{work_id}", dependencies=keyed)
+    def save_my_work(work_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
+        job_id = str(body.get("job_id") or "")
+        if re.fullmatch(r"[0-9a-f]{12}", job_id):
+            find(job_id)  # 404 for a song the server no longer has
+        return accounts.save_work(user, work_id, body)
+
+    @app.delete("/me/works/{work_id}", dependencies=keyed)
+    def delete_my_work(work_id: int, user: User = Depends(current_user)) -> dict:
+        return {"deleted": accounts.delete_work(user, work_id)}
 
     @app.patch("/me/works/{work_id}", dependencies=keyed)
     def rename_my_work(work_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:

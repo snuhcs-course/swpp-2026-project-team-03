@@ -126,6 +126,7 @@ class ScoreJob(
         unrecognized = unrecognized,
         personal = personal,
         audio = audio.uri.toString(),
+        jobId = serverId,
     )
 }
 

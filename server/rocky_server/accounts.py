@@ -7,6 +7,15 @@ shared scores read nicknames from `users`, so a nickname change shows everywhere
 Passwords are hashed with PBKDF2-HMAC-SHA256 in the app's format
 ("pbkdf2-sha256$<iterations>$<salt b64>$<hash b64>"). A login gets a random token; only its
 SHA-256 is stored.
+
+One phone per account: while the account is logged in on another phone that used the server within
+SESSION_IDLE_DAYS, a login gets 409 (field "session") with a warning. The app shows it and, if the
+member confirms, logs in again with force=true: the other phone's session ends (its next call gets 401
+"login required", it logs out and cancels its running songs). The phone sends a device id (Android
+ANDROID_ID); a login from the same phone needs no warning. Sessions from apps that sent no device id
+never trigger the warning.
+
+Each member's library (보관함) lives in `works`, so the same scores appear on any phone they log in to.
 """
 
 from __future__ import annotations
@@ -18,6 +27,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +40,10 @@ NAME_MAX = 20
 MEMBERS_MAX = 8  # a band (owner included) has at most this many members
 OLD_DEMO_CODE = "BAND33"  # the removed demo band; see Accounts._remove_old_demo
 ITERATIONS = 120_000
+# A phone that has not called the server for this long no longer keeps the account from logging in elsewhere.
+SESSION_IDLE_DAYS = float(os.environ.get("ROCKY_SESSION_IDLE_DAYS", "14"))
+SEEN_EVERY_MS = 60_000  # last_seen_at is written at most this often per session
+JOB_ID_RE = re.compile(r"[0-9a-f]{12}")
 
 # Same rules as the app's SignUpValidator.
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$")
@@ -98,6 +112,11 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _device_hash(device: str | None) -> str | None:
+    device = (device or "").strip()
+    return hashlib.sha256(device.encode()).hexdigest() if device else None
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,6 +161,21 @@ CREATE TABLE IF NOT EXISTS shared_scores (
     shared_at   INTEGER NOT NULL,
     UNIQUE (band_id, work_id)
 );
+-- 보관함: one row per score a member saved. work_id is the id the app gave the score.
+CREATE TABLE IF NOT EXISTS works (
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    work_id      INTEGER NOT NULL,
+    job_id       TEXT    NOT NULL,
+    title        TEXT    NOT NULL,
+    instruments  TEXT    NOT NULL DEFAULT '',
+    work_date    TEXT    NOT NULL DEFAULT '',
+    original     TEXT    NOT NULL DEFAULT '',
+    unrecognized TEXT    NOT NULL DEFAULT '',
+    personal     INTEGER NOT NULL DEFAULT 0,
+    saved_at     INTEGER NOT NULL,
+    PRIMARY KEY (user_id, work_id)
+);
+CREATE INDEX IF NOT EXISTS idx_works_job ON works(job_id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON band_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_scores_job ON shared_scores(job_id);
 -- Star ratings (1-5) the app collects under each score, to see which results need work.
@@ -208,6 +242,9 @@ class Accounts:
             if column not in have:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         add("users", "photo_at", "INTEGER")          # when the profile photo last changed (null = no photo)
+        add("sessions", "device_hash", "TEXT")       # SHA-256 of the phone's device id (null = an older app)
+        add("sessions", "last_seen_at", "INTEGER")   # last call with this token
+        self.db.execute("UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL")
         add("ratings", "comment", "TEXT NOT NULL DEFAULT ''")  # optional words after the stars
         for column, kind in (("assigned_model", "TEXT"), ("applied_model", "TEXT"),
                              ("model_sha256", "TEXT"), ("assignment_probability", "REAL"),
@@ -228,12 +265,22 @@ class Accounts:
         row = self._one("SELECT * FROM users WHERE id = ?", user_id)
         return self._user(row) if row else None
 
-    def _new_session(self, user_id: int) -> str:
+    def _new_session(self, user_id: int, device: str | None = None) -> str:
         token = secrets.token_urlsafe(32)
         now = self.clock()
-        self.db.execute("INSERT INTO sessions VALUES (?, ?, ?)", (_token_hash(token), user_id, now))
+        self.db.execute("INSERT INTO sessions (token_hash, user_id, created_at, device_hash, last_seen_at)"
+                        " VALUES (?, ?, ?, ?, ?)", (_token_hash(token), user_id, now, _device_hash(device), now))
         self.db.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now, user_id))
         return token
+
+    def _logged_in_elsewhere(self, user_id: int, device: str | None) -> bool:
+        """Another phone holds a session it used recently. Older apps (no device id) never block."""
+        since = self.clock() - int(SESSION_IDLE_DAYS * 86_400_000)
+        mine = _device_hash(device)
+        row = self._one("SELECT 1 FROM sessions WHERE user_id = ? AND device_hash IS NOT NULL"
+                        " AND (? IS NULL OR device_hash != ?) AND last_seen_at >= ?",
+                        user_id, mine, mine, since)
+        return row is not None
 
     # ---------- members ----------
 
@@ -244,7 +291,8 @@ class Accounts:
         return self._one("SELECT 1 FROM users WHERE nickname = ? COLLATE NOCASE AND id != ?",
                          nickname.strip(), except_user or 0) is not None
 
-    def sign_up(self, email: str, password: str, nickname: str, instruments) -> tuple[User, str]:
+    def sign_up(self, email: str, password: str, nickname: str, instruments,
+                device: str | None = None) -> tuple[User, str]:
         email, nickname = normalize_email(email), nickname.strip()
         if len(email) > 254 or not EMAIL_RE.match(email):
             raise AccountError(422, "이메일 형식이 올바르지 않아요", "email")
@@ -264,20 +312,32 @@ class Accounts:
                 "INSERT INTO users (email, password_hash, nickname, instruments, terms_agreed_at, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
                 (email, hashed, nickname, ",".join(clean_instruments(instruments)), now, now))
-            token = self._new_session(cur.lastrowid)
+            token = self._new_session(cur.lastrowid, device)
             return self.user(cur.lastrowid), token
 
-    def login(self, email: str, password: str) -> tuple[User, str] | None:
+    def login(self, email: str, password: str, device: str | None = None,
+              force: bool = False) -> tuple[User, str] | None:
+        """None for a wrong email or password. AccountError 409 (a warning) while another phone is logged in,
+        unless force. Otherwise every other session of the account ends: one phone at a time."""
         row = self._one("SELECT * FROM users WHERE email = ?", normalize_email(email))
         if row is None or not verify_password(password, row["password_hash"]):
             return None
-        with self.lock:
-            return self._user(row), self._new_session(row["id"])
+        with self.lock, self._tx():
+            if not force and self._logged_in_elsewhere(row["id"], device):
+                raise AccountError(409, "다른 핸드폰에서 로그인중입니다. 돌리고 있는 곡이 있으면 취소됩니다", "session")
+            self.db.execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],))
+            return self._user(row), self._new_session(row["id"], device)
 
     def user_for_token(self, token: str) -> User | None:
-        row = self._one("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
-                        _token_hash(token))
-        return self._user(row) if row else None
+        row = self._one("SELECT u.*, s.last_seen_at AS seen FROM sessions s JOIN users u ON u.id = s.user_id"
+                        " WHERE s.token_hash = ?", _token_hash(token))
+        if row is None:
+            return None
+        now = self.clock()
+        if (row["seen"] or 0) < now - SEEN_EVERY_MS:
+            with self.lock:
+                self.db.execute("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?", (now, _token_hash(token)))
+        return self._user(row)
 
     def logout(self, token: str) -> None:
         with self.lock:
@@ -454,10 +514,13 @@ class Accounts:
             self.db.execute("UPDATE shared_scores SET title = ? WHERE id = ?", (title, score_id))
 
     def rename_my_work(self, user: User, work_id: int, title: str) -> None:
+        """Rename my score in my library and in every band I shared it to."""
         title = title.strip()[:120]
         if title:
-            with self.lock:
+            with self.lock, self._tx():
                 self.db.execute("UPDATE shared_scores SET title = ? WHERE shared_by = ? AND work_id = ?",
+                                (title, user.id, work_id))
+                self.db.execute("UPDATE works SET title = ? WHERE user_id = ? AND work_id = ?",
                                 (title, user.id, work_id))
 
     def work_shared(self, user: User, work_id: int) -> bool:
@@ -466,6 +529,53 @@ class Accounts:
     def job_shared(self, job_id: str) -> bool:
         """Band members open a shared score from the server, so its job must not be deleted."""
         return self._one("SELECT 1 FROM shared_scores WHERE job_id = ?", job_id) is not None
+
+    # ---------- library (보관함) ----------
+
+    @staticmethod
+    def _work_json(r) -> dict:
+        split = lambda v: [i for i in (v or "").split(",") if i]
+        return {"work_id": r["work_id"], "job_id": r["job_id"], "title": r["title"],
+                "instruments": split(r["instruments"]), "date": r["work_date"], "original": split(r["original"]),
+                "unrecognized": split(r["unrecognized"]), "personal": bool(r["personal"]), "saved_at": r["saved_at"]}
+
+    def works(self, user: User) -> list[dict]:
+        rows = self.db.execute("SELECT * FROM works WHERE user_id = ? ORDER BY saved_at DESC, work_id DESC",
+                               (user.id,)).fetchall()
+        return [self._work_json(r) for r in rows]
+
+    def save_work(self, user: User, work_id: int, work: dict) -> dict:
+        """Add a score to my library, or update it if it is already there (saved_at stays)."""
+        job_id = str(work.get("job_id") or "")
+        if not JOB_ID_RE.fullmatch(job_id):
+            raise AccountError(422, "작업 번호가 올바르지 않아요", "job_id")
+        title = str(work.get("title", "")).strip()[:120]
+        if not title:
+            raise AccountError(422, "악보 제목이 없어요", "title")
+        join = lambda key: ",".join(str(i) for i in (work.get(key) or []) if str(i) in BAND_PARTS)
+        with self.lock, self._tx():
+            self.db.execute(
+                """INSERT INTO works (user_id, work_id, job_id, title, instruments, work_date, original,
+                                      unrecognized, personal, saved_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (user_id, work_id) DO UPDATE SET job_id = excluded.job_id, title = excluded.title,
+                       instruments = excluded.instruments, work_date = excluded.work_date,
+                       original = excluded.original, unrecognized = excluded.unrecognized,
+                       personal = excluded.personal""",
+                (user.id, int(work_id), job_id, title, join("instruments"), str(work.get("date", ""))[:40],
+                 join("original"), join("unrecognized"), 1 if work.get("personal") else 0,
+                 int(work.get("saved_at") or self.clock())))
+            return self._work_json(self._one("SELECT * FROM works WHERE user_id = ? AND work_id = ?", user.id, int(work_id)))
+
+    def delete_work(self, user: User, work_id: int) -> bool:
+        with self.lock:
+            return self.db.execute("DELETE FROM works WHERE user_id = ? AND work_id = ?",
+                                   (user.id, work_id)).rowcount == 1
+
+    def forget_job(self, job_id: str) -> None:
+        """The song was deleted from the server: drop it from every library that still lists it."""
+        with self.lock:
+            self.db.execute("DELETE FROM works WHERE job_id = ?", (job_id,))
 
     # ---------- profile photos (the file itself lives next to the database, see app.py) ----------
 

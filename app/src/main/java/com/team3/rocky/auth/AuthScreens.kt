@@ -90,17 +90,20 @@ fun LoginScreen(auth: AuthRepository, onLoggedIn: (User) -> Unit, onSignUp: () -
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var editServer by remember { mutableStateOf(false) }
+    // 다른 폰에 로그인되어 있을 때의 경고. 확인하면 그 폰을 로그아웃시키고 이 폰으로 로그인한다.
+    var elsewhere by remember { mutableStateOf<String?>(null) }
 
-    fun submit() {
+    fun submit(force: Boolean = false) {
         if (busy) return
         focus.clearFocus()
         busy = true
         error = null
         scope.launch {
-            when (val r = auth.login(email, password)) {
+            when (val r = auth.login(email, password, force)) {
                 is AuthResult.Success -> onLoggedIn(r.user)
                 is AuthResult.Failure -> error = r.message
                 is AuthResult.Invalid -> error = r.errors.values.first()
+                is AuthResult.LoggedInElsewhere -> elsewhere = r.message
             }
             busy = false
         }
@@ -154,6 +157,18 @@ fun LoginScreen(auth: AuthRepository, onLoggedIn: (User) -> Unit, onSignUp: () -
         }
     }
     if (editServer) com.team3.rocky.ServerDialog(onDismiss = { editServer = false })
+    elsewhere?.let { message ->
+        AlertDialog(
+            onDismissRequest = { elsewhere = null },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { elsewhere = null; submit(force = true) }, modifier = Modifier.testTag("login_force")) {
+                    Text(tr("이 기기에서 로그인", "Log in here"))
+                }
+            },
+            dismissButton = { TextButton(onClick = { elsewhere = null }) { Text(tr("취소", "Cancel")) } },
+        )
+    }
 }
 
 // ---------- 회원가입 ----------
@@ -223,6 +238,7 @@ fun SignUpScreen(auth: AuthRepository, onBack: () -> Unit, onSignedUp: (User) ->
                 }
                 is AuthResult.Invalid -> serverErrors = r.errors
                 is AuthResult.Failure -> failure = r.message
+                is AuthResult.LoggedInElsewhere -> failure = r.message  // 가입은 새 계정이라 오지 않는다
             }
             busy = false
         }
