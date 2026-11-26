@@ -93,4 +93,28 @@ class ServerAccountsTest {
         val odd = JSONObject(userJson).put("provider", "KAKAO")
         assertEquals(AuthProvider.EMAIL, ServerAccounts.user(odd).provider)
     }
+
+    // ---------- 한 계정은 한 폰에서만 (11/26) ----------
+
+    @Test fun signUpAndLoginSendThisPhonesDeviceId() {
+        FakeHttp(mapOf(
+            "POST /auth/signup" to json(201, """{"token":"t1","user":$userJson}"""),
+            "POST /auth/login" to json(200, """{"token":"t2","user":$userJson}"""),
+        )).use { s ->
+            val a = ServerAccounts({ "phone-1" }) { token -> MemberApi(s.url, "", token) }
+            a.signUp("a@b.com", "12345678a", "가나", emptyList(), 0)
+            a.login("a@b.com", "12345678a", 0)
+            for (r in s.requests) assertEquals("phone-1", JSONObject(String(r.body, Charsets.UTF_8)).getString("device"))
+        }
+    }
+
+    @Test fun loggedInOnAnotherPhoneIsItsOwnError() {
+        FakeHttp(mapOf("POST /auth/login" to json(409, """{"detail":"다른 기기에서 로그인되어 있어요","field":"session"}"""))).use { s ->
+            try {
+                accounts(s).login("a@b.com", "12345678a", 0); fail()
+            } catch (e: LoggedInElsewhereException) {
+                // 화면은 '다른 기기에서 로그인되어 있어요'를 보여 준다 (AuthRepository.LOGGED_IN_ELSEWHERE)
+            }
+        }
+    }
 }

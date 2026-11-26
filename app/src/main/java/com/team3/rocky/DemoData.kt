@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.team3.rocky.auth.AuthRepository
+import com.team3.rocky.server.LibrarySync
 import java.io.File
 
 /*
@@ -186,6 +187,8 @@ data class Work(
     val personal: Boolean = false,
     /** 올린 곡 파일 (content:// 주소). 개인 연습용의 '전체'는 이 원곡을 들려준다. 이 폰에서만 열린다. */
     val audio: String? = null,
+    /** 서버 작업 번호. 다른 폰에서 로그인해도 이 번호로 악보 파일을 다시 받는다 (보관함 동기화). */
+    val jobId: String? = null,
 ) {
     val aiGenerated: Set<String> get() = Demo.aiGenerated(instruments, original) - unrecognized.toSet()
 }
@@ -194,10 +197,14 @@ object WorkStore {
     private const val PREF = "rocky"
 
     // 보관함은 회원마다 따로 저장한다. 로그인 전에는 쓰지 않는다.
-    private fun key(ctx: Context) = "works_" + (AuthRepository.currentUserId(ctx) ?: "guest")
+    // 같은 내용이 서버(/me/works)에도 있어서, 다른 폰에서 로그인해도 보관함이 그대로다 ([LibrarySync]).
+    private fun key(ctx: Context) = key(AuthRepository.currentUserId(ctx))
+    private fun key(userId: Long?) = "works_" + (userId ?: "guest")
 
-    fun load(ctx: Context): List<Work> {
-        val raw = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(key(ctx), "") ?: ""
+    fun load(ctx: Context): List<Work> = load(ctx, AuthRepository.currentUserId(ctx))
+
+    internal fun load(ctx: Context, userId: Long?): List<Work> {
+        val raw = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(key(userId), "") ?: ""
         return raw.split("\n").filter { it.isNotBlank() }.mapNotNull { line ->
             val p = line.split("\t")
             if (p.size < 4) null
@@ -210,24 +217,37 @@ object WorkStore {
                 unrecognized = p.getOrNull(5).orEmpty().split(",").filter { it.isNotBlank() },
                 personal = p.getOrNull(6) == "1",
                 audio = p.getOrNull(7)?.takeIf { it.isNotBlank() },
+                jobId = p.getOrNull(8)?.takeIf { it.isNotBlank() },
             )
         }
     }
 
-    fun add(ctx: Context, w: Work) = save(ctx, listOf(w) + load(ctx).filter { it.id != w.id })
+    fun add(ctx: Context, w: Work) {
+        save(ctx, listOf(w) + load(ctx).filter { it.id != w.id })
+        LibrarySync.changed(ctx, w.id)
+    }
 
-    fun rename(ctx: Context, id: Long, title: String) =
+    fun rename(ctx: Context, id: Long, title: String) {
         save(ctx, load(ctx).map { if (it.id == id) it.copy(title = title) else it })
+        LibrarySync.changed(ctx, id)
+    }
 
-    fun remove(ctx: Context, id: Long) = save(ctx, load(ctx).filter { it.id != id })
+    fun remove(ctx: Context, id: Long) {
+        save(ctx, load(ctx).filter { it.id != id })
+        LibrarySync.removed(ctx, id)
+    }
 
-    private fun save(ctx: Context, list: List<Work>) {
+    private fun save(ctx: Context, list: List<Work>) = save(ctx, AuthRepository.currentUserId(ctx), list)
+
+    /** 동기화가 서버 목록으로 바꿔 쓸 때. 다시 서버로 보내지 않는다. */
+    internal fun save(ctx: Context, userId: Long?, list: List<Work>) {
         val raw = list.joinToString("\n") {
             val title = it.title.replace("\t", " ").replace("\n", " ")
             "${it.id}\t$title\t${it.instruments.joinToString(",")}\t${it.date}\t${it.original.joinToString(",")}" +
-                "\t${it.unrecognized.joinToString(",")}\t${if (it.personal) "1" else "0"}\t${it.audio.orEmpty()}"
+                "\t${it.unrecognized.joinToString(",")}\t${if (it.personal) "1" else "0"}\t${it.audio.orEmpty()}" +
+                "\t${it.jobId.orEmpty()}"
         }
-        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(key(ctx), raw).apply()
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(key(userId), raw).commit()
     }
 }
 

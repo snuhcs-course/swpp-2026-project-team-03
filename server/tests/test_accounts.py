@@ -68,7 +68,8 @@ def test_sign_up_login_and_profile(client):
 
     client.post("/auth/logout", headers=auth(again))
     assert client.get("/me", headers=auth(again)).status_code == 401
-    assert client.get("/me", headers=auth(s)).status_code == 200  # the other phone stays logged in
+    # one phone per account: logging in again ended the earlier session
+    assert client.get("/me", headers=auth(s)).status_code == 401
 
 
 def test_app_key_and_login_are_required(client):

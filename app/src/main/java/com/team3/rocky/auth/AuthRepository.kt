@@ -59,6 +59,8 @@ class AuthRepository(
         // 없는 이메일인지 틀린 비밀번호인지 알려주지 않는다 (가입 여부를 알아내는 것을 막기 위해).
         val s = try {
             accounts.login(normalized, password, clock())
+        } catch (e: LoggedInElsewhereException) {
+            return@withContext AuthResult.Failure(LOGGED_IN_ELSEWHERE)
         } catch (e: MemberApiException) {
             return@withContext AuthResult.Failure(e.message ?: OFFLINE)
         } catch (e: IOException) {
@@ -103,6 +105,11 @@ class AuthRepository(
         if (s != null && s.token.isNotEmpty()) Thread { accounts.logout(s) }.start()
     }
 
+    /** 서버가 이 폰의 로그인을 끝냈을 때 (다른 폰에서 로그인함). 서버에는 보낼 것이 없어 폰에서만 지운다. */
+    fun forget() {
+        prefs.edit().remove(KEY_USER_ID).remove(KEY_TOKEN).remove(KEY_USER).apply()
+    }
+
     /** 로그인한 회원. 로그인하지 않았으면 null. */
     fun currentUser(): User? = session()?.user
 
@@ -123,6 +130,10 @@ class AuthRepository(
 
     companion object {
         val WRONG_CREDENTIALS get() = tr("이메일 또는 비밀번호가 맞지 않아요", "Wrong email or password")
+        val LOGGED_IN_ELSEWHERE get() = tr(
+            "다른 기기에서 로그인되어 있어요.\n그 기기에서 로그아웃한 뒤 다시 로그인해 주세요",
+            "This account is logged in on another device.\nLog out there first, then log in here",
+        )
         val OFFLINE get() = tr(
             "서버에 연결하지 못했어요. 인터넷이나 연결 설정을 확인해 주세요",
             "Can't reach the server. Check the internet or connection settings",

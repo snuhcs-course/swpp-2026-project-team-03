@@ -5,6 +5,7 @@ package com.team3.rocky
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import com.team3.rocky.server.ServerCleanup
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -115,6 +116,7 @@ import com.team3.rocky.progress.ScoreJobs
 import com.team3.rocky.progress.Stage
 import com.team3.rocky.progress.formatEta
 import com.team3.rocky.server.RockyApi
+import com.team3.rocky.server.LibrarySync
 import com.team3.rocky.server.ScoreStore
 import com.team3.rocky.band.SharedScore
 import com.team3.rocky.server.ServerSettings
@@ -179,7 +181,29 @@ fun RockyApp() {
         stack.add(s)
         while (stack.size > 1) stack.removeAt(0)
     }
-    fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main) }
+    fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main); LibrarySync.syncSoon(ctx) }
+
+    // 한 계정은 한 폰에서만: 다른 폰에서 로그인해서 서버가 이 폰의 로그인을 끝냈으면 로그인 화면으로 보낸다.
+    var kicked by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        LibrarySync.onLoggedOut = {
+            appScope.launch(Dispatchers.Main) {
+                if (user != null) {
+                    auth.forget(); ScoreJobs.clear(ctx); user = null; kicked = true; restart(Screen.Login)
+                }
+            }
+        }
+        onDispose { LibrarySync.onLoggedOut = null }
+    }
+    // 켤 때와 로그인할 때 보관함을 서버와 맞춘다 (로그인이 끝났는지도 이때 안다).
+    LaunchedEffect(user?.id) { if (user != null) runCatching { LibrarySync.sync(ctx) } }
+    if (kicked) AlertDialog(
+        onDismissRequest = { kicked = false },
+        title = { Text(tr("로그아웃됐어요", "You were logged out")) },
+        text = { Text(tr("다른 기기에서 이 계정으로 로그인해서\n이 기기에서는 로그아웃됐어요.",
+            "This account was logged in on another device,\nso it was logged out here.")) },
+        confirmButton = { TextButton(onClick = { kicked = false }) { Text(tr("확인", "OK")) } },
+    )
     fun newScore(preset: Set<String>, personalMode: Boolean = false) {
         personal = personalMode; lineup = preset; go(Screen.Lineup)
     }
@@ -187,20 +211,19 @@ fun RockyApp() {
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun openTab(t: Tab) { tab = t; restart(Screen.Main) }
 
-    // 다른 밴드원이 공유한 악보는 이 폰에 파일이 없으므로, 처음 열 때 서버에서 받는다.
+    // 다른 밴드원이 공유한 악보와 다른 폰에서 만든 내 악보는 이 폰에 파일이 없으므로, 처음 열 때 서버에서 받는다.
     var fetching by remember { mutableStateOf(false) }
-    fun openShared(score: SharedScore, part: String?) {
-        val job = score.jobId
-        if (job == null || ScoreStore.load(ctx, score.work.id) != null) {
-            go(Screen.Result(score.work, myPart = part)); return
+    fun openWork(work: Work, job: String?, part: String? = null) {
+        if (job == null || ScoreStore.load(ctx, work.id) != null) {
+            go(Screen.Result(work, myPart = part)); return
         }
         fetching = true
         appScope.launch {
             val ok = withContext(Dispatchers.IO) {
-                runCatching { ScoreStore.download(ctx, RockyApi.from(ctx), job, score.work.id) }.isSuccess
+                runCatching { ScoreStore.download(ctx, RockyApi.from(ctx), job, work.id) }.isSuccess
             }
             fetching = false
-            if (ok) go(Screen.Result(score.work, myPart = part))
+            if (ok) go(Screen.Result(work, myPart = part))
             else Toast.makeText(
                 ctx, tr("악보를 받지 못했어요. 인터넷이나 연결 설정을 확인해 주세요", "Couldn't get the score. Check the internet or connection settings"),
                 Toast.LENGTH_LONG,
@@ -210,7 +233,7 @@ fun RockyApp() {
     if (fetching) AlertDialog(
         onDismissRequest = {},
         title = { Text(tr("악보 받는 중", "Getting the score")) },
-        text = { Text(tr("밴드에 공유된 악보를 받고 있어요…", "Downloading the score shared with your band…")) },
+        text = { Text(tr("서버에서 악보를 받고 있어요…", "Downloading the score from the server…")) },
         confirmButton = {},
     )
 
@@ -304,7 +327,7 @@ fun RockyApp() {
                     onPersonal = { newScore(emptySet(), personalMode = true) },
                     onBand = { newScore(emptySet(), personalMode = false) },
                     onOpenJob = { job -> go(Screen.Result(job.toWork(), jobId = job.id)) },
-                    onOpenWork = { go(Screen.Result(it)) },
+                    onOpenWork = { openWork(it, it.jobId) },
                     onShareWork = { go(Screen.ShareToBand(it)) },
                     onOpenBand = { go(Screen.BandDetail(it)) },
                     onAddBand = { go(Screen.BandJoin) },
@@ -355,7 +378,7 @@ fun RockyApp() {
                 BandDetailScreen(
                     u, bands, s.bandId,
                     onBack = { back() },
-                    onOpenScore = { score, part -> openShared(score, part) },
+                    onOpenScore = { score, part -> openWork(score.work, score.jobId, part) },
                     onShareScore = { go(Screen.PickScore(s.bandId)) },
                     // 밴드 멤버들이 맡은 파트를 새 악보의 기본 구성으로 쓴다.
                     onNewScore = { parts -> newScore(Demo.lineupOf(parts), personalMode = false) },
@@ -1052,6 +1075,8 @@ fun StorageTab(modifier: Modifier, onOpen: (Work) -> Unit, onShare: (List<Work>)
     LaunchedEffect(Unit) {
         ServerCleanup.retryPending(ctx)
         RatingStore.sendPending(ctx)   // 인터넷이 안 돼서 못 보낸 별점도 다시 보낸다
+        // 다른 폰에서 저장·삭제한 곡도 보이게 서버 보관함과 맞춘다 (서버에 닿지 않으면 폰 목록 그대로).
+        if (runCatching { LibrarySync.sync(ctx) }.getOrDefault(false)) works = WorkStore.load(ctx)
     }
 
     // 고르기 모드: 오른쪽 위 '선택'을 누르거나 곡을 꾹 누르면 켜진다. 고른 곡은 아래에서 삭제하거나 밴드에 공유한다.

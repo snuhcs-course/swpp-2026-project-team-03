@@ -103,18 +103,20 @@ class ServerBandRepositoryTest {
     @Test fun accountApiAgainstTheServer() {
         assertTrue(accounts.emailTaken(a.user.email))
         assertFalse(accounts.nicknameTaken("nobody-${System.nanoTime()}", a))
-        assertEquals(a.user.id, accounts.login(a.user.email, "12345678a", 0)!!.user.id)
+        // 한 계정은 한 폰에서만: 다시 로그인하면 이전 토큰은 끝나므로 새 세션을 쓴다.
+        val again = accounts.login(a.user.email, "12345678a", 0)!!
+        assertEquals(a.user.id, again.user.id)
         assertNull(accounts.login(a.user.email, "wrong-password1", 0))
-        val updated = accounts.updateProfile(a, a.user.nickname + "x", listOf("drums"))
+        val updated = accounts.updateProfile(again, a.user.nickname + "x", listOf("drums"))
         assertEquals(listOf("drums"), updated.instruments)
 
         // 프로필 사진: 올리고, 다른 멤버가 받고, 지우면 없음
         val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + ByteArray(64) { it.toByte() }
-        val api = MemberApi(url, "", a.token)
+        val api = MemberApi(url, "", again.token)
         api.bytes("PUT", "/me/photo", png, "image/png")
         assertArrayEquals(png, MemberApi(url, "", b.token).bytes("GET", "/users/${a.user.id}/photo"))
         api.call("DELETE", "/me/photo")
         assertNull(MemberApi(url, "", b.token).bytes("GET", "/users/${a.user.id}/photo"))
-        accounts.logout(a)
+        accounts.logout(again)
     }
 }
