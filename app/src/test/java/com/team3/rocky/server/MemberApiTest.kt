@@ -92,4 +92,24 @@ class MemberApiTest {
         assertEquals(1, api.obj("""{"a":1}""").getInt("a"))
         assertEquals(2, api.arr("[1,2]").length())
     }
+
+    // ---------- 다른 폰 로그인으로 세션이 끝났을 때 (순형 리뷰 3) ----------
+
+    @Test fun anyMemberCallReportsLoginRequired() {
+        var calls = 0
+        MemberApi.onLoginRequired = { calls++ }
+        try {
+            FakeHttp(mapOf(
+                "GET /bands" to json(401, """{"detail":"login required"}"""),
+                "GET /me" to json(401, """{"detail":"missing or wrong X-Rocky-Key"}"""),
+            )).use { s ->
+                runCatching { MemberApi(s.url, "", "tok").get("/bands") }   // 밴드 API도 알린다
+                runCatching { MemberApi(s.url, "", "tok").get("/me") }      // API 키가 틀린 401은 로그아웃이 아니다
+                runCatching { MemberApi(s.url, "", null).get("/bands") }    // 로그인 전 요청도 아니다
+            }
+        } finally {
+            MemberApi.onLoginRequired = null
+        }
+        assertEquals(1, calls)
+    }
 }

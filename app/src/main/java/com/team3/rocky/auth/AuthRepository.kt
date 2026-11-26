@@ -15,6 +15,8 @@ sealed class AuthResult {
     /** 칸별 오류. 화면은 해당 입력칸 아래에 메시지를 보여준다. */
     data class Invalid(val errors: Map<SignUpValidator.Field, String>) : AuthResult()
     data class Failure(val message: String) : AuthResult()
+    /** 다른 폰에 로그인되어 있다. 화면은 [message]로 경고하고, 확인하면 force로 다시 로그인한다. */
+    data class LoggedInElsewhere(val message: String) : AuthResult()
 }
 
 /**
@@ -51,16 +53,16 @@ class AuthRepository(
         }
     }
 
-    suspend fun login(email: String, password: String): AuthResult = withContext(Dispatchers.IO) {
+    suspend fun login(email: String, password: String, force: Boolean = false): AuthResult = withContext(Dispatchers.IO) {
         val normalized = SignUpValidator.normalizeEmail(email)
         if (normalized.isEmpty() || password.isEmpty()) {
             return@withContext AuthResult.Failure(tr("이메일과 비밀번호를 입력해 주세요", "Enter your email and password"))
         }
         // 없는 이메일인지 틀린 비밀번호인지 알려주지 않는다 (가입 여부를 알아내는 것을 막기 위해).
         val s = try {
-            accounts.login(normalized, password, clock())
+            accounts.login(normalized, password, clock(), force)
         } catch (e: LoggedInElsewhereException) {
-            return@withContext AuthResult.Failure(LOGGED_IN_ELSEWHERE)
+            return@withContext AuthResult.LoggedInElsewhere(LOGGED_IN_ELSEWHERE)
         } catch (e: MemberApiException) {
             return@withContext AuthResult.Failure(e.message ?: OFFLINE)
         } catch (e: IOException) {
@@ -131,8 +133,8 @@ class AuthRepository(
     companion object {
         val WRONG_CREDENTIALS get() = tr("이메일 또는 비밀번호가 맞지 않아요", "Wrong email or password")
         val LOGGED_IN_ELSEWHERE get() = tr(
-            "다른 기기에서 로그인되어 있어요.\n그 기기에서 로그아웃한 뒤 다시 로그인해 주세요",
-            "This account is logged in on another device.\nLog out there first, then log in here",
+            "다른 핸드폰에서 로그인중입니다.\n돌리고 있는 곡이 있으면 취소됩니다",
+            "This account is logged in on another phone.\nAny song being made there will be cancelled",
         )
         val OFFLINE get() = tr(
             "서버에 연결하지 못했어요. 인터넷이나 연결 설정을 확인해 주세요",

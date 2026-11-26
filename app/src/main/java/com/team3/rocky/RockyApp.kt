@@ -117,6 +117,7 @@ import com.team3.rocky.progress.Stage
 import com.team3.rocky.progress.formatEta
 import com.team3.rocky.server.RockyApi
 import com.team3.rocky.server.LibrarySync
+import com.team3.rocky.server.MemberApi
 import com.team3.rocky.server.ScoreStore
 import com.team3.rocky.band.SharedScore
 import com.team3.rocky.server.ServerSettings
@@ -183,27 +184,45 @@ fun RockyApp() {
     }
     fun signedIn(u: User) { user = u; tab = Tab.NEW; restart(Screen.Main); LibrarySync.syncSoon(ctx) }
 
-    // 한 계정은 한 폰에서만: 다른 폰에서 로그인해서 서버가 이 폰의 로그인을 끝냈으면 로그인 화면으로 보낸다.
-    var kicked by remember { mutableStateOf(false) }
+    // 한 계정은 한 폰에서만: 다른 폰에서 로그인해서(경고를 확인하고 넘어감) 서버가 이 폰의 로그인을 끝냈으면,
+    // 진행 중인 곡을 취소하고(ScoreJobs.clear) 로그인 화면으로 보낸다. 어느 회원 API든 401 "login required"면 온다.
+    var kicked by remember { mutableStateOf<Boolean?>(null) }   // true: 취소한 곡이 있음
     DisposableEffect(Unit) {
-        LibrarySync.onLoggedOut = {
+        MemberApi.onLoginRequired = {
             appScope.launch(Dispatchers.Main) {
                 if (user != null) {
-                    auth.forget(); ScoreJobs.clear(ctx); user = null; kicked = true; restart(Screen.Login)
+                    val hadRunning = ScoreJobs.runningCount > 0
+                    auth.forget(); ScoreJobs.clear(ctx); user = null; kicked = hadRunning; restart(Screen.Login)
                 }
             }
         }
-        onDispose { LibrarySync.onLoggedOut = null }
+        onDispose { MemberApi.onLoginRequired = null }
     }
-    // 켤 때와 로그인할 때 보관함을 서버와 맞춘다 (로그인이 끝났는지도 이때 안다).
-    LaunchedEffect(user?.id) { if (user != null) runCatching { LibrarySync.sync(ctx) } }
-    if (kicked) AlertDialog(
-        onDismissRequest = { kicked = false },
-        title = { Text(tr("로그아웃됐어요", "You were logged out")) },
-        text = { Text(tr("다른 기기에서 이 계정으로 로그인해서\n이 기기에서는 로그아웃됐어요.",
-            "This account was logged in on another device,\nso it was logged out here.")) },
-        confirmButton = { TextButton(onClick = { kicked = false }) { Text(tr("확인", "OK")) } },
-    )
+    // 켤 때와 로그인할 때 보관함을 서버와 맞추고, 로그인해 있는 동안 30초마다 이 폰의 로그인이 살아 있는지 본다
+    // (다른 폰이 넘어가면 돌리던 곡이 바로 취소되도록). 서버에 닿지 않으면 그냥 넘어간다.
+    LaunchedEffect(user?.id) {
+        if (user == null) return@LaunchedEffect
+        runCatching { LibrarySync.sync(ctx) }
+        val token = AuthRepository.token(ctx)?.takeIf { it.isNotEmpty() && !Backend.local } ?: return@LaunchedEffect
+        while (true) {
+            delay(30_000)
+            withContext(Dispatchers.IO) { runCatching { MemberApi.from(ctx, token).get("/me") } }
+        }
+    }
+    kicked?.let { cancelled ->
+        AlertDialog(
+            onDismissRequest = { kicked = null },
+            title = { Text(tr("로그아웃됐어요", "You were logged out")) },
+            text = {
+                Text(
+                    tr("다른 핸드폰에서 이 계정으로 로그인해서\n이 기기에서는 로그아웃됐어요.",
+                        "This account was logged in on another phone,\nso it was logged out here.") +
+                        if (cancelled) tr("\n돌리고 있던 곡은 취소됐어요.", "\nThe song being made was cancelled.") else "",
+                )
+            },
+            confirmButton = { TextButton(onClick = { kicked = null }) { Text(tr("확인", "OK")) } },
+        )
+    }
     fun newScore(preset: Set<String>, personalMode: Boolean = false) {
         personal = personalMode; lineup = preset; go(Screen.Lineup)
     }

@@ -8,10 +8,12 @@ Passwords are hashed with PBKDF2-HMAC-SHA256 in the app's format
 ("pbkdf2-sha256$<iterations>$<salt b64>$<hash b64>"). A login gets a random token; only its
 SHA-256 is stored.
 
-One phone per account: a login is refused (409, field "session") while the account is logged in on
-another phone that used the server within SESSION_IDLE_DAYS. The phone sends a device id (Android
-ANDROID_ID, kept across reinstalls of the same APK); a login from the same phone replaces its old
-session. Sessions from apps that sent no device id never block a login.
+One phone per account: while the account is logged in on another phone that used the server within
+SESSION_IDLE_DAYS, a login gets 409 (field "session") with a warning. The app shows it and, if the
+member confirms, logs in again with force=true: the other phone's session ends (its next call gets 401
+"login required", it logs out and cancels its running songs). The phone sends a device id (Android
+ANDROID_ID); a login from the same phone needs no warning. Sessions from apps that sent no device id
+never trigger the warning.
 
 Each member's library (보관함) lives in `works`, so the same scores appear on any phone they log in to.
 """
@@ -313,16 +315,16 @@ class Accounts:
             token = self._new_session(cur.lastrowid, device)
             return self.user(cur.lastrowid), token
 
-    def login(self, email: str, password: str, device: str | None = None) -> tuple[User, str] | None:
-        """None for a wrong email or password. AccountError 409 while another phone is logged in;
-        otherwise the account's old sessions (this phone's, idle or from older apps) are ended."""
+    def login(self, email: str, password: str, device: str | None = None,
+              force: bool = False) -> tuple[User, str] | None:
+        """None for a wrong email or password. AccountError 409 (a warning) while another phone is logged in,
+        unless force. Otherwise every other session of the account ends: one phone at a time."""
         row = self._one("SELECT * FROM users WHERE email = ?", normalize_email(email))
         if row is None or not verify_password(password, row["password_hash"]):
             return None
         with self.lock, self._tx():
-            if self._logged_in_elsewhere(row["id"], device):
-                raise AccountError(409, "다른 기기에서 로그인되어 있어요. 그 기기에서 로그아웃한 뒤 다시 로그인해 주세요",
-                                   "session")
+            if not force and self._logged_in_elsewhere(row["id"], device):
+                raise AccountError(409, "다른 핸드폰에서 로그인중입니다. 돌리고 있는 곡이 있으면 취소됩니다", "session")
             self.db.execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],))
             return self._user(row), self._new_session(row["id"], device)
 

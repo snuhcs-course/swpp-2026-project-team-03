@@ -76,16 +76,25 @@ class LibrarySyncServerTest {
         assertEquals(1, onServer.length())
         assertEquals(job, onServer.getJSONObject(0).getString("job_id"))
 
-        // 폰 A가 로그인해 있는 동안 폰 B는 로그인할 수 없다
+        // 폰 A가 로그인해 있으면 폰 B는 먼저 경고를 받는다
         try {
             phoneB.login(email, "12345678a", 0)
-            throw AssertionError("두 번째 폰이 로그인됐어요")
+            throw AssertionError("경고 없이 두 번째 폰이 로그인됐어요")
         } catch (e: LoggedInElsewhereException) { }
 
-        // 폰 A에서 로그아웃하면 폰 B에서 로그인되고, 보관함이 그대로 보인다
-        phoneA.logout(a)
+        // 경고를 확인하면(force) 폰 B로 넘어오고, 폰 A는 다음 요청에서 로그아웃된다
         newPhone()
-        val b = phoneB.login(email, "12345678a", 0)!!
+        val b = phoneB.login(email, "12345678a", 0, force = true)!!
+        var kicked = false
+        MemberApi.onLoginRequired = { kicked = true }
+        try {
+            MemberApi(url, "", a.token).get("/me"); throw AssertionError("폰 A가 아직 로그인되어 있어요")
+        } catch (e: MemberApiException) {
+            assertEquals(401, e.code)
+        } finally {
+            MemberApi.onLoginRequired = null
+        }
+        assertTrue("어느 회원 API든 로그아웃을 알려야 해요", kicked)
         useSession(b)
         assertTrue(WorkStore.load(ctx).isEmpty())
         assertTrue(LibrarySync.sync(ctx))
@@ -99,5 +108,22 @@ class LibrarySyncServerTest {
         LibrarySync.sync(ctx)
         assertEquals(0, JSONArray(MemberApi(url, "", b.token).get("/me/works")).length())
         phoneB.logout(b)
+    }
+
+    /** 순형 리뷰: 서버가 받지 않는 곡(다른 서버 주소에서 만든 곡 등)은 보관함과 폰에서 지우지 않는다. */
+    @Test fun songTheServerDoesNotKnowStaysOnThisPhone() = runBlocking {
+        val tag = System.nanoTime() % 1_000_000_000
+        val a = phoneA.signUp("local$tag@test.com", "12345678a", "l$tag", emptyList(), 0)
+        useSession(a)
+        val work = Work(1_765_000_000_000 + tag, "다른 서버 곡", listOf("drums"), "2026.11.27", jobId = "0123456789ab")
+        val files = ScoreStore.dir(ctx, work.id).apply { mkdirs(); resolve("full.pdf").writeText("pdf") }
+        WorkStore.add(ctx, work)
+        repeat(2) { LibrarySync.sync(ctx) }   // 두 번째 동기화에서도 지우지 않는다
+        assertEquals(listOf(work.id), WorkStore.load(ctx).map { it.id })
+        assertTrue(files.resolve("full.pdf").exists())
+        assertEquals(0, JSONArray(MemberApi(url, "", a.token).get("/me/works")).length())
+        WorkStore.remove(ctx, work.id)
+        files.deleteRecursively()
+        phoneA.logout(a)
     }
 }

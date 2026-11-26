@@ -11,7 +11,8 @@ GET  /health              liveness check
 Members and bands (SQLite at ROCKY_HOME/rocky.db; see accounts.py). Login returns a token
 that later calls send as "Authorization: Bearer <token>":
 POST /auth/signup, POST /auth/login, POST /auth/logout, GET /auth/taken?email=|nickname=
-  (signup and login take "device"; login is 409 field "session" while another phone is logged in)
+  (signup and login take "device"; login is 409 field "session" (a warning) while another phone is
+   logged in, and "force": true logs in anyway and logs the other phone out)
 GET|PATCH /me             my profile (nickname, instruments)
 GET  /me/works            my library (보관함), the same on every phone
 PUT  /me/works/{work_id}  save a score to my library;  DELETE /me/works/{work_id}  remove it
@@ -388,7 +389,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     @app.post("/auth/login", dependencies=keyed)
     def login(body: dict = Body(...)) -> dict:
         found = accounts.login(str(body.get("email", "")), str(body.get("password", "")),
-                               str(body.get("device", ""))[:200])
+                               str(body.get("device", ""))[:200], body.get("force") is True)
         if found is None:  # same answer for an unknown email and a wrong password
             raise HTTPException(401, "wrong email or password")
         return session(*found)

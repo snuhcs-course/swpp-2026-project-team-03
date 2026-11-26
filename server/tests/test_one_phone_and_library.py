@@ -39,8 +39,8 @@ def sign_up(c, device="phone-A", email="a@snu.ac.kr", nickname="에이"):
     return r.json()
 
 
-def login(c, device, email="a@snu.ac.kr"):
-    return c.post("/auth/login", json={"email": email, "password": "band2026", "device": device})
+def login(c, device, email="a@snu.ac.kr", force=False):
+    return c.post("/auth/login", json={"email": email, "password": "band2026", "device": device, "force": force})
 
 
 def auth(s):
@@ -55,13 +55,32 @@ def done_job(store, title="곡"):
 
 # ---------- one phone per account ----------
 
-def test_second_phone_cannot_log_in_while_the_first_is_logged_in(env):
+def test_second_phone_is_warned_first(env):
     c, *_ = env
     a = sign_up(c, "phone-A")
     r = login(c, "phone-B")
     assert r.status_code == 409 and r.json()["field"] == "session"
-    assert "다른 기기" in r.json()["detail"]
-    assert c.get("/me", headers=auth(a)).status_code == 200  # phone A is untouched
+    assert r.json()["detail"] == "다른 핸드폰에서 로그인중입니다. 돌리고 있는 곡이 있으면 취소됩니다"
+    assert c.get("/me", headers=auth(a)).status_code == 200  # phone A is untouched until confirmed
+
+
+def test_confirming_the_warning_moves_the_account_to_the_new_phone(env):
+    c, *_ = env
+    a = sign_up(c, "phone-A")
+    b = login(c, "phone-B", force=True)
+    assert b.status_code == 200
+    gone = c.get("/me", headers=auth(a))
+    assert gone.status_code == 401 and gone.json()["detail"] == "login required"  # phone A logs itself out
+    assert c.get("/me", headers=auth(b.json())).status_code == 200
+    assert login(c, "phone-A").status_code == 409  # and phone A is warned the same way
+
+
+def test_force_needs_the_right_password(env):
+    c, *_ = env
+    a = sign_up(c, "phone-A")
+    r = c.post("/auth/login", json={"email": "a@snu.ac.kr", "password": "wrong999", "device": "B", "force": True})
+    assert r.status_code == 401
+    assert c.get("/me", headers=auth(a)).status_code == 200
 
 
 def test_wrong_password_is_still_401_not_a_session_hint(env):

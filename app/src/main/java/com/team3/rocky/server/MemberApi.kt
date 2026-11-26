@@ -54,6 +54,7 @@ class MemberApi(baseUrl: String, private val apiKey: String, private val token: 
                 val json = runCatching { JSONObject(text) }.getOrNull()
                 val detail = json?.opt("detail") as? String
                 val field = json?.optString("field")?.takeIf { it.isNotBlank() && it != "null" }
+                if (code == 401 && detail == LOGIN_REQUIRED && token != null) onLoginRequired?.invoke()
                 throw MemberApiException(code, detail ?: "HTTP $code", field)
             }
             return c.inputStream.bufferedReader().use { it.readText() }
@@ -68,6 +69,11 @@ class MemberApi(baseUrl: String, private val apiKey: String, private val token: 
         try {
             val code = c.responseCode
             if (code == 404) return null
+            if (code == 401 && token != null) {
+                // 사진 요청도 다른 폰 로그인으로 세션이 끝났는지 알려 준다 (키가 틀린 401과 구분).
+                val detail = runCatching { JSONObject(c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()).optString("detail") }.getOrNull()
+                if (detail == LOGIN_REQUIRED) onLoginRequired?.invoke()
+            }
             if (code !in 200..299) throw MemberApiException(code, "HTTP $code", null)
             return c.inputStream.use { it.readBytes() }
         } finally {
@@ -83,6 +89,15 @@ class MemberApi(baseUrl: String, private val apiKey: String, private val token: 
     fun arr(text: String) = JSONArray(text)
 
     companion object {
+        /** 서버가 이 토큰의 로그인을 끝냈다는 답 (다른 폰에서 로그인함). API 키가 틀린 401과 다르다. */
+        const val LOGIN_REQUIRED = "login required"
+
+        /**
+         * 어느 회원 API든 [LOGIN_REQUIRED]를 받으면 부른다 (보관함·밴드·내 정보 모두).
+         * 앱은 이때 로그아웃하고, 진행 중인 곡을 취소하고, 로그인 화면으로 간다 (RockyApp).
+         */
+        @Volatile var onLoginRequired: (() -> Unit)? = null
+
         fun from(ctx: Context, token: String?) = MemberApi(ServerSettings.url(ctx), ServerSettings.key(ctx), token)
 
         fun q(s: String): String = URLEncoder.encode(s, "UTF-8")

@@ -6,7 +6,7 @@ import com.team3.rocky.server.MemberApiException
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** 이 계정이 다른 폰에 로그인되어 있어서 로그인할 수 없다. */
+/** 이 계정이 다른 폰에 로그인되어 있다 (경고: 확인하면 force로 넘어온다). */
 class LoggedInElsewhereException : Exception("logged in on another phone")
 
 /** 이 폰의 기기 번호 (ANDROID_ID). 같은 APK를 지웠다 다시 깔아도 같아서, 같은 폰의 다시 로그인은 막지 않는다. */
@@ -24,8 +24,11 @@ interface AccountService {
     /** 이메일·닉네임이 이미 있으면 [UserDatabase.DuplicateException]. */
     fun signUp(email: String, password: String, nickname: String, instruments: List<String>, now: Long): Session
 
-    /** 이메일이나 비밀번호가 틀리면 null. */
-    fun login(email: String, password: String, now: Long): Session?
+    /**
+     * 이메일이나 비밀번호가 틀리면 null. 다른 폰에 로그인되어 있으면 [LoggedInElsewhereException](경고),
+     * [force]면 그 폰을 로그아웃시키고 이 폰으로 로그인한다.
+     */
+    fun login(email: String, password: String, now: Long, force: Boolean = false): Session?
     fun emailTaken(email: String): Boolean
     fun nicknameTaken(nickname: String, me: Session?): Boolean
 
@@ -37,7 +40,8 @@ interface AccountService {
 /**
  * ROCKY 서버의 회원 DB. 다른 폰에서도 같은 계정으로 로그인하고 같은 밴드에 들어갈 수 있다.
  * 한 계정은 한 폰에서만 로그인한다: 가입·로그인할 때 이 폰의 기기 번호([device])를 보내고,
- * 다른 폰에 로그인되어 있으면 서버가 409(field "session")로 거절한다 ([LoggedInElsewhereException]).
+ * 다른 폰에 로그인되어 있으면 서버가 409(field "session")로 경고한다 ([LoggedInElsewhereException]).
+ * 사용자가 확인하면 force로 다시 로그인하고, 예전 폰은 다음 요청에서 401 "login required"를 받아 로그아웃된다.
  */
 class ServerAccounts(
     private val device: () -> String = { "" },
@@ -52,8 +56,9 @@ class ServerAccounts(
                 .put("instruments", JSONArray(instruments)).put("device", device())))
         }
 
-    override fun login(email: String, password: String, now: Long): Session? = try {
-        session(api(null).post("/auth/login", JSONObject().put("email", email).put("password", password).put("device", device())))
+    override fun login(email: String, password: String, now: Long, force: Boolean): Session? = try {
+        session(api(null).post("/auth/login", JSONObject().put("email", email).put("password", password)
+            .put("device", device()).put("force", force)))
     } catch (e: MemberApiException) {
         if (e.code == 409 && e.field == "session") throw LoggedInElsewhereException()
         if (e.code == 401) null else throw e
@@ -112,7 +117,7 @@ class LocalAccounts(val db: UserDatabase) : AccountService {
         return Session(db.findById(id)!!, "")
     }
 
-    override fun login(email: String, password: String, now: Long): Session? {
+    override fun login(email: String, password: String, now: Long, force: Boolean): Session? {
         val found = db.findCredentials(email) ?: return null
         if (found.second?.let { PasswordHasher.verify(password, it) } != true) return null
         db.updateLastLogin(found.first.id, now)

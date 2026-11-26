@@ -108,12 +108,19 @@ class ServerAccountsTest {
         }
     }
 
+    @Test fun confirmingTheWarningSendsForce() {
+        FakeHttp(mapOf("POST /auth/login" to json(200, """{"token":"t2","user":$userJson}"""))).use { s ->
+            accounts(s).login("a@b.com", "12345678a", 0, force = true)
+            assertTrue(JSONObject(String(s.requests.single().body, Charsets.UTF_8)).getBoolean("force"))
+        }
+    }
+
     @Test fun loggedInOnAnotherPhoneIsItsOwnError() {
-        FakeHttp(mapOf("POST /auth/login" to json(409, """{"detail":"다른 기기에서 로그인되어 있어요","field":"session"}"""))).use { s ->
+        FakeHttp(mapOf("POST /auth/login" to json(409, """{"detail":"다른 핸드폰에서 로그인중입니다. 돌리고 있는 곡이 있으면 취소됩니다","field":"session"}"""))).use { s ->
             try {
                 accounts(s).login("a@b.com", "12345678a", 0); fail()
             } catch (e: LoggedInElsewhereException) {
-                // 화면은 '다른 기기에서 로그인되어 있어요'를 보여 준다 (AuthRepository.LOGGED_IN_ELSEWHERE)
+                // 화면은 경고를 보여 주고, 확인하면 force로 다시 로그인한다 (LoginScreen)
             }
         }
     }
