@@ -1,0 +1,14 @@
+# Experiment data and generated artifacts stay outside Git.
+*.mid
+*.midi
+*.wav
+*.flac
+*.mp3
+*.zip
+*.tsv
+*.csv
+*.json
+*.jsonl
+*.log
+__pycache__/
+*.pyc
