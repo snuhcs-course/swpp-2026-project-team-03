@@ -1,0 +1,41 @@
+# gpu22 (ford) public tunnel, running since 2026-11-21. Opens an SSH reverse tunnel from the team server
+# (swpp-b, 127.0.0.1:18081) to Service rocky-api:8000, so the public address works without any laptop.
+# The SSH key is NOT in this file: it comes from Secret rocky-tunnel-key (key "id"). See server/deploy/README.md 0절.
+# Only one tunnel may hold port 18081: do not run tunnel.sh on a laptop while this Pod runs.
+#
+#   kubectl apply -f server/k8s/ws2/api-service.yaml   # once
+#   kubectl apply -f server/k8s/ws2/tunnel-pod.yaml
+#
+# Compared with the live Pod on 2026-11-28: same command, image, volumes, limits; the cluster only adds
+# its own defaults (nodegroup selector, ephemeral-storage, service-account volume).
+apiVersion: v1
+kind: Pod
+metadata: {name: rocky-tunnel, labels: {app: rocky-tunnel}}
+spec:
+  nodeSelector: {kubernetes.io/hostname: ford}
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 1
+  dnsConfig: {options: [{name: ndots, value: "1"}]}
+  volumes: [{name: key, secret: {secretName: rocky-tunnel-key, defaultMode: 0400}}]
+  containers:
+    - name: main
+      image: alpine:3.20
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -u
+          apk add --no-cache openssh-client >/dev/null 2>&1
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh && cp /key/id ~/.ssh/id && chmod 600 ~/.ssh/id
+          printf 'Host jump\n  HostName 147.46.242.174\n  Port 26022\n  User swpp26jump\n  IdentityFile ~/.ssh/id\n  IdentitiesOnly yes\nHost team\n  HostName 10.226.0.13\n  HostKeyAlias swpp26t03.b\n  User swpp26-46\n  IdentityFile ~/.ssh/id\n  IdentitiesOnly yes\n  ProxyJump jump\n  BatchMode yes\n  ServerAliveInterval 30\n  ServerAliveCountMax 3\n  ExitOnForwardFailure yes\n' > ~/.ssh/config
+          ssh-keyscan -T 10 -t ed25519 -p 26022 147.46.242.174 2>/dev/null > ~/.ssh/known_hosts
+          [ "$(ssh-keygen -lf ~/.ssh/known_hosts | awk '{print $2}')" = "SHA256:jtsrQ7OgvzaaL7fSADAmEVWgGT2T+tMzuf3CeGL1RUM" ] || { echo "jump host key mismatch"; sleep 600; exit 1; }
+          ssh -o StrictHostKeyChecking=accept-new team true || { echo "login failed"; sleep 60; exit 1; }
+          [ "$(ssh-keygen -l -F swpp26t03.b | grep -o 'SHA256:[A-Za-z0-9+/=]*' | head -1)" = "SHA256:ifagWFJuTNc4Fa09Gx8eUyBB+oR1hIZ0xFkhDqema8I" ] || { echo "team host key mismatch"; sleep 600; exit 1; }
+          echo "host keys OK; port 18081 on team server now:"; ssh team 'ss -ltn | grep 18081 || echo free'
+          while true; do
+            echo "$(date +%T) tunnel up -> rocky-api:8000"
+            ssh -N -o StrictHostKeyChecking=yes -R 127.0.0.1:18081:rocky-api:8000 team
+            echo "$(date +%T) tunnel exited, retrying"; sleep 5
+          done
+      resources: {requests: {cpu: "0", memory: "0"}, limits: {cpu: "500m", memory: 128Mi}}
+      volumeMounts: [{name: key, mountPath: /key, readOnly: true}]

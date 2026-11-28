@@ -1,0 +1,12 @@
+# gpu22 (ford): a fixed name for the rocky-api Pod, so rocky-tunnel keeps working when rocky-api is recreated.
+# Same as the live Service on 2026-11-28.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rocky-api
+  labels: {app: rocky-api}
+spec:
+  type: ClusterIP
+  selector: {app: rocky-api}
+  ports:
+    - {port: 8000, targetPort: 8000, protocol: TCP}

@@ -3,6 +3,36 @@
 폰을 노트북에 USB로 꽂지 않아도, APK만 깔면 어디서든(와이파이·LTE) 앱이 서버에 붙게 하는 설정이다.
 2026-11-18부터 이 방식으로 운영 중이다. 예전 USB 방식(`adb reverse`)은 [../DEPLOY_ko.md](../DEPLOY_ko.md)의 D절에 있다.
 
+## 0. 지금 방식: 클러스터 안 터널 Pod (2026-11-21부터)
+
+아래 1~7절의 노트북 터널(port-forward + `tunnel.sh`)은 **예비용**이다. 지금은 gpu22에 뜬 `rocky-tunnel` Pod가
+팀 서버 18081 → Service `rocky-api`:8000으로 터널을 열어서 노트북이 필요 없다. 클러스터는 학교 IP로 나가므로 학교 밖에서도 된다.
+
+```
+폰 → https://team3.swpp-2026-b.snu.ac.kr → 수업 HAProxy → 팀 서버 nginx :80 → 127.0.0.1:18081
+   → (SSH 역방향 터널, rocky-tunnel Pod) → Service rocky-api:8000 → rocky-api Pod
+```
+
+| 파일 | 내용 |
+|---|---|
+| `../k8s/ws2/tunnel-pod.yaml` | 터널 Pod. 시작할 때 jump·팀 서버 열쇠 지문(4절과 같음)을 확인하고, 다르면 터널을 열지 않음. 끊기면 5초 뒤 다시 연결 |
+| `../k8s/ws2/api-service.yaml` | Service `rocky-api` — `rocky-api` Pod를 다시 만들어도 터널 대상이 그대로 |
+| Secret `rocky-tunnel-key` (git에 없음) | 키 하나(`id`) = 팀 서버에 로그인할 swpp 계정의 SSH 개인 키. 지금은 챈 `swpp26-46` 키. 조교님이 터널 전용 키를 주면 바꿀 것 |
+
+**다시 만들기** (Pod가 지워졌거나 설정을 바꿀 때, `k22` = gpu22 kubectl):
+
+```bash
+k22 get secret rocky-tunnel-key                 # 없을 때만: 키 주인이 직접 아래 줄 실행
+# k22 create secret generic rocky-tunnel-key --from-file=id=<개인 키 경로>
+k22 apply -f server/k8s/ws2/api-service.yaml    # 이미 있으면 unchanged
+k22 delete pod rocky-tunnel --ignore-not-found && k22 apply -f server/k8s/ws2/tunnel-pod.yaml
+k22 logs -f rocky-tunnel                         # "host keys OK" → "tunnel up -> rocky-api:8000"
+```
+
+- 키 Secret에 넣은 계정이 팀 서버 SSH 키 주인이다. 그 사람이 아니면 Secret을 새로 만들 수 없다.
+- 터널 Pod가 떠 있는 동안 노트북에서 `tunnel.sh`를 켜지 않는다(18081을 같이 써서 실패).
+- 확인은 6절 표의 "공개 주소"·"키 검사" 두 줄. 로그에 `jump host key mismatch`/`team host key mismatch`가 보이면 서버 열쇠가 바뀐 것이니 조교님께 확인한다.
+
 ## 1. 구조
 
 ```
