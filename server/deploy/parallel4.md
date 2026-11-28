@@ -104,7 +104,12 @@ Without a thread cap a 2 CPU limit is throttled heavily and the GPU stage is
 25% slower, so `ROCKY_MIDI_THREADS=2` must stay together with `ROCKY_MIDI_CPU=2`.
 `throttled_usec` is summed over threads and can exceed wall time.
 
-Not yet checked: the same runs on gpu05.
+On gpu05 (2026-11-23 23:38, same settings and four songs) all four completed with 21/21
+files, 642 s after the first upload. ferrari had only three free GPUs, so the fourth GPU Pod
+waited (FailedScheduling, the app showed it was waiting for a GPU) and started when one freed.
+`/data` on gpu05 (20 GB) fell from 4.4 GB to 1.4 GB free during the run, so gpu05 does not
+meet the 6 GB condition below: do not apply `server/k8s/api-pod.yaml` with four songs there
+until space is freed and checked again (review on PR #50).
 
 ## Disk on gpu22
 
