@@ -1,5 +1,5 @@
 # Second workspace (gpu22). The ROCKY API: a CPU-only pod that stays up (no GPU, so the 30-minute idle-GPU
-# rule does not apply). It runs up to two songs, each with one GPU Pod (unified.py) and then
+# rule does not apply). It runs up to four songs, each with one GPU Pod (unified.py) and then
 # one CPU Pod (publish_scores.py). Code is read from /data/server.
 #
 #   After checking no jobs are active: kubectl replace --force -f server/k8s/ws2/api-pod.yaml
@@ -44,14 +44,21 @@ spec:
         # the GPU and PDF Pods mount the same volume
         - name: ROCKY_PVC
           value: rocky-data
-        # At most two active songs; extra jobs stay queued.
+        # At most four active songs (the workspace's 4-GPU quota); extra jobs stay queued.
         - name: ROCKY_PARALLEL
-          value: "2"
-        # Two GPU Pods must fit the workspace's 16 CPU quota with the API, files and tunnel Pods.
-        - name: ROCKY_MIDI_CPU
           value: "4"
+        # Per-song work Pods. Four of them plus the API, files and tunnel Pods (4.5 CPU) fit the 16 CPU quota.
+        # Sizes measured on gpu05 on 2026-11-23: see deploy/parallel4.md.
+        - name: ROCKY_MIDI_CPU
+          value: "2"
         - name: ROCKY_MIDI_MEMORY
-          value: 16Gi
+          value: 8Gi
+        - name: ROCKY_MIDI_THREADS
+          value: "2"
+        - name: ROCKY_PDF_CPU
+          value: "2"
+        - name: ROCKY_PDF_MEMORY
+          value: 8Gi
         # whole songs as WAV are large (a 6-minute WAV is about 60 MB)
         - name: ROCKY_MAX_UPLOAD_MB
           value: "200"
