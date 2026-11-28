@@ -18,6 +18,7 @@ class RockyApiTest {
     private lateinit var http: HttpServer
     private var lastBody = ""
     private var lastKey: String? = null
+    private var lastAuth: String? = null
     private var lastType: String? = null
     private var lastMethod: String? = null
     private var asyncPolls = 0
@@ -26,6 +27,7 @@ class RockyApiTest {
         http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         http.createContext("/") { ex ->
             lastKey = ex.requestHeaders.getFirst("X-Rocky-Key")
+            lastAuth = ex.requestHeaders.getFirst("Authorization")
             lastMethod = ex.requestMethod
             lastType = ex.requestHeaders.getFirst("Content-Type")
             lastMethod = ex.requestMethod
@@ -56,6 +58,14 @@ class RockyApiTest {
     @After fun stop() = http.stop(0)
 
     private fun api(key: String = "secret") = RockyApi("http://127.0.0.1:${http.address.port}/", key)
+
+    @Test fun uploadSendsTheLoginSoTheServerKnowsTheOwner() {
+        RockyApi("http://127.0.0.1:${http.address.port}/", "secret", "tok123")
+            .upload("RIFF".byteInputStream(), "a.mp3", "a", listOf("drums"))
+        assertEquals("Bearer tok123", lastAuth)
+        api().upload("RIFF".byteInputStream(), "a.mp3", "a", listOf("drums"))
+        assertEquals(null, lastAuth)   // 로그인 전이면 보내지 않는다
+    }
 
     @Test fun uploadSendsSoloMode() {
         api().upload("RIFF".byteInputStream(), "a.mp3", "a", listOf("guitar"), lineup = listOf("guitar", "guitar2"), mode = "personal")

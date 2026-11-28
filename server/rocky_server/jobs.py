@@ -55,6 +55,9 @@ class Job:
     # "band": a score for every part of the user's band. "personal": solo practice, one instrument
     # (guitar may be two). Personal scores are never shared to a band.
     mode: str = "band"
+    # the member who uploaded the song (None: no login was sent, e.g. an app older than this field).
+    # Only that member can put the song in their library (PUT /me/works).
+    user_id: int | None = None
 
 
 class JobStore:
@@ -103,12 +106,14 @@ class JobStore:
 
     def create(self, title: str, filename: str, requested: list[str],
                original: list[str] | None = None, lineup: list[str] | None = None,
-               pipeline_original: str = "unknown", pipeline_requested: str = "", mode: str = "band") -> Job:
+               pipeline_original: str = "unknown", pipeline_requested: str = "", mode: str = "band",
+               user_id: int | None = None) -> Job:
         # "uploading" until the file is fully saved, so no worker picks it up early.
         job = Job(id=uuid.uuid4().hex[:12], title=title, filename=filename, requested=requested,
                   state="uploading", original=original or [], lineup=lineup or [],
                   pipeline_original=pipeline_original,
-                  pipeline_requested=pipeline_requested or ",".join(requested), mode=mode)
+                  pipeline_requested=pipeline_requested or ",".join(requested), mode=mode,
+                  user_id=user_id)
         self.save(job)
         return job
 

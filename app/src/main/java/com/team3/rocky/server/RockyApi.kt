@@ -3,6 +3,7 @@ package com.team3.rocky.server
 
 import android.content.Context
 import com.team3.rocky.BuildConfig
+import com.team3.rocky.auth.AuthRepository
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -51,7 +52,11 @@ interface ScoreServer {
  * ROCKY 서버(server/) HTTP 클라이언트. 외부 라이브러리 없이 HttpURLConnection만 쓴다.
  * 모든 함수는 네트워크를 쓰므로 Dispatchers.IO에서 부를 것.
  */
-class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
+/**
+ * @param token 로그인 토큰. 있으면 곡을 올릴 때 같이 보내서 서버가 누가 올린 곡인지 기록한다
+ *   (베타 I1, 내 곡만 내 보관함에 넣을 수 있음). 없으면 주인 없이 올라간다.
+ */
+class RockyApi(baseUrl: String, private val apiKey: String, private val token: String? = null) : ScoreServer {
     private val base = baseUrl.trim().trimEnd('/')
 
     private fun open(path: String, method: String = "GET", readTimeoutMs: Int = 30_000): HttpURLConnection =
@@ -107,6 +112,7 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
         // 음원은 한 번만 읽을 수 있어서 돌려보내기를 받은 뒤 다시 보낼 수 없다. 먼저 연결을 통과시켜 둔다.
         FrontGate.warm(base, apiKey)
         val c = open("/jobs", "POST", readTimeoutMs = 120_000)
+        if (!token.isNullOrBlank()) c.setRequestProperty("Authorization", "Bearer $token")
         c.doOutput = true
         c.setChunkedStreamingMode(64 * 1024)
         c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -202,7 +208,7 @@ class RockyApi(baseUrl: String, private val apiKey: String) : ScoreServer {
     }
 
     companion object {
-        fun from(ctx: Context) = RockyApi(ServerSettings.url(ctx), ServerSettings.key(ctx))
+        fun from(ctx: Context) = RockyApi(ServerSettings.url(ctx), ServerSettings.key(ctx), AuthRepository.token(ctx))
 
         private fun extension(name: String) = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
 

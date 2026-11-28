@@ -1,6 +1,7 @@
 """ROCKY HTTP API for the Android app.
 
 POST /jobs                upload a song and the instruments to play -> job id
+                          (with "Authorization: Bearer <token>" the job records who uploaded it)
 GET  /jobs/{id}           state and progress (stage, chunks, percent, time left)
 POST /jobs/{id}/cancel    stop a queued or active job
 GET  /jobs/{id}/result    PDF and MIDI files of a finished job
@@ -15,7 +16,8 @@ POST /auth/signup, POST /auth/login, POST /auth/logout, GET /auth/taken?email=|n
    logged in, and "force": true logs in anyway and logs the other phone out)
 GET|PATCH /me             my profile (nickname, instruments)
 GET  /me/works            my library (보관함), the same on every phone
-PUT  /me/works/{work_id}  save a score to my library;  DELETE /me/works/{work_id}  remove it
+PUT  /me/works/{work_id}  save a score to my library (403 for a song another member uploaded);
+                          DELETE /me/works/{work_id}  remove it
 PATCH /me/works/{work_id}  rename my score in my library and every band I shared it to
 GET  /me/works/{work_id}/shared  whether I shared that score to a band
 GET|POST /bands           my bands / make a band;  POST /bands/join  join with an invite code
@@ -119,6 +121,12 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(401, "login required")
         return user
 
+    def optional_user(authorization: str | None = Header(default=None)) -> User | None:
+        """The member who sent the request, or None (no token, or a token that is no longer valid).
+        Uploads still work without a login; the job is then stored without an owner."""
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        return accounts.user_for_token(token) if token else None
+
     def find(job_id: str):
         job = store.get(job_id) if re.fullmatch(r"[0-9a-f]{12}", job_id) else None
         if job is None or store.is_deleted(job_id):
@@ -132,7 +140,7 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     @app.post("/jobs", status_code=201, dependencies=[Depends(check_key)])
     async def create_job(file: UploadFile = File(...), requested: str = Form(""),
                          title: str = Form(""), original: str = Form(""), lineup: str = Form(""),
-                         mode: str = Form("band")) -> dict:
+                         mode: str = Form("band"), user: User | None = Depends(optional_user)) -> dict:
         parts = [p.strip() for p in requested.split(",") if p.strip()]
         if len(parts) != len(set(parts)) or any(p not in INSTRUMENTS for p in parts):
             raise HTTPException(422, f"requested must be distinct names from {','.join(INSTRUMENTS)}")
@@ -156,7 +164,8 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
             raise HTTPException(415, f"audio must be one of {' '.join(AUDIO_EXT)}")
         job = store.create(title.strip()[:120] or Path(file.filename or "song").stem, "", parts,
                            original=orig, lineup=app_lineup,
-                           pipeline_original=pipe_original, pipeline_requested=pipe_requested, mode=mode)
+                           pipeline_original=pipe_original, pipeline_requested=pipe_requested, mode=mode,
+                           user_id=user.id if user else None)
         target = store.inputs / f"{job.id}{ext}"
         size = 0
         with target.open("wb") as out:
@@ -458,7 +467,14 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def save_my_work(work_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
         job_id = str(body.get("job_id") or "")
         if re.fullmatch(r"[0-9a-f]{12}", job_id):
-            find(job_id)  # 404 for a song the server no longer has
+            job = find(job_id)  # 404 for a song the server no longer has
+            if job.user_id is None:
+                # Uploaded without a login (an older app, or before owners were recorded):
+                # the first member to save it to a library becomes its owner.
+                job = store.update(job, user_id=user.id)
+                accounts.set_experiment_owner(job_id, user.id)
+            if job.user_id != user.id:
+                raise HTTPException(403, "다른 사람이 만든 악보는 내 보관함에 넣을 수 없어요")
         return accounts.save_work(user, work_id, body)
 
     @app.delete("/me/works/{work_id}", dependencies=keyed)
