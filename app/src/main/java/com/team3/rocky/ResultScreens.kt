@@ -584,10 +584,14 @@ fun ResultScreen(
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+        // 품질 주의: 밴드 곡이 아닌 곡, 곡 중간에 박자가 바뀌는 곡 (박 검출·마디 나누기가 한 박자표를 가정). 한 줄에 한 문장.
         Text(
-            tr("밴드 곡이 아니면 악보가 부정확할 수 있어요", "Less accurate for non-band songs"),
-            fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            tr(
+                "밴드 곡이 아니면 악보가 부정확할 수 있어요\n곡 중간에 박자가 바뀌면 품질이 낮아질 수 있어요",
+                "Less accurate for non-band songs\nLower quality if the time signature changes mid-song",
+            ),
+            fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("result_caution"),
         )
         Spacer(Modifier.height(8.dp))
         // 가운데: 악보. 아래 재생 바와 겹치지 않게 남은 높이를 다 쓴다.
