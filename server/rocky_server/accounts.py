@@ -194,7 +194,9 @@ CREATE TABLE IF NOT EXISTS ratings (
     predicted_guitars INTEGER,
     PRIMARY KEY (job_id, rater)
 );
--- One row for every job, including unrated and failed jobs. No song title or user identity.
+-- One row for every job, including unrated and failed jobs. No song title. user_id is the member who
+-- uploaded it (null when no login was sent) and mode is band or personal, so failed and rejected jobs
+-- can also be counted per account (beta plan I1; terms v2 article 6).
 CREATE TABLE IF NOT EXISTS experiment_jobs (
     job_id TEXT PRIMARY KEY,
     state TEXT NOT NULL,
@@ -250,6 +252,9 @@ class Accounts:
                              ("model_sha256", "TEXT"), ("assignment_probability", "REAL"),
                              ("predicted_guitars", "INTEGER")):
             add("ratings", column, kind)
+        add("experiment_jobs", "user_id", "INTEGER")  # who uploaded the job (null: unknown)
+        add("experiment_jobs", "mode", "TEXT")        # band or personal
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_experiment_jobs_user ON experiment_jobs(user_id)")
 
     def _tx(self):
         return _Tx(self)
@@ -602,9 +607,10 @@ class Accounts:
                        job_id, state, created_at, started_at, finished_at, processing_seconds,
                        failure_code, rejection_reason, assigned_model, applied_model, model_sha256,
                        model_manifest_sha256, assignment_probability, predicted_guitars,
-                       experiment_eligible)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       experiment_eligible, user_id, mode)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(job_id) DO UPDATE SET
+                       user_id = COALESCE(excluded.user_id, experiment_jobs.user_id), mode = excluded.mode,
                        state = excluded.state, started_at = excluded.started_at,
                        finished_at = excluded.finished_at, processing_seconds = excluded.processing_seconds,
                        failure_code = excluded.failure_code, rejection_reason = excluded.rejection_reason,
@@ -625,7 +631,13 @@ class Accounts:
                  job.error_code, job.reason, model.get("assigned_model"), model.get("applied_model"),
                  model.get("model_sha256"), model.get("model_manifest_sha256"),
                  model.get("assignment_probability"), model.get("predicted_guitars"),
-                 model.get("experiment_eligible")))
+                 model.get("experiment_eligible"), getattr(job, "user_id", None), getattr(job, "mode", None)))
+
+    def set_experiment_owner(self, job_id: str, user_id: int) -> None:
+        """A song uploaded without a login was saved to this member's library: record them as its owner."""
+        with self.lock:
+            self.db.execute("UPDATE experiment_jobs SET user_id = ? WHERE job_id = ? AND user_id IS NULL",
+                            (user_id, job_id))
 
     def delete_experiment_job(self, job_id: str) -> None:
         """Delete per-song analysis and ratings when the song is deleted (NFR-07)."""
