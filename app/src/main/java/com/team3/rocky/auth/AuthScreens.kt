@@ -683,15 +683,26 @@ private fun InfoRow(label: String, value: String) {
 private fun terms() = tr("서비스 이용약관", "Terms of service") to
     com.team3.rocky.termsItems().joinToString("\n\n") { "${it.title}\n${it.body}" }
 
-private fun privacy() = if (AppSettings.lang == Lang.EN) "Privacy policy" to """
-    • What we collect: email, password (stored encrypted so it can't be recovered), nickname, instrument (optional), profile photo (optional), time of agreement
-    • Why: to identify you and log you in, keep your score library, and preset new scores
+// 이용 약관 6조와 같은 내용을 항목별로 (베타 계획 3.6절, 11/28). 약관 6조를 바꾸면 여기도 같이 바꾼다.
+internal fun privacy() = if (AppSettings.lang == Lang.EN) "Privacy policy" to """
+    • What we collect
+      - At sign-up: email, password (stored encrypted so it can't be recovered), nickname, time of agreement
+      - Optional: profile photo, the instruments you play in a band
+      - While you use the app: a device identifier (stored in a form that can't be turned back, to keep one account on one phone), song titles and job records (processing time, result, failure reason, mode, instruments chosen), ratings and comments, app usage records (screens and features used, and when), device model, OS version and app version, app error reports (crashes and freezes)
+    • Why: to identify you and log you in, keep your library and band sharing, keep one account on one phone, and improve the service (analysing job records, ratings, usage and errors)
+    • Sent outside ROCKY: app error reports and device details are sent to Google (Firebase Crashlytics) and processed there for error analysis.
+    • Reporting: results are reported only as statistics that do not identify anyone.
     • How long: until you delete your account
     • Your account is stored on the ROCKY server so you can log in on any phone and share scores with your band.
     • You may refuse, but then you can't sign up.
 """.trimIndent() else "개인정보 수집·이용" to """
-    • 수집 항목: 이메일, 비밀번호(복원할 수 없는 형태로 암호화해 저장), 닉네임, 연주하는 악기(선택), 프로필 사진(선택), 약관 동의 시각
-    • 이용 목적: 회원 식별과 로그인, 악보 보관함 제공, 악보 만들기 기본 설정
+    • 수집 항목
+      - 가입할 때: 이메일, 비밀번호(복원할 수 없는 형태로 암호화해 저장), 닉네임, 약관 동의 시각
+      - 선택: 프로필 사진, 밴드에서 연주하는 악기
+      - 앱을 쓰는 동안: 기기 식별값(되돌릴 수 없는 형태로 바꿔 저장, 한 계정 한 기기 로그인 확인용), 곡 이름과 작업 기록(처리 시간·결과·실패 이유·모드·고른 악기), 별점·의견, 앱 사용 기록(쓴 화면·기능과 시각), 기기 모델·OS 버전·앱 버전, 앱 오류 기록(갑자기 꺼짐·응답 없음)
+    • 이용 목적: 회원 식별과 로그인, 보관함·밴드 공유 제공, 한 계정 한 기기 로그인, 서비스 품질 개선(작업 기록·별점·사용 기록·오류 분석)
+    • 외부 전송: 앱 오류 기록과 기기 정보는 오류 분석을 위해 Google(Firebase Crashlytics)로 전송되어 처리됩니다.
+    • 결과 공개: 분석 결과는 개인을 알아볼 수 없는 통계로만 씁니다.
     • 보관 기간: 회원 탈퇴 시까지
     • 회원 정보는 ROCKY 서버에 저장되어, 다른 휴대폰에서 로그인하고 밴드와 악보를 공유하는 데 쓰입니다.
     • 동의를 거부할 수 있으나, 거부하면 가입할 수 없습니다.
