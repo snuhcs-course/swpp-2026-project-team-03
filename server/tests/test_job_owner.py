@@ -107,3 +107,21 @@ def test_older_database_gets_the_new_columns(tmp_path):
     cols = {r["name"] for r in acc.db.execute("PRAGMA table_info(experiment_jobs)")}
     assert {"user_id", "mode"} <= cols
     assert tuple(ledger(acc, "0123456789ab")) == (None, None)
+
+
+def test_claiming_an_ownerless_song_is_one_step(env):
+    c, store, acc = env
+    job = upload(c)
+    assert store.claim_owner(job, 7) == 7
+    assert store.claim_owner(job, 8) == 7       # the second member does not take it over
+    assert store.get(job).user_id == 7
+    assert store.claim_owner("0123456789ab", 7) is None
+
+
+def test_a_cancelled_ownerless_song_is_still_claimed(env):
+    c, store, acc = env
+    a, a_id = sign_up(c, "a@snu.ac.kr", "에이", "phone-A")
+    job = store.get(upload(c))
+    store.update(job, state="cancelled")
+    assert c.put("/me/works/1", headers=a, json={"job_id": job.id, "title": "곡"}).status_code == 200
+    assert store.get(job.id).user_id == a_id

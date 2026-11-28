@@ -117,6 +117,20 @@ class JobStore:
         self.save(job)
         return job
 
+    def claim_owner(self, job_id: str, user_id: int) -> int | None:
+        """Make `user_id` the owner of a job that has none, and return the job's owner.
+
+        Checked and written in one step under the store lock, like Worker.claim and retry,
+        so two members saving the same ownerless song at once cannot both become its owner."""
+        with self.lock:
+            current = self.get(job_id)
+            if current is None:
+                return None
+            if current.user_id is None:
+                current.user_id = user_id
+                self.save(current)
+            return current.user_id
+
     # ---- delete (NFR-07): remove the song and its experiment row ----
 
     def tombstone(self, job_id: str) -> Path:

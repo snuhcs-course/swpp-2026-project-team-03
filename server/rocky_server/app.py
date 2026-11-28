@@ -467,13 +467,14 @@ def create_app(store: JobStore | None = None, runner=None, start_worker: bool = 
     def save_my_work(work_id: int, body: dict = Body(...), user: User = Depends(current_user)) -> dict:
         job_id = str(body.get("job_id") or "")
         if re.fullmatch(r"[0-9a-f]{12}", job_id):
-            job = find(job_id)  # 404 for a song the server no longer has
-            if job.user_id is None:
+            owner = find(job_id).user_id  # 404 for a song the server no longer has
+            if owner is None:
                 # Uploaded without a login (an older app, or before owners were recorded):
                 # the first member to save it to a library becomes its owner.
-                job = store.update(job, user_id=user.id)
-                accounts.set_experiment_owner(job_id, user.id)
-            if job.user_id != user.id:
+                owner = store.claim_owner(job_id, user.id)
+                if owner == user.id:
+                    accounts.set_experiment_owner(job_id, user.id)
+            if owner != user.id:
                 raise HTTPException(403, "다른 사람이 만든 악보는 내 보관함에 넣을 수 없어요")
         return accounts.save_work(user, work_id, body)
 
