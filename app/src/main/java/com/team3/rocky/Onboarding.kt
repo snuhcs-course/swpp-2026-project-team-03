@@ -136,12 +136,12 @@ internal fun termsItems() = listOf(
                 "서비스 품질 개선을 위해 곡마다 만든 시간·결과·실패 이유 같은 작업 기록, 별점·의견, 앱 사용 기록(어떤 화면과 기능을 언제 썼는지), " +
                 "기기 모델·OS 버전·앱 버전, 앱 오류(갑자기 꺼짐·응답 없음) 기록을 계정과 함께 모아 분석해요. " +
                 "앱 오류 기록과 기기 정보는 분석을 위해 Google(Firebase Crashlytics)로 보내져요. " +
-                "분석 결과는 개인을 알아볼 수 없는 통계로만 써요. 자세한 항목은 회원가입의 '개인정보 수집·이용'에 있어요.",
+                "분석 결과를 밖에 알릴 때는 개인을 알아볼 수 없는 통계로만 알려요. 자세한 항목은 회원가입의 '개인정보 수집·이용'에 있어요.",
             "Account details (email, nickname, profile photo) are used for sign-in and bands, and your uploads and scores for making scores, your library and band sharing. " +
                 "To improve the service we collect, linked to your account, each song's job record (processing time, result, failure reason), your ratings and comments, " +
                 "app usage records (which screens and features you used, and when), device model, OS version and app version, and app error reports (crashes and freezes). " +
                 "App error reports and device details are sent to Google (Firebase Crashlytics) for analysis. " +
-                "Results are only reported as statistics that do not identify anyone. The full list is in 'Privacy policy' at sign-up.",
+                "Anything reported outside ROCKY is only statistics that do not identify anyone. The full list is in 'Privacy policy' at sign-up.",
         ),
     ),
 )

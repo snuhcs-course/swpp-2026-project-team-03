@@ -691,7 +691,7 @@ internal fun privacy() = if (AppSettings.lang == Lang.EN) "Privacy policy" to ""
       - While you use the app: a device identifier (stored in a form that can't be turned back, to keep one account on one phone), song titles and job records (processing time, result, failure reason, mode, instruments chosen), ratings and comments, app usage records (screens and features used, and when), device model, OS version and app version, app error reports (crashes and freezes)
     • Why: to identify you and log you in, keep your library and band sharing, keep one account on one phone, and improve the service (analysing job records, ratings, usage and errors)
     • Sent outside ROCKY: app error reports and device details are sent to Google (Firebase Crashlytics) and processed there for error analysis.
-    • Reporting: results are reported only as statistics that do not identify anyone.
+    • Reporting: anything reported outside ROCKY is only statistics that do not identify anyone.
     • How long: until you delete your account
     • Your account is stored on the ROCKY server so you can log in on any phone and share scores with your band.
     • You may refuse, but then you can't sign up.
@@ -702,7 +702,7 @@ internal fun privacy() = if (AppSettings.lang == Lang.EN) "Privacy policy" to ""
       - 앱을 쓰는 동안: 기기 식별값(되돌릴 수 없는 형태로 바꿔 저장, 한 계정 한 기기 로그인 확인용), 곡 이름과 작업 기록(처리 시간·결과·실패 이유·모드·고른 악기), 별점·의견, 앱 사용 기록(쓴 화면·기능과 시각), 기기 모델·OS 버전·앱 버전, 앱 오류 기록(갑자기 꺼짐·응답 없음)
     • 이용 목적: 회원 식별과 로그인, 보관함·밴드 공유 제공, 한 계정 한 기기 로그인, 서비스 품질 개선(작업 기록·별점·사용 기록·오류 분석)
     • 외부 전송: 앱 오류 기록과 기기 정보는 오류 분석을 위해 Google(Firebase Crashlytics)로 전송되어 처리됩니다.
-    • 결과 공개: 분석 결과는 개인을 알아볼 수 없는 통계로만 씁니다.
+    • 결과 공개: 분석 결과를 밖에 알릴 때는 개인을 알아볼 수 없는 통계로만 알립니다.
     • 보관 기간: 회원 탈퇴 시까지
     • 회원 정보는 ROCKY 서버에 저장되어, 다른 휴대폰에서 로그인하고 밴드와 악보를 공유하는 데 쓰입니다.
     • 동의를 거부할 수 있으나, 거부하면 가입할 수 없습니다.
