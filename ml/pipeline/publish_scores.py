@@ -92,6 +92,24 @@ def musescore_score(source: Path, target: Path, musescore: str, *, force: bool =
     stamp.write_text(source_hash + "\n", encoding="ascii")
 
 
+def keyboard_notation(source: Path, target: Path, musescore: str, *, force: bool = False) -> None:
+    """Keyboard PDF source: one player's two-hand grand staff (piano_score.py).
+    The two-hand arrangement is an improvement, not a requirement: if it fails, the
+    keyboard part is drawn the old way (MuseScore's own MIDI import) and the run goes on."""
+    import piano_score
+    stamp = target.with_suffix(target.suffix + ".source_sha256")
+    if not force and piano_score.cached(source, target, " fallback"):
+        return  # this MIDI already failed the arrangement: keep its MuseScore import, do not retry
+    try:
+        piano_score.piano_notation(source, target, musescore, force=force)
+    except Exception as exc:  # see docstring: never lose the keyboard PDF over the arrangement
+        print(f"two-hand piano notation failed, using MuseScore's import: {type(exc).__name__}: {exc}",
+              flush=True)
+        stamp.unlink(missing_ok=True)
+        musescore_score(source, target, musescore, force=True)
+        stamp.write_text(piano_score.cache_key(source) + " fallback\n", encoding="ascii")
+
+
 def gp5_score(source: Path, target: Path, parts: list[tuple[str, int]], *, force: bool = False,
               keep_track: int | None = None,
               chords: dict[int, list[tuple[float, str]]] | None = None,
@@ -569,7 +587,10 @@ def publish(run: Path, musescore: str, node: str, gp5_converter: Path, pdfinfo: 
         if part == "drums":
             notation_midi(pretty_midi.PrettyMIDI(str(part_midi)), render_midi)
         notation = out / f"{part}_render.mscx"
-        musescore_score(render_midi, notation, musescore, force=force)
+        if part == "piano":
+            keyboard_notation(render_midi, notation, musescore, force=force)
+        else:
+            musescore_score(render_midi, notation, musescore, force=force)
         render(part, notation, "musescore-score",
                [musescore, "-o", str(out / f"{part}.pdf"), str(notation)], tracks)
     # Chord symbols are an aid: a failure here must not lose the finished score.
