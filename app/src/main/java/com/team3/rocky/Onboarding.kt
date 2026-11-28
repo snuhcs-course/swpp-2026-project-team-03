@@ -73,7 +73,9 @@ import kotlinx.coroutines.launch
 object FirstRun {
     private const val PREF = "rocky_first_run"
     /** 약관 문구를 바꾸면 올린다. 올리면 모두 다시 동의해야 한다. */
-    const val TERMS_VERSION = 2  // 2: 이용 목적(서비스 품질 개선)·듣기 24시간 추가 (11/25 베타)
+    // 2: 이용 목적(서비스 품질 개선)·듣기 24시간 추가 (11/25 베타)
+    // 3: 6조에 앱 사용 기록·기기 정보·오류 기록과 Google(Firebase) 전송 추가 (11/28 베타 계획 3.6절)
+    const val TERMS_VERSION = 3
     private const val KEY_TERMS = "terms_version"
     private const val KEY_GUIDE_OFF = "guide_never"
 
@@ -130,8 +132,16 @@ internal fun termsItems() = listOf(
     TermsItem(
         tr("6. 이런 정보를 이런 목적으로 써요", "6. What we collect and why"),
         tr(
-            "계정 정보(이메일·닉네임·프로필 사진)는 로그인과 밴드 기능에, 올린 곡과 만든 악보는 악보 만들기·보관함·밴드 공유에 써요. 또 서비스 품질 개선(작업 기록·별점 분석)을 위해 곡마다 만든 시간·결과·실패 이유 같은 작업 기록과 별점·의견을 계정과 함께 모아 분석해요.",
-            "Account details (email, nickname, profile photo) are used for sign-in and bands, and your uploads and scores for making scores, your library and band sharing. To improve the service (analysing job records and ratings), we also collect each song's job record, such as processing time, result and failure reason, together with your ratings and comments, linked to your account.",
+            "계정 정보(이메일·닉네임·프로필 사진)는 로그인과 밴드 기능에, 올린 곡과 만든 악보는 악보 만들기·보관함·밴드 공유에 써요. " +
+                "서비스 품질 개선을 위해 곡마다 만든 시간·결과·실패 이유 같은 작업 기록, 별점·의견, 앱 사용 기록(어떤 화면과 기능을 언제 썼는지), " +
+                "기기 모델·OS 버전·앱 버전, 앱 오류(갑자기 꺼짐·응답 없음) 기록을 계정과 함께 모아 분석해요. " +
+                "앱 오류 기록과 기기 정보는 분석을 위해 Google(Firebase Crashlytics)로 보내져요. " +
+                "분석 결과를 밖에 알릴 때는 개인을 알아볼 수 없는 통계로만 알려요. 자세한 항목은 회원가입의 '개인정보 수집·이용'에 있어요.",
+            "Account details (email, nickname, profile photo) are used for sign-in and bands, and your uploads and scores for making scores, your library and band sharing. " +
+                "To improve the service we collect, linked to your account, each song's job record (processing time, result, failure reason), your ratings and comments, " +
+                "app usage records (which screens and features you used, and when), device model, OS version and app version, and app error reports (crashes and freezes). " +
+                "App error reports and device details are sent to Google (Firebase Crashlytics) for analysis. " +
+                "Anything reported outside ROCKY is only statistics that do not identify anyone. The full list is in 'Privacy policy' at sign-up.",
         ),
     ),
 )
